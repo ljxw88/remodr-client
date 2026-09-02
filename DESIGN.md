@@ -33,6 +33,10 @@ the normal user flow.
   changes tabs.
 - Blur only content beneath the dock. Android uses the SDK 31+ RenderNode blur
   path and a translucent fallback on older devices.
+- Scrollable regions use short, non-interactive top and bottom edge fades so
+  rows transition smoothly into fixed controls and the dock rather than ending
+  at a hard clipping line. iOS/web may add cropped blur; Android keeps the
+  gradient-only path to avoid re-blurring a full scrolling viewport.
 - Keep navigation reachable and labeled for assistive technology in both
   states, and disable motion when the system requests reduced motion.
 

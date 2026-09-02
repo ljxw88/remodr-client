@@ -5,6 +5,7 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 import { AppIcon } from '@/components/ui/app-icon';
 import { AppButton } from '@/components/ui/app-button';
 import { Screen } from '@/components/ui/screen';
+import { ScrollEdgeFrame } from '@/components/ui/scroll-edge-frame';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import {
@@ -34,46 +35,50 @@ export default function SettingsScreen() {
 
   return (
     <Screen includeTopSafeArea>
-      <ScrollView
-        onScroll={onDockScroll}
-        scrollEventThrottle={16}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.content, { paddingBottom: dockContentInset }]}>
-        <SettingsGroup title="Security">
-          <SettingRow
-            icon={{ ios: 'key', android: 'key', web: 'key' }}
-            label="Credentials"
-            value="Android Keystore"
-          />
-          <SettingDivider />
-          <SettingRow
-            icon={{ ios: 'checkmark.shield', android: 'security', web: 'security' }}
-            label="Host keys"
-            value="Strict verification"
-          />
-        </SettingsGroup>
+      <ScrollEdgeFrame onScroll={onDockScroll}>
+        {(onScroll) => (
+          <ScrollView
+            onScroll={onScroll}
+            scrollEventThrottle={16}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={[styles.content, { paddingBottom: dockContentInset }]}>
+            <SettingsGroup title="Security">
+              <SettingRow
+                icon={{ ios: 'key', android: 'key', web: 'key' }}
+                label="Credentials"
+                value="Android Keystore"
+              />
+              <SettingDivider />
+              <SettingRow
+                icon={{ ios: 'checkmark.shield', android: 'security', web: 'security' }}
+                label="Host keys"
+                value="Strict verification"
+              />
+            </SettingsGroup>
 
-        <SettingsGroup title="About">
-          <SettingRow
-            icon={{ ios: 'info.circle', android: 'info', web: 'info' }}
-            label="Version"
-            value={version}
-          />
-        </SettingsGroup>
+            <SettingsGroup title="About">
+              <SettingRow
+                icon={{ ios: 'info.circle', android: 'info', web: 'info' }}
+                label="Version"
+                value={version}
+              />
+            </SettingsGroup>
 
-        <SettingsGroup title="Developer">
-          <View>
-            <SettingRow
-              icon={{ ios: 'stethoscope', android: 'troubleshoot', web: 'troubleshoot' }}
-              label="Diagnostics"
-              value="Runtime status"
-            />
-            <View style={styles.diagnosticsAction}>
-              <PressableRow onPress={() => router.push('/diagnostics')} />
-            </View>
-          </View>
-        </SettingsGroup>
-      </ScrollView>
+            <SettingsGroup title="Developer">
+              <View>
+                <SettingRow
+                  icon={{ ios: 'stethoscope', android: 'troubleshoot', web: 'troubleshoot' }}
+                  label="Diagnostics"
+                  value="Runtime status"
+                />
+                <View style={styles.diagnosticsAction}>
+                  <PressableRow onPress={() => router.push('/diagnostics')} />
+                </View>
+              </View>
+            </SettingsGroup>
+          </ScrollView>
+        )}
+      </ScrollEdgeFrame>
     </Screen>
   );
 }
@@ -132,6 +137,7 @@ function SettingDivider() {
 const styles = StyleSheet.create({
   content: {
     gap: Spacing.three,
+    paddingTop: Spacing.one,
   },
   group: {
     gap: Spacing.one,

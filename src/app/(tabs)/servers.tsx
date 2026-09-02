@@ -12,6 +12,7 @@ import {
 import { EmptyState } from '@/components/ui/empty-state';
 import { AppIcon } from '@/components/ui/app-icon';
 import { Screen } from '@/components/ui/screen';
+import { ScrollEdgeFrame } from '@/components/ui/scroll-edge-frame';
 import { ThemedText } from '@/components/themed-text';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import {
@@ -144,25 +145,29 @@ export default function HostsScreen() {
           </ThemedText>
         </View>
       ) : (
-        <FlatList
-          onScroll={onDockScroll}
-          scrollEventThrottle={16}
-          data={visibleHosts}
-          keyExtractor={(host) => host.id}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={[styles.list, { paddingBottom: dockContentInset }]}
-          renderItem={({ item }) => (
-            <HostRow
-              host={item}
-              onPress={() =>
-                router.push({
-                  pathname: '/hosts/[id]',
-                  params: { id: item.id },
-                })
-              }
+        <ScrollEdgeFrame onScroll={onDockScroll}>
+          {(onScroll) => (
+            <FlatList
+              onScroll={onScroll}
+              scrollEventThrottle={16}
+              data={visibleHosts}
+              keyExtractor={(host) => host.id}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={[styles.list, { paddingBottom: dockContentInset }]}
+              renderItem={({ item }) => (
+                <HostRow
+                  host={item}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/hosts/[id]',
+                      params: { id: item.id },
+                    })
+                  }
+                />
+              )}
             />
           )}
-        />
+        </ScrollEdgeFrame>
       )}
     </Screen>
   );
@@ -213,6 +218,7 @@ const styles = StyleSheet.create({
   },
   list: {
     gap: Spacing.one + Spacing.half,
+    paddingTop: Spacing.one,
   },
   centerState: {
     flex: 1,

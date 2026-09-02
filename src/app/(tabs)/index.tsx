@@ -12,6 +12,7 @@ import {
 import { AppIcon } from '@/components/ui/app-icon';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Screen } from '@/components/ui/screen';
+import { ScrollEdgeFrame } from '@/components/ui/scroll-edge-frame';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
 import {
@@ -312,19 +313,23 @@ export default function AgentsScreen() {
           onAction={() => setShowNewAgent(true)}
         />
       ) : (
-        <ScrollView
-          onScroll={onDockScroll}
-          scrollEventThrottle={16}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={[styles.list, { paddingBottom: dockContentInset }]}>
-          {sections.map((section) => (
-            <WorkspaceGroup
-              key={section.space.id}
-              space={section.space}
-              agents={section.agents}
-            />
-          ))}
-        </ScrollView>
+        <ScrollEdgeFrame onScroll={onDockScroll}>
+          {(onScroll) => (
+            <ScrollView
+              onScroll={onScroll}
+              scrollEventThrottle={16}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={[styles.list, { paddingBottom: dockContentInset }]}>
+              {sections.map((section) => (
+                <WorkspaceGroup
+                  key={section.space.id}
+                  space={section.space}
+                  agents={section.agents}
+                />
+              ))}
+            </ScrollView>
+          )}
+        </ScrollEdgeFrame>
       )}
       {showNewAgent ? (
         <NewAgentSheet
@@ -637,6 +642,7 @@ const styles = StyleSheet.create({
   },
   list: {
     gap: Spacing.three,
+    paddingTop: Spacing.one,
   },
   workspace: {
     gap: Spacing.one,
