@@ -7,6 +7,10 @@ import { AppButton } from '@/components/ui/app-button';
 import { Screen } from '@/components/ui/screen';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
+import {
+  useDockContentInset,
+  useDockScrollHandler,
+} from '@/features/navigation/floating-dock';
 import { useTheme } from '@/hooks/use-theme';
 
 type SettingRowProps = {
@@ -25,12 +29,16 @@ type SettingRowProps = {
 
 export default function SettingsScreen() {
   const version = Constants.expoConfig?.version ?? '1.0.0';
+  const onDockScroll = useDockScrollHandler();
+  const dockContentInset = useDockContentInset();
 
   return (
     <Screen includeTopSafeArea>
       <ScrollView
+        onScroll={onDockScroll}
+        scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.content}>
+        contentContainerStyle={[styles.content, { paddingBottom: dockContentInset }]}>
         <SettingsGroup title="Security">
           <SettingRow
             icon={{ ios: 'key', android: 'key', web: 'key' }}
@@ -87,8 +95,8 @@ function SettingsGroup({ title, children }: { title: string; children: React.Rea
         style={[
           styles.card,
           {
-            backgroundColor: theme.backgroundElement,
-            borderColor: theme.border,
+            backgroundColor: theme.glassStrong,
+            borderColor: theme.glassBorder,
             shadowColor: theme.glassShadow,
           },
         ]}>
@@ -104,7 +112,7 @@ function SettingRow({ icon, label, value }: SettingRowProps) {
   return (
     <View style={styles.row}>
       <View style={[styles.iconFrame, { backgroundColor: theme.accentSoft }]}>
-        <AppIcon name={icon} size={20} tintColor={theme.text} fallback="•" />
+        <AppIcon name={icon} size={20} tintColor={theme.accent} fallback="•" />
       </View>
       <ThemedText type="small" style={styles.rowLabel}>
         {label}
@@ -124,7 +132,6 @@ function SettingDivider() {
 const styles = StyleSheet.create({
   content: {
     gap: Spacing.three,
-    paddingBottom: Spacing.four,
   },
   group: {
     gap: Spacing.one,

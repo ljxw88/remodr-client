@@ -21,6 +21,21 @@ Successful manual connection returns to Server status. It never opens
 Terminal. Connected servers lead with **Open agents**; Terminal is not part of
 the normal user flow.
 
+## Floating dock
+
+- Top-level navigation floats above the canvas as one rounded glass dock. It
+  never spans edge to edge or paints a full-width navigation background.
+- The active destination uses one restrained violet-soft capsule; inactive
+  destinations remain transparent.
+- At the top of a page, show icons and labels in a 72dp dock. After a deliberate
+  downward scroll, animate to a narrower 54dp icon-only dock.
+- Restore the expanded dock when the user scrolls upward, returns to the top, or
+  changes tabs.
+- Blur only content beneath the dock. Android uses the SDK 31+ RenderNode blur
+  path and a translucent fallback on older devices.
+- Keep navigation reachable and labeled for assistive technology in both
+  states, and disable motion when the system requests reduced motion.
+
 ## Visual principles
 
 - Keep the canvas a pure, solid near-black. Do not add gradients, glow blobs,

@@ -14,6 +14,10 @@ import { AppIcon } from '@/components/ui/app-icon';
 import { Screen } from '@/components/ui/screen';
 import { ThemedText } from '@/components/themed-text';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
+import {
+  useDockContentInset,
+  useDockScrollHandler,
+} from '@/features/navigation/floating-dock';
 import { HostRow } from '@/features/hosts/HostRow';
 import { useHosts } from '@/features/hosts/use-hosts';
 import { useTheme } from '@/hooks/use-theme';
@@ -21,6 +25,8 @@ import { useTheme } from '@/hooks/use-theme';
 export default function HostsScreen() {
   const theme = useTheme();
   const { hosts, loading, error, reload } = useHosts();
+  const onDockScroll = useDockScrollHandler();
+  const dockContentInset = useDockContentInset();
   const [query, setQuery] = useState('');
   const visibleHosts = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -139,10 +145,12 @@ export default function HostsScreen() {
         </View>
       ) : (
         <FlatList
+          onScroll={onDockScroll}
+          scrollEventThrottle={16}
           data={visibleHosts}
           keyExtractor={(host) => host.id}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: dockContentInset }]}
           renderItem={({ item }) => (
             <HostRow
               host={item}
@@ -205,7 +213,6 @@ const styles = StyleSheet.create({
   },
   list: {
     gap: Spacing.one + Spacing.half,
-    paddingBottom: Spacing.four,
   },
   centerState: {
     flex: 1,

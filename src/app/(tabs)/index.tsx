@@ -24,6 +24,10 @@ import { connectAgentRuntime } from '@/features/agents/connect-runtime';
 import { AgentProviderIcon } from '@/features/agents/agent-provider-icon';
 import { NewAgentSheet } from '@/features/agents/new-agent-sheet';
 import { useHerdr } from '@/features/agents/use-herdr';
+import {
+  useDockContentInset,
+  useDockScrollHandler,
+} from '@/features/navigation/floating-dock';
 import { useHostSession } from '@/features/connection/use-host-session';
 import { useHosts } from '@/features/hosts/use-hosts';
 import { useTheme } from '@/hooks/use-theme';
@@ -34,6 +38,8 @@ export default function AgentsScreen() {
   const theme = useTheme();
   const state = useHerdr();
   const { hosts, loading: hostsLoading } = useHosts();
+  const onDockScroll = useDockScrollHandler();
+  const dockContentInset = useDockContentInset();
   const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null);
   const [showNewAgent, setShowNewAgent] = useState(false);
   const [switchingDeviceId, setSwitchingDeviceId] = useState<string | null>(null);
@@ -307,8 +313,10 @@ export default function AgentsScreen() {
         />
       ) : (
         <ScrollView
+          onScroll={onDockScroll}
+          scrollEventThrottle={16}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.list}>
+          contentContainerStyle={[styles.list, { paddingBottom: dockContentInset }]}>
           {sections.map((section) => (
             <WorkspaceGroup
               key={section.space.id}
@@ -444,7 +452,11 @@ function WorkspaceGroup({ space, agents }: { space: AgentWorkspace; agents: Remo
       <View
         style={[
           styles.workspaceCard,
-          { backgroundColor: theme.backgroundElement, borderColor: theme.border },
+          {
+            backgroundColor: theme.glassStrong,
+            borderColor: theme.glassBorder,
+            shadowColor: theme.glassShadow,
+          },
         ]}>
         {agents.map((agent, index) => (
           <View key={agent.id}>
@@ -474,7 +486,7 @@ function AgentRow({ agent }: { agent: RemoteAgent }) {
         },
       ]}>
       <View style={[styles.providerIcon, { backgroundColor: theme.accentSoft }]}>
-        <AgentProviderIcon provider={agent.provider} tintColor={theme.text} />
+        <AgentProviderIcon provider={agent.provider} tintColor={theme.accent} />
       </View>
       <View style={styles.agentCopy}>
         <View style={styles.agentTitle}>
@@ -625,7 +637,6 @@ const styles = StyleSheet.create({
   },
   list: {
     gap: Spacing.three,
-    paddingBottom: Spacing.four,
   },
   workspace: {
     gap: Spacing.one,
@@ -648,6 +659,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: Radius.glass,
     overflow: 'hidden',
+    elevation: 2,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 1,
+    shadowRadius: 18,
   },
   agent: {
     minHeight: 76,

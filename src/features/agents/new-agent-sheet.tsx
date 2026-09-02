@@ -11,7 +11,7 @@ import {
 import { AppButton } from '@/components/ui/app-button';
 import { AppIcon } from '@/components/ui/app-icon';
 import { ThemedText } from '@/components/themed-text';
-import { BottomTabInset, Radius, Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
 import {
   launchableAgentProviderSchema,
   providerLabel,
@@ -21,6 +21,7 @@ import {
   type LaunchableAgentProvider,
 } from '@/domain/herdr';
 import { AgentProviderIcon } from '@/features/agents/agent-provider-icon';
+import { useDockContentInset } from '@/features/navigation/floating-dock';
 import { useTheme } from '@/hooks/use-theme';
 import { toUserMessage } from '@/utils/user-error';
 
@@ -42,6 +43,7 @@ export function NewAgentSheet({
   onCreate,
 }: Props) {
   const theme = useTheme();
+  const dockContentInset = useDockContentInset();
   const availability = useMemo(
     () => new Map(manifests.map((manifest) => [manifest.provider, manifest.available])),
     [manifests],
@@ -101,7 +103,10 @@ export function NewAgentSheet({
           ]}>
           <View style={[styles.handle, { backgroundColor: theme.border }]} />
           <ScrollView
-            contentContainerStyle={styles.sheetContent}
+            contentContainerStyle={[
+              styles.sheetContent,
+              { paddingBottom: dockContentInset },
+            ]}
             showsVerticalScrollIndicator={false}>
           <View style={styles.header}>
             <View style={styles.titleCopy}>
@@ -288,7 +293,6 @@ const styles = StyleSheet.create({
   },
   sheetContent: {
     gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.one,
   },
   handle: {
     width: 38,

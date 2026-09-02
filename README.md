@@ -17,6 +17,9 @@ workspace as a filterable space, and can start Copilot, Claude, Codex, or
 OpenCode in a new tab inside the selected space. Herdr events refresh additions,
 removals, moves, and status changes from authoritative snapshots.
 
+Top-level navigation uses a custom floating glass dock that collapses to compact
+icons during downward scrolling and expands on upward scrolling or tab changes.
+
 ## Current remote compatibility
 
 - Herdr 0.8.2 / protocol 20

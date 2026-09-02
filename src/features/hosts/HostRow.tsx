@@ -27,8 +27,8 @@ export function HostRow({ host, onPress }: Props) {
       style={({ pressed }) => [
         styles.row,
         {
-          backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
-          borderColor: theme.border,
+          backgroundColor: pressed ? theme.backgroundSelected : theme.glassStrong,
+          borderColor: theme.glassBorder,
           shadowColor: theme.glassShadow,
           transform: [{ scale: pressed ? 0.99 : 1 }],
         },
@@ -37,7 +37,7 @@ export function HostRow({ host, onPress }: Props) {
         <AppIcon
           name={{ ios: 'server.rack', android: 'dns', web: 'dns' }}
           size={22}
-          tintColor={theme.text}
+          tintColor={theme.accent}
           fallback="□"
         />
       </View>

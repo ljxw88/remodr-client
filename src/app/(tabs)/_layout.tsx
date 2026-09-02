@@ -1,34 +1,45 @@
-import { NativeTabs } from 'expo-router/unstable-native-tabs';
+import { BlurTargetView } from 'expo-blur';
+import { TabList, TabSlot, Tabs, TabTrigger } from 'expo-router/ui';
+import { useRef } from 'react';
+import { StyleSheet, View } from 'react-native';
 
+import {
+  DockMotionProvider,
+  FloatingDock,
+} from '@/features/navigation/floating-dock';
 import { useTheme } from '@/hooks/use-theme';
 
 export default function TabsLayout() {
-  const colors = useTheme();
+  const theme = useTheme();
+  const blurTarget = useRef<View | null>(null);
 
   return (
-    <NativeTabs
-      backgroundColor={colors.glassStrong}
-      indicatorColor={colors.accentSoft}
-      iconColor={{ default: colors.textMuted, selected: colors.accent }}
-      labelStyle={{
-        default: { color: colors.textMuted },
-        selected: { color: colors.accent },
-      }}
-      blurEffect="systemMaterial"
-      shadowColor="transparent"
-      minimizeBehavior="onScrollDown">
-      <NativeTabs.Trigger name="index">
-        <NativeTabs.Trigger.Label>Agents</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf="bubble.left.and.bubble.right" md="forum" />
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="servers">
-        <NativeTabs.Trigger.Label>Servers</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf="desktopcomputer" md="computer" />
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="settings">
-        <NativeTabs.Trigger.Label>Settings</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf="gear" md="settings" />
-      </NativeTabs.Trigger>
-    </NativeTabs>
+    <DockMotionProvider>
+      <Tabs style={[styles.tabs, { backgroundColor: theme.background }]}>
+        <BlurTargetView ref={blurTarget} style={styles.content}>
+          <TabSlot style={styles.content} />
+        </BlurTargetView>
+
+        <FloatingDock blurTarget={blurTarget} />
+
+        <TabList style={styles.hiddenTabs}>
+          <TabTrigger name="agents" href="/" />
+          <TabTrigger name="servers" href="/servers" />
+          <TabTrigger name="settings" href="/settings" />
+        </TabList>
+      </Tabs>
+    </DockMotionProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  tabs: {
+    flex: 1,
+  },
+  content: {
+    flex: 1,
+  },
+  hiddenTabs: {
+    display: 'none',
+  },
+});
