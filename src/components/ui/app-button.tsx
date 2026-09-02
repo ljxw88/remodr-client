@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text } from 'react-native';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
-type Variant = 'primary' | 'secondary' | 'danger';
+type Variant = 'primary' | 'secondary';
 
 type Props = {
   label: string;
@@ -21,12 +21,7 @@ export function AppButton({
   accessibilityHint,
 }: Props) {
   const theme = useTheme();
-  const backgroundColor =
-    variant === 'primary'
-      ? theme.accent
-      : variant === 'danger'
-        ? theme.chrome
-        : theme.glassStrong;
+  const backgroundColor = variant === 'primary' ? theme.accent : theme.glassStrong;
   const color = variant === 'secondary' ? theme.text : theme.onAccent;
   const borderColor = variant === 'secondary' ? theme.glassBorder : backgroundColor;
 
@@ -35,6 +30,7 @@ export function AppButton({
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityHint={accessibilityHint}
+      accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [

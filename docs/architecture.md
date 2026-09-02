@@ -17,6 +17,5 @@ Android / Kotlin / SSHJ
 
 React Native must not know how SSH works internally. UI talks to `RemoteClient`, `HostRepository`, and feature services.
 
-PTY bytes are written to a native terminal view. They do not flow through React state.
-
-AI proposes commands. A policy layer classifies risk. Destructive commands require confirmation.
+Agent conversations are normalized by the Herdr bridge. Terminal rendering is
+intentionally omitted from the mobile product surface.

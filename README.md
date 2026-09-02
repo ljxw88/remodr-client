@@ -9,7 +9,7 @@ Android UI → existing SSH → Herdr mobile bridge → Herdr / provider session
 
 The default workflow is a native Agents list and shared conversation UI. Herdr
 provides runtime identity and status; provider adapters provide semantic
-messages, tool activity, questions, and TODOs where reliable. Terminal output
+messages, tool activity, questions, and TODOs where reliable. Raw agent output
 is a conservative fallback, not the primary interface.
 
 ## Current remote compatibility

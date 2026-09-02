@@ -2,7 +2,6 @@ package com.remoteworkspace.remotecore
 
 import net.schmizz.sshj.SSHClient
 import net.schmizz.sshj.connection.channel.direct.Parameters
-import net.schmizz.sshj.connection.channel.direct.Session
 import net.schmizz.sshj.sftp.FileMode
 import net.schmizz.sshj.sftp.OpenMode
 import net.schmizz.sshj.sftp.SFTPClient
@@ -17,14 +16,41 @@ import java.util.EnumSet
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 data class SessionRecord(
   val sessionId: String,
   val hostId: String,
   val client: SSHClient,
+  val jumpChain: JumpChain?,
   var fingerprint: String?,
   var status: String = "connected",
-)
+) {
+  fun close() {
+    runCatching { client.close() }
+    jumpChain?.close()
+  }
+}
+
+data class OpenedSsh(
+  val client: SSHClient,
+  val jumpChain: JumpChain? = null,
+) {
+  fun close() {
+    runCatching { client.close() }
+    jumpChain?.close()
+  }
+}
+
+class JumpChain(
+  private val clients: List<AutoCloseable>,
+  private val forwards: List<AutoCloseable>,
+) : AutoCloseable {
+  override fun close() {
+    forwards.asReversed().forEach { forward -> runCatching { forward.close() } }
+    clients.asReversed().forEach { client -> runCatching { client.close() } }
+  }
+}
 
 class SessionManager(
   private val knownHosts: KnownHostsStore,
@@ -32,10 +58,8 @@ class SessionManager(
 ) {
   private val sessions = ConcurrentHashMap<String, SessionRecord>()
   private val sessionsByHost = ConcurrentHashMap<String, String>()
-  private val ptys = ConcurrentHashMap<String, PtySession>()
   private val forwards = ConcurrentHashMap<String, LocalForward>()
   private val bridges = ConcurrentHashMap<String, HerdrBridgeSession>()
-  val views = ConcurrentHashMap<String, RemoteCoreView>()
   private val io = Executors.newCachedThreadPool()
 
   fun connect(
@@ -54,18 +78,21 @@ class SessionManager(
     CryptoProvider.ensureInstalled()
     disconnectHost(hostId)
     val sessionId = UUID.randomUUID().toString()
+    var opened: OpenedSsh? = null
     return try {
-      val client = if (jumpHops.isEmpty()) {
-        openClient(
-          hostname,
-          port,
-          username,
-          password,
-          privateKey,
-          passphrase,
-          credentialId,
-          credentialType,
-          acceptedFingerprint,
+      val connection = if (jumpHops.isEmpty()) {
+        OpenedSsh(
+          openClient(
+            hostname,
+            port,
+            username,
+            password,
+            privateKey,
+            passphrase,
+            credentialId,
+            credentialType,
+            acceptedFingerprint,
+          ),
         )
       } else {
         openViaJumps(
@@ -81,13 +108,27 @@ class SessionManager(
           jumpHops,
         )
       }
+      opened = connection
+      val client = connection.client
       client.connection.keepAlive.keepAliveInterval = 30
       val fingerprint = knownHosts.fingerprintFor(hostname, port)
-      val record = SessionRecord(sessionId, hostId, client, fingerprint, "connected")
+      val record = SessionRecord(
+        sessionId,
+        hostId,
+        client,
+        connection.jumpChain,
+        fingerprint,
+        "connected",
+      )
       sessions[sessionId] = record
-      sessionsByHost[hostId] = sessionId
+      sessionsByHost.put(hostId, sessionId)?.let { replacedSessionId ->
+        if (replacedSessionId != sessionId) {
+          disconnect(replacedSessionId)
+        }
+      }
       snapshot(record)
     } catch (error: Exception) {
+      opened?.close()
       throw mapConnectError(error)
     }
   }
@@ -96,11 +137,10 @@ class SessionManager(
     bridges.values
       .filter { it.sshSessionId == sessionId }
       .forEach { stopHerdrBridge(it.id) }
-    ptys.keys.filter { it.startsWith(sessionId) }.forEach { closePty(it) }
     forwards.keys.filter { it.startsWith(sessionId) }.forEach { closeForward(it) }
     sessions.remove(sessionId)?.let { record ->
       sessionsByHost.remove(record.hostId, sessionId)
-      runCatching { record.client.close() }
+      record.close()
     }
   }
 
@@ -167,41 +207,28 @@ class SessionManager(
     val session = record.client.startSession()
     session.use {
       val cmd = it.exec(command)
-      val stdout = cmd.inputStream.readBytes().toString(Charsets.UTF_8)
-      val stderr = cmd.errorStream.readBytes().toString(Charsets.UTF_8)
-      cmd.join(30, java.util.concurrent.TimeUnit.SECONDS)
-      return mapOf(
-        "stdout" to stdout,
-        "stderr" to stderr,
-        "exitCode" to (cmd.exitStatus ?: -1),
-      )
+      val stdoutTask = io.submit<ByteArray> { cmd.inputStream.readBytes() }
+      val stderrTask = io.submit<ByteArray> { cmd.errorStream.readBytes() }
+      try {
+        cmd.join(30, TimeUnit.SECONDS)
+        if (cmd.isOpen) {
+          throw TimeoutException()
+        }
+        val stdout = stdoutTask.get(5, TimeUnit.SECONDS).toString(Charsets.UTF_8)
+        val stderr = stderrTask.get(5, TimeUnit.SECONDS).toString(Charsets.UTF_8)
+        return mapOf(
+          "stdout" to stdout,
+          "stderr" to stderr,
+          "exitCode" to (cmd.exitStatus ?: -1),
+        )
+      } catch (_: java.util.concurrent.TimeoutException) {
+        throw TimeoutException()
+      } finally {
+        runCatching { cmd.close() }
+        stdoutTask.cancel(true)
+        stderrTask.cancel(true)
+      }
     }
-  }
-
-  fun openPty(sessionId: String, cols: Int, rows: Int): String {
-    val record = requireSession(sessionId)
-    val sshSession = record.client.startSession()
-    sshSession.allocatePTY("xterm-256color", cols, rows, 0, 0, emptyMap())
-    val shell = sshSession.startShell()
-    val ptyId = "$sessionId:${UUID.randomUUID()}"
-    val pty = PtySession(ptyId, sshSession, shell)
-    ptys[ptyId] = pty
-    io.execute { pumpPty(pty) }
-    return ptyId
-  }
-
-  fun writePty(ptyId: String, data: String) {
-    val pty = ptys[ptyId] ?: return
-    pty.shell.outputStream.write(data.toByteArray(Charsets.UTF_8))
-    pty.shell.outputStream.flush()
-  }
-
-  fun resizePty(ptyId: String, cols: Int, rows: Int) {
-    ptys[ptyId] ?: return
-  }
-
-  fun closePty(ptyId: String) {
-    ptys.remove(ptyId)?.close()
   }
 
   fun sftpList(sessionId: String, path: String): List<Map<String, Any?>> {
@@ -253,19 +280,21 @@ class SessionManager(
     destPort: Int,
   ): Map<String, Any?> {
     val record = requireSession(sessionId)
-    val server = ServerSocket(bindPort, 50, InetAddress.getByName(bindHost))
-    val actualPort = server.localPort
-    val params = Parameters(bindHost, actualPort, destHost, destPort)
-    val forwarder = record.client.newLocalPortForwarder(params, server)
     val tunnelId = "$sessionId:${UUID.randomUUID()}"
-    val job = io.submit {
-      runCatching { forwarder.listen() }
-    }
-    forwards[tunnelId] = LocalForward(tunnelId, sessionId, server, forwarder, job, bindHost, actualPort, destHost, destPort)
+    val forward = createLocalForward(
+      record.client,
+      tunnelId,
+      sessionId,
+      bindHost,
+      bindPort,
+      destHost,
+      destPort,
+    )
+    forwards[tunnelId] = forward
     return mapOf(
       "id" to tunnelId,
       "bindHost" to bindHost,
-      "bindPort" to actualPort,
+      "bindPort" to forward.bindPort,
       "destHost" to destHost,
       "destPort" to destPort,
     )
@@ -284,27 +313,6 @@ class SessionManager(
         "destHost" to it.destHost,
         "destPort" to it.destPort,
       )
-    }
-  }
-
-  fun attachView(ptyId: String, view: RemoteCoreView) {
-    views[ptyId] = view
-  }
-
-  fun detachView(ptyId: String, view: RemoteCoreView) {
-    views.remove(ptyId, view)
-  }
-
-  private fun pumpPty(pty: PtySession) {
-    val buffer = ByteArray(8192)
-    try {
-      while (!pty.closed) {
-        val read = pty.shell.inputStream.read(buffer)
-        if (read < 0) break
-        val chunk = buffer.copyOf(read)
-        views[pty.id]?.writeOutput(chunk)
-      }
-    } catch (_: Exception) {
     }
   }
 
@@ -390,9 +398,9 @@ class SessionManager(
     credentialType: String?,
     acceptedFingerprint: String?,
     jumpHops: List<Map<String, Any?>>,
-  ): SSHClient {
-    var previous: SSHClient? = null
-    var forward: LocalForward? = null
+  ): OpenedSsh {
+    val clients = mutableListOf<SSHClient>()
+    val chainForwards = mutableListOf<LocalForward>()
     try {
       jumpHops.forEachIndexed { index, hop ->
         val hopHost = hop["hostname"] as String
@@ -406,7 +414,7 @@ class SessionManager(
         val hopAccepted = hop["acceptedHostKeyFingerprint"] as String?
         val targetHost = if (index == jumpHops.lastIndex) hostname else jumpHops[index + 1]["hostname"] as String
         val targetPort = if (index == jumpHops.lastIndex) port else (jumpHops[index + 1]["port"] as Number).toInt()
-        val client = if (previous == null) {
+        val client = if (clients.isEmpty()) {
           openClient(
             hopHost,
             hopPort,
@@ -421,7 +429,7 @@ class SessionManager(
         } else {
           openClient(
             "127.0.0.1",
-            forward!!.bindPort,
+            chainForwards.last().bindPort,
             hopUser,
             hopPassword,
             hopKey,
@@ -431,26 +439,34 @@ class SessionManager(
             hopAccepted,
           )
         }
-        previous = client
-        val server = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
-        val params = Parameters("127.0.0.1", server.localPort, targetHost, targetPort)
-        val forwarder = client.newLocalPortForwarder(params, server)
-        val job = io.submit { runCatching { forwarder.listen() } }
-        forward = LocalForward("jump-$index", "jump", server, forwarder, job, "127.0.0.1", server.localPort, targetHost, targetPort)
+        clients += client
+        chainForwards += createLocalForward(
+          client,
+          "jump-$index",
+          "jump",
+          "127.0.0.1",
+          0,
+          targetHost,
+          targetPort,
+        )
       }
-      return openClient(
-        "127.0.0.1",
-        forward!!.bindPort,
-        username,
-        password,
-        privateKey,
-        passphrase,
-        credentialId,
-        credentialType,
-        acceptedFingerprint,
+      return OpenedSsh(
+        client = openClient(
+          "127.0.0.1",
+          chainForwards.last().bindPort,
+          username,
+          password,
+          privateKey,
+          passphrase,
+          credentialId,
+          credentialType,
+          acceptedFingerprint,
+        ),
+        jumpChain = JumpChain(clients.toList(), chainForwards.toList()),
       )
     } catch (error: Exception) {
-      previous?.let { runCatching { it.close() } }
+      chainForwards.asReversed().forEach(LocalForward::close)
+      clients.asReversed().forEach { client -> runCatching { client.close() } }
       throw error
     }
   }
@@ -496,6 +512,40 @@ class SessionManager(
     }
   }
 
+  private fun createLocalForward(
+    client: SSHClient,
+    id: String,
+    sessionId: String,
+    bindHost: String,
+    bindPort: Int,
+    destHost: String,
+    destPort: Int,
+  ): LocalForward {
+    val server = ServerSocket(bindPort, 50, InetAddress.getByName(bindHost))
+    var forwarder: net.schmizz.sshj.connection.channel.direct.LocalPortForwarder? = null
+    try {
+      val params = Parameters(bindHost, server.localPort, destHost, destPort)
+      val activeForwarder = client.newLocalPortForwarder(params, server)
+      forwarder = activeForwarder
+      val job = io.submit { runCatching { activeForwarder.listen() } }
+      return LocalForward(
+        id,
+        sessionId,
+        server,
+        activeForwarder,
+        job,
+        bindHost,
+        server.localPort,
+        destHost,
+        destPort,
+      )
+    } catch (error: Exception) {
+      forwarder?.let { runCatching { it.close() } }
+      runCatching { server.close() }
+      throw error
+    }
+  }
+
   private fun mapConnectError(error: Exception): Exception {
     findCause<HostKeyUnknownException>(error)?.let { return it }
     findCause<HostKeyMismatchException>(error)?.let { return it }
@@ -522,20 +572,6 @@ private inline fun <reified T : Throwable> findCause(error: Throwable): T? {
   return null
 }
 
-class PtySession(
-  val id: String,
-  val session: Session,
-  val shell: Session.Shell,
-) {
-  @Volatile var closed = false
-
-  fun close() {
-    closed = true
-    runCatching { shell.close() }
-    runCatching { session.close() }
-  }
-}
-
 class LocalForward(
   val id: String,
   val sessionId: String,
@@ -546,8 +582,8 @@ class LocalForward(
   val bindPort: Int,
   val destHost: String,
   val destPort: Int,
-) {
-  fun close() {
+) : AutoCloseable {
+  override fun close() {
     runCatching { forwarder.close() }
     runCatching { server.close() }
     job.cancel(true)

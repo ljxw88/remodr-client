@@ -50,10 +50,6 @@ export interface RemoteClient {
   getSession(hostId: string): SessionSnapshot | null;
   listSessions(): SessionSnapshot[];
   exec(sessionId: string, command: string): Promise<CommandResult>;
-  openPty(sessionId: string, cols: number, rows: number): Promise<string>;
-  writePty(ptyId: string, data: string): Promise<void>;
-  resizePty(ptyId: string, cols: number, rows: number): Promise<void>;
-  closePty(ptyId: string): Promise<void>;
   sftpList(sessionId: string, path: string): Promise<RemoteFile[]>;
   sftpMkdir(sessionId: string, path: string): Promise<void>;
   sftpRename(sessionId: string, from: string, to: string): Promise<void>;
@@ -74,11 +70,4 @@ export interface RemoteClient {
   deleteSecret(id: string): Promise<void>;
   listKnownHosts(): { hostname: string; port: number; fingerprint: string }[];
   removeKnownHost(hostname: string, port: number): Promise<void>;
-}
-
-export interface RemoteSession {
-  id: string;
-  exec(command: string): Promise<CommandResult>;
-  openTerminal(): Promise<string>;
-  disconnect(): Promise<void>;
 }

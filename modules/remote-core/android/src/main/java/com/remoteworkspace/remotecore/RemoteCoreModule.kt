@@ -83,22 +83,6 @@ class RemoteCoreModule : Module() {
       manager.exec(sessionId, command)
     }
 
-    AsyncFunction("openPty") { sessionId: String, cols: Int, rows: Int ->
-      manager.openPty(sessionId, cols, rows)
-    }
-
-    AsyncFunction("writePty") { ptyId: String, data: String ->
-      manager.writePty(ptyId, data)
-    }
-
-    AsyncFunction("resizePty") { ptyId: String, cols: Int, rows: Int ->
-      manager.resizePty(ptyId, cols, rows)
-    }
-
-    AsyncFunction("closePty") { ptyId: String ->
-      manager.closePty(ptyId)
-    }
-
     AsyncFunction("sftpList") { sessionId: String, path: String ->
       manager.sftpList(sessionId, path)
     }
@@ -155,16 +139,5 @@ class RemoteCoreModule : Module() {
       knownHosts.remove(hostname, port)
     }
 
-    View(RemoteCoreView::class) {
-      Prop("ptyId") { view: RemoteCoreView, ptyId: String? ->
-        view.bind(ptyId, manager)
-      }
-      Prop("cols") { view: RemoteCoreView, cols: Int? ->
-        view.setColumns(cols ?: 80)
-      }
-      Prop("rows") { view: RemoteCoreView, rows: Int? ->
-        view.setRows(rows ?: 24)
-      }
-    }
   }
 }

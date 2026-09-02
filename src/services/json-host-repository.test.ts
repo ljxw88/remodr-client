@@ -61,6 +61,25 @@ describe('JsonHostRepository', () => {
     expect(names).toEqual(['alpha', 'zeta']);
   });
 
+  it('serializes concurrent mutations without losing records', async () => {
+    const ids = ['host-1', 'host-2'];
+    const repository = new JsonHostRepository(
+      createMemoryStringStore(),
+      () => new Date('2026-04-01T12:00:00.000Z'),
+      () => ids.shift() ?? 'unexpected',
+    );
+
+    await Promise.all([
+      repository.create({ ...input, name: 'alpha' }),
+      repository.create({ ...input, name: 'beta' }),
+    ]);
+
+    await expect(repository.list()).resolves.toMatchObject([
+      { id: 'host-1', name: 'alpha' },
+      { id: 'host-2', name: 'beta' },
+    ]);
+  });
+
   it('throws when updating or removing a missing host', async () => {
     const { repository } = createRepository();
     await expect(repository.update('missing', input)).rejects.toBeInstanceOf(HostNotFoundError);

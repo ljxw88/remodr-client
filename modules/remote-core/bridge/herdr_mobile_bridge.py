@@ -25,6 +25,8 @@ BRIDGE_VERSION = "0.1.0"
 PROTOCOL = 1
 HERDR_PROTOCOL = 20
 SUPPORTED_PROVIDERS = ("copilot", "claude", "codex", "opencode")
+SUBSCRIPTION_RETRY_INITIAL = 0.25
+SUBSCRIPTION_RETRY_MAX = 2.0
 SUBSCRIPTIONS = (
     "workspace.created",
     "workspace.updated",
@@ -688,45 +690,62 @@ class Bridge:
         }
 
     def _subscription_loop(self) -> None:
-        try:
-            with socket.socket(socket.AF_UNIX) as connection:
-                connection.connect(self.herdr_socket)
-                request = {
-                    "id": "mobile-subscription",
-                    "method": "events.subscribe",
-                    "params": {
-                        "subscriptions": [{"type": item} for item in SUBSCRIPTIONS]
-                    },
-                }
-                connection.sendall((json.dumps(request) + "\n").encode())
-                stream = connection.makefile("r", encoding="utf-8")
-                acknowledgement = json.loads(stream.readline())
-                if acknowledgement.get("error"):
-                    raise BridgeError(
-                        "SUBSCRIPTION_FAILED",
-                        str(acknowledgement["error"].get("message", "Unknown error")),
-                    )
+        retry_delay = SUBSCRIPTION_RETRY_INITIAL
+        while self.running:
+            resynchronize = self.subscribed.is_set()
+            try:
+                self._read_global_subscription(resynchronize)
+            except Exception as error:
+                self._diagnostic("HERDR_EVENT", repr(error))
+            finally:
                 self.subscribed.set()
-                while self.running:
-                    line = stream.readline()
-                    if not line:
-                        break
-                    try:
-                        event = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if not self.live.is_set():
-                        self.buffered_events.put(event)
-                    else:
-                        self._handle_herdr_event(event)
-        except Exception as error:
-            self.subscribed.set()
-            self._diagnostic("HERDR_EVENT", repr(error))
+            if not self.running:
+                return
             if self.live.is_set():
                 self.write_event(
                     "connection.warning",
-                    {"code": "EVENT_STREAM_CLOSED", "message": "Herdr events stopped."},
+                    {
+                        "code": "EVENT_STREAM_CLOSED",
+                        "message": "Herdr events are reconnecting.",
+                    },
                 )
+            self._wait_for_subscription_retry(retry_delay)
+            retry_delay = min(retry_delay * 2, SUBSCRIPTION_RETRY_MAX)
+
+    def _read_global_subscription(self, resynchronize: bool = False) -> None:
+        with socket.socket(socket.AF_UNIX) as connection:
+            connection.connect(self.herdr_socket)
+            request = {
+                "id": "mobile-subscription",
+                "method": "events.subscribe",
+                "params": {
+                    "subscriptions": [{"type": item} for item in SUBSCRIPTIONS]
+                },
+            }
+            connection.sendall((json.dumps(request) + "\n").encode())
+            stream = connection.makefile("r", encoding="utf-8")
+            acknowledgement = json.loads(stream.readline())
+            if acknowledgement.get("error"):
+                raise BridgeError(
+                    "SUBSCRIPTION_FAILED",
+                    str(acknowledgement["error"].get("message", "Unknown error")),
+                )
+            self.subscribed.set()
+            if resynchronize:
+                self._refresh_runtime()
+                self.write_event("runtime.snapshot", self.runtime)
+            while self.running:
+                line = stream.readline()
+                if not line:
+                    return
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not self.live.is_set():
+                    self.buffered_events.put(event)
+                else:
+                    self._handle_herdr_event(event)
 
     def _ensure_pane_subscriptions(self) -> None:
         with self.state_lock:
@@ -748,46 +767,70 @@ class Bridge:
             ).start()
 
     def _pane_subscription_loop(self, pane_id: str) -> None:
+        retry_delay = SUBSCRIPTION_RETRY_INITIAL
         try:
-            with socket.socket(socket.AF_UNIX) as connection:
-                connection.connect(self.herdr_socket)
-                request = {
-                    "id": "mobile-status-" + uuid.uuid4().hex,
-                    "method": "events.subscribe",
-                    "params": {
-                        "subscriptions": [
-                            {
-                                "type": "pane.agent_status_changed",
-                                "pane_id": pane_id,
-                            }
-                        ]
-                    },
-                }
-                connection.sendall((json.dumps(request) + "\n").encode())
-                stream = connection.makefile("r", encoding="utf-8")
-                acknowledgement = json.loads(stream.readline())
-                if acknowledgement.get("error"):
-                    raise BridgeError(
-                        "SUBSCRIPTION_FAILED",
-                        str(acknowledgement["error"].get("message", "Unknown error")),
-                    )
-                while self.running:
-                    line = stream.readline()
-                    if not line:
-                        break
-                    try:
-                        event = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if not self.live.is_set():
-                        self.buffered_events.put(event)
-                    else:
-                        self._handle_herdr_event(event)
-        except Exception as error:
-            self._diagnostic("HERDR_EVENT", f"{pane_id}: {error!r}")
+            while self.running and self._pane_is_active(pane_id):
+                try:
+                    self._read_pane_subscription(pane_id)
+                except Exception as error:
+                    self._diagnostic("HERDR_EVENT", f"{pane_id}: {error!r}")
+                if not self.running or not self._pane_is_active(pane_id):
+                    return
+                self._wait_for_subscription_retry(retry_delay)
+                retry_delay = min(retry_delay * 2, SUBSCRIPTION_RETRY_MAX)
         finally:
             with self.pane_subscription_lock:
                 self.pane_subscriptions.discard(pane_id)
+
+    def _read_pane_subscription(self, pane_id: str) -> None:
+        with socket.socket(socket.AF_UNIX) as connection:
+            connection.connect(self.herdr_socket)
+            request = {
+                "id": "mobile-status-" + uuid.uuid4().hex,
+                "method": "events.subscribe",
+                "params": {
+                    "subscriptions": [
+                        {
+                            "type": "pane.agent_status_changed",
+                            "pane_id": pane_id,
+                        }
+                    ]
+                },
+            }
+            connection.sendall((json.dumps(request) + "\n").encode())
+            stream = connection.makefile("r", encoding="utf-8")
+            acknowledgement = json.loads(stream.readline())
+            if acknowledgement.get("error"):
+                raise BridgeError(
+                    "SUBSCRIPTION_FAILED",
+                    str(acknowledgement["error"].get("message", "Unknown error")),
+                )
+            while self.running and self._pane_is_active(pane_id):
+                line = stream.readline()
+                if not line:
+                    return
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not self.live.is_set():
+                    self.buffered_events.put(event)
+                else:
+                    self._handle_herdr_event(event)
+
+    def _pane_is_active(self, pane_id: str) -> bool:
+        with self.state_lock:
+            return any(
+                agent.get("paneId") == pane_id for agent in self.raw_agents.values()
+            )
+
+    def _wait_for_subscription_retry(self, delay: float) -> None:
+        deadline = time.monotonic() + delay
+        while self.running:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(0.1, remaining))
 
     def _handle_herdr_event(self, event: dict[str, Any]) -> None:
         try:

@@ -10,7 +10,7 @@ Use React Native, TypeScript, Expo SDK 57, Expo Router, and a development build.
 
 ## Reasons
 
-The UI can move quickly while native code owns SSH, PTY, and credentials.
+The UI can move quickly while native code owns SSH and credentials.
 
 ## Consequences
 

@@ -27,26 +27,35 @@ export class HerdrBridgeTransport {
   async start(sessionId: string): Promise<BridgeHello> {
     await this.stop();
     const native = getRemoteCoreNativeModule();
-    this.subscription = native.addListener('onHerdrMessage', (event) => {
-      const payload = event as unknown as { bridgeId: string; message: string };
-      if (!this.bridgeId) {
-        this.bufferedMessages.push(payload);
-        return;
+    try {
+      this.subscription = native.addListener('onHerdrMessage', (event) => {
+        const payload = event as unknown as { bridgeId: string; message: string };
+        if (!this.bridgeId) {
+          this.bufferedMessages.push(payload);
+          return;
+        }
+        if (payload.bridgeId === this.bridgeId) {
+          this.publish(payload.message);
+        }
+      });
+      const started = await native.startHerdrBridge(sessionId);
+      this.bridgeId = started.bridgeId;
+      const hello = bridgeHelloSchema.parse(JSON.parse(started.hello));
+      for (const event of this.bufferedMessages) {
+        if (event.bridgeId === this.bridgeId) {
+          this.publish(event.message);
+        }
       }
-      if (payload.bridgeId === this.bridgeId) {
-        this.publish(payload.message);
+      this.bufferedMessages = [];
+      return hello;
+    } catch (error) {
+      try {
+        await this.stop();
+      } catch (cleanupError) {
+        console.warn('[HERDR_BRIDGE] Could not clean up failed bridge start', cleanupError);
       }
-    });
-    const started = await native.startHerdrBridge(sessionId);
-    this.bridgeId = started.bridgeId;
-    const hello = bridgeHelloSchema.parse(JSON.parse(started.hello));
-    for (const event of this.bufferedMessages) {
-      if (event.bridgeId === this.bridgeId) {
-        this.publish(event.message);
-      }
+      throw error;
     }
-    this.bufferedMessages = [];
-    return hello;
   }
 
   subscribe(listener: (event: BridgeEvent) => void): () => void {

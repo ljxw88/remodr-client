@@ -6,6 +6,7 @@ import { Screen } from '@/components/ui/screen';
 import type { HostProfile } from '@/domain/hosts';
 import { hostFormFromProfile } from '@/domain/hosts';
 import { HostForm } from '@/features/hosts/HostForm';
+import { updateHost } from '@/features/hosts/host-lifecycle';
 import { hostRepository } from '@/services/host-repository';
 import { toUserMessage } from '@/utils/user-error';
 import { ThemedText } from '@/components/themed-text';
@@ -53,7 +54,7 @@ export default function EditServerScreen() {
         submitLabel="Save changes"
         onSubmit={async (input) => {
           try {
-            await hostRepository.update(host.id, input);
+            await updateHost(host, input);
             router.back();
           } catch (error) {
             Alert.alert('Could not save server', toUserMessage(error));

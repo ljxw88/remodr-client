@@ -2,15 +2,15 @@ import {
   Inter_400Regular,
   Inter_500Medium,
   Inter_600SemiBold,
-  useFonts,
 } from '@expo-google-fonts/inter';
+import { useFonts } from 'expo-font';
 import { DarkTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-
-import { AnimatedSplashOverlay } from '@/components/animated-icon';
+import { useEffect } from 'react';
 
 SplashScreen.preventAutoHideAsync();
+SplashScreen.setOptions({ duration: 300, fade: true });
 
 const AbyssTheme = {
   ...DarkTheme,
@@ -26,26 +26,31 @@ const AbyssTheme = {
 };
 
 export default function RootLayout() {
-  const [fontsLoaded] = useFonts({
+  const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
     Inter_600SemiBold,
   });
-  if (!fontsLoaded) {
-    return <AnimatedSplashOverlay />;
+
+  useEffect(() => {
+    if (fontsLoaded || fontError) {
+      void SplashScreen.hideAsync();
+    }
+  }, [fontError, fontsLoaded]);
+
+  if (!fontsLoaded && !fontError) {
+    return null;
   }
 
   return (
     <ThemeProvider value={AbyssTheme}>
       <StatusBar style="light" />
-      <AnimatedSplashOverlay />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="hosts" />
         <Stack.Screen name="agents" />
         <Stack.Screen name="diagnostics" />
         <Stack.Screen name="connect" />
-        <Stack.Screen name="terminal" />
         <Stack.Screen name="files" />
         <Stack.Screen name="monitor" />
         <Stack.Screen name="docker" />

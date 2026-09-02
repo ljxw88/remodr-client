@@ -106,6 +106,9 @@ export class HerdrRepository {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not start Herdr.';
+      if (this.sessionId === sessionId) {
+        this.sessionId = null;
+      }
       this.setState({
         ...this.state,
         connection: 'error',

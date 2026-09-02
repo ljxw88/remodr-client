@@ -44,6 +44,7 @@ export function TextField({
         onChangeText={onChangeText}
         placeholder={placeholder}
         placeholderTextColor={theme.placeholder}
+        selectionColor={theme.accent}
         keyboardType={keyboardType}
         autoCapitalize={autoCapitalize}
         autoCorrect={autoCorrect}
@@ -64,7 +65,10 @@ export function TextField({
         ]}
       />
       {error ? (
-        <ThemedText type="caption" style={{ color: theme.danger }}>
+        <ThemedText
+          accessibilityLiveRegion="polite"
+          type="caption"
+          style={{ color: theme.danger }}>
           {error}
         </ThemedText>
       ) : null}

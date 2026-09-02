@@ -5,9 +5,9 @@
 - Product UI: React Native 0.86 / TypeScript / Expo SDK 57, not Jetpack Compose.
 - Navigation: Expo Router with native tabs and stack routes.
 - SSH: Kotlin local Expo module using SSHJ 0.39.
-- Connection ownership: `SessionManager` owns authenticated `SSHClient` instances and can open multiple exec, SFTP, PTY, tunnel, and bridge channels.
+- Connection ownership: `SessionManager` owns authenticated `SSHClient` instances and can open multiple exec, SFTP, tunnel, and bridge channels.
 - State: small external stores through `useSyncExternalStore`; no MVVM/MVI framework.
-- Terminal: SSHJ PTY rendered by xterm inside a native Android view. It remains a separate diagnostics/server tool, not the agent experience.
+- Terminal: intentionally omitted from the mobile product and native module.
 - Persistence: AsyncStorage for non-secret metadata and Android Keystore-backed encrypted preferences for credentials.
 - Dependency injection: explicit singleton services; no DI container.
 
@@ -49,6 +49,6 @@ second; unchanged transcript snapshots are cached by remote file version.
 
 ## Process ownership
 
-Closing the Android bridge or SSH connection closes only the client channel.
-It never stops Herdr, closes panes, or terminates agents. Runtime and Copilot
-conversation state are reconstructed after reconnect.
+Closing the Android bridge or SSH connection never stops Herdr, closes panes,
+or terminates agents. Runtime and Copilot conversation state are reconstructed
+after reconnect.

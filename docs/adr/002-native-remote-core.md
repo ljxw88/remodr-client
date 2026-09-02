@@ -2,7 +2,7 @@
 
 ## Context
 
-SSH, SFTP, PTY, tunnels, and credentials need a mature native implementation.
+SSH, SFTP, tunnels, and credentials need a mature native implementation.
 
 ## Decision
 
@@ -10,7 +10,7 @@ Own those concerns in a Kotlin `remote-core` module behind typed TypeScript inte
 
 ## Reasons
 
-React Native should call `RemoteClient` / `RemoteSession`, not sockets or ciphers.
+React Native should call `RemoteClient`, not sockets or ciphers.
 
 ## Consequences
 

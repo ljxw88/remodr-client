@@ -1,28 +1,34 @@
-import { GlassView } from 'expo-glass-effect';
+import {
+  GlassView,
+  isGlassEffectAPIAvailable,
+  isLiquidGlassAvailable,
+} from 'expo-glass-effect';
 import { Platform, StyleSheet, View, type ViewProps } from 'react-native';
 
 import { Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 type Props = ViewProps & {
-  interactive?: boolean;
   strength?: 'regular' | 'strong';
 };
 
 export function GlassSurface({
   children,
   style,
-  interactive = false,
   strength = 'regular',
   ...props
 }: Props) {
   const theme = useTheme();
 
-  if (Platform.OS === 'ios') {
+  const canUseLiquidGlass =
+    Platform.OS === 'ios' &&
+    isLiquidGlassAvailable() &&
+    isGlassEffectAPIAvailable();
+
+  if (canUseLiquidGlass) {
     return (
       <GlassView
         {...props}
-        isInteractive={interactive}
         glassEffectStyle="regular"
         colorScheme="dark"
         tintColor={strength === 'strong' ? theme.glassStrong : theme.glass}
@@ -37,7 +43,7 @@ export function GlassSurface({
       {...props}
       style={[
         styles.surface,
-        styles.android,
+        styles.fallback,
         {
           backgroundColor: strength === 'strong' ? theme.glassStrong : theme.glass,
           borderColor: theme.glassBorder,
@@ -56,7 +62,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.glass,
     overflow: 'hidden',
   },
-  android: {
+  fallback: {
     elevation: 3,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 1,

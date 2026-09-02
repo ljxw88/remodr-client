@@ -151,14 +151,17 @@ function AuthChoice({
       accessibilityLabel={label}
       accessibilityState={{ selected }}
       onPress={onPress}
-      style={[
+      style={({ pressed }) => [
         styles.choice,
         {
-          backgroundColor: selected ? theme.fog : theme.backgroundElement,
-          borderColor: selected ? theme.text : theme.border,
+          backgroundColor: selected ? theme.accentSoft : theme.backgroundElement,
+          borderColor: selected ? theme.accent : theme.border,
+          opacity: pressed ? 0.72 : 1,
         },
       ]}>
-      <ThemedText type="smallBold">{label}</ThemedText>
+      <ThemedText type="smallBold" style={{ color: selected ? theme.accent : theme.text }}>
+        {label}
+      </ThemedText>
     </Pressable>
   );
 }

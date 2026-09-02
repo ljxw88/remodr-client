@@ -30,6 +30,8 @@ export function createMemoryStringStore(initial: Record<string, string> = {}): S
 }
 
 export class JsonHostRepository implements HostRepository {
+  private mutationTail: Promise<void> = Promise.resolve();
+
   constructor(
     private readonly store: StringStore,
     private readonly now: () => Date = () => new Date(),
@@ -37,58 +39,68 @@ export class JsonHostRepository implements HostRepository {
   ) {}
 
   async list(): Promise<HostProfile[]> {
+    await this.mutationTail;
     const hosts = await this.readAll();
     return [...hosts].sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async get(id: string): Promise<HostProfile | null> {
+    await this.mutationTail;
     const hosts = await this.readAll();
     return hosts.find((host) => host.id === id) ?? null;
   }
 
   async create(input: CreateHostInput): Promise<HostProfile> {
     const data = createHostInputSchema.parse(input);
-    const hosts = await this.readAll();
-    const timestamp = this.now().toISOString();
-    const host: HostProfile = {
-      ...data,
-      id: this.newId(),
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-    hosts.push(host);
-    await this.writeAll(hosts);
-    return host;
+    return this.enqueueMutation(async () => {
+      const hosts = await this.readAll();
+      const timestamp = this.now().toISOString();
+      const host: HostProfile = {
+        ...data,
+        id: this.newId(),
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      hosts.push(host);
+      await this.writeAll(hosts);
+      return host;
+    });
   }
 
   async update(id: string, input: UpdateHostInput): Promise<HostProfile> {
     const data = createHostInputSchema.parse(input);
-    const hosts = await this.readAll();
-    const index = hosts.findIndex((host) => host.id === id);
-    if (index === -1) {
-      throw new HostNotFoundError(id);
-    }
+    return this.enqueueMutation(async () => {
+      const hosts = await this.readAll();
+      const index = hosts.findIndex((host) => host.id === id);
+      if (index === -1) {
+        throw new HostNotFoundError(id);
+      }
 
-    const current = hosts[index];
-    const updated: HostProfile = {
-      ...current,
-      ...data,
-      id: current.id,
-      createdAt: current.createdAt,
-      updatedAt: this.now().toISOString(),
-    };
-    hosts[index] = updated;
-    await this.writeAll(hosts);
-    return updated;
+      const current = hosts[index];
+      const updated: HostProfile = {
+        ...current,
+        ...data,
+        credentialId:
+          data.authType === current.authType ? data.credentialId ?? current.credentialId : undefined,
+        id: current.id,
+        createdAt: current.createdAt,
+        updatedAt: this.now().toISOString(),
+      };
+      hosts[index] = updated;
+      await this.writeAll(hosts);
+      return updated;
+    });
   }
 
   async remove(id: string): Promise<void> {
-    const hosts = await this.readAll();
-    const next = hosts.filter((host) => host.id !== id);
-    if (next.length === hosts.length) {
-      throw new HostNotFoundError(id);
-    }
-    await this.writeAll(next);
+    await this.enqueueMutation(async () => {
+      const hosts = await this.readAll();
+      const next = hosts.filter((host) => host.id !== id);
+      if (next.length === hosts.length) {
+        throw new HostNotFoundError(id);
+      }
+      await this.writeAll(next);
+    });
   }
 
   private async readAll(): Promise<HostProfile[]> {
@@ -97,5 +109,14 @@ export class JsonHostRepository implements HostRepository {
 
   private async writeAll(hosts: HostProfile[]): Promise<void> {
     await this.store.setItem(HOSTS_STORAGE_KEY, encodeHostRecords(hosts));
+  }
+
+  private enqueueMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.mutationTail.then(operation);
+    this.mutationTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 }

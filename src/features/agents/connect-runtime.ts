@@ -42,6 +42,16 @@ async function connectAgentRuntimeOnce(): Promise<boolean> {
   }
   const session = await connectHost(host, '');
   refreshSessions();
-  await herdrRepository.connect(session.sessionId);
-  return true;
+  try {
+    await herdrRepository.connect(session.sessionId);
+    return true;
+  } catch (error) {
+    try {
+      await remoteClient.disconnect(session.sessionId);
+    } catch (cleanupError) {
+      console.warn('[HERDR_RUNTIME] Could not release failed SSH session', cleanupError);
+    }
+    refreshSessions();
+    throw error;
+  }
 }

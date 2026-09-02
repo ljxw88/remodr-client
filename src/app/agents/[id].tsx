@@ -231,7 +231,6 @@ export default function AgentConversationScreen() {
           request={conversation?.activeHumanRequest ?? null}
           provider={providerLabel(agent.provider)}
           blurTarget={blurTargetRef}
-          dark
           working={showWorking}
           workingLabel={
             activeTool?.title
@@ -336,21 +335,6 @@ function ConversationRow({
     return <ToolActivityRow item={item} />;
   }
 
-  function toolStateLabel(state: Extract<ConversationItem, { kind: 'tool_activity' }>['state']) {
-    switch (state) {
-      case 'completed':
-        return 'Done';
-      case 'running':
-        return 'Running';
-      case 'failed':
-        return 'Failed';
-      case 'cancelled':
-        return 'Cancelled';
-      default:
-        return '';
-    }
-  }
-
   if (item.kind === 'human_request') {
     return item.resolved ? null : (
       <HumanRequestCard agentId={agent.id} request={item.request} />
@@ -393,107 +377,124 @@ function ConversationRow({
     );
   }
 
-  function ToolActivityRow({
-    item,
-  }: {
-    item: Extract<ConversationItem, { kind: 'tool_activity' }>;
-  }) {
-    const theme = useTheme();
-    const [expanded, setExpanded] = useState(false);
-    return (
+  return (
+    <ThemedText type="caption" themeColor="textMuted">
+      {item.text ?? statusLabel(item.status)}
+    </ThemedText>
+  );
+}
+
+function ToolActivityRow({
+  item,
+}: {
+  item: Extract<ConversationItem, { kind: 'tool_activity' }>;
+}) {
+  const theme = useTheme();
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ expanded }}
+      onPress={() => setExpanded((current) => !current)}
+      style={({ pressed }) => [
+        styles.tool,
+        {
+          backgroundColor: theme.backgroundElement,
+          borderColor: theme.border,
+          opacity: pressed ? 0.72 : 1,
+        },
+      ]}>
+      <AppIcon
+        name={{ ios: 'hammer', android: 'build', web: 'build' }}
+        size={16}
+        tintColor={theme.textMuted}
+        fallback="•"
+      />
+      <View style={styles.toolCopy}>
+        <ThemedText type="smallBold">{item.title}</ThemedText>
+        {expanded && item.detail ? (
+          <ThemedText type="caption" themeColor="textSecondary">
+            {item.detail}
+          </ThemedText>
+        ) : null}
+      </View>
+      <ThemedText type="caption" themeColor="textMuted">
+        {toolStateLabel(item.state)}
+      </ThemedText>
+      <AppIcon
+        name={{
+          ios: expanded ? 'chevron.up' : 'chevron.down',
+          android: expanded ? 'expand_less' : 'expand_more',
+          web: expanded ? 'expand_less' : 'expand_more',
+        }}
+        size={16}
+        tintColor={theme.textMuted}
+        fallback={expanded ? '⌃' : '⌄'}
+      />
+    </Pressable>
+  );
+}
+
+function ToolActivityGroupRow({ group }: { group: ToolActivityGroup }) {
+  const theme = useTheme();
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <View
+      style={[
+        styles.toolGroup,
+        { backgroundColor: theme.backgroundElement, borderColor: theme.border },
+      ]}>
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded }}
         onPress={() => setExpanded((current) => !current)}
-        style={({ pressed }) => [
-          styles.tool,
-          {
-            backgroundColor: theme.backgroundElement,
-            borderColor: theme.border,
-            opacity: pressed ? 0.72 : 1,
-          },
-        ]}>
+        style={({ pressed }) => [styles.toolSummary, pressed && styles.pressed]}>
         <AppIcon
           name={{ ios: 'hammer', android: 'build', web: 'build' }}
           size={16}
           tintColor={theme.textMuted}
           fallback="•"
         />
-        <View style={styles.toolCopy}>
-          <ThemedText type="smallBold">{item.title}</ThemedText>
-          {expanded && item.detail ? (
-            <ThemedText type="caption" themeColor="textSecondary">
-              {item.detail}
-            </ThemedText>
-          ) : null}
-        </View>
-        <ThemedText type="caption" themeColor="textMuted">
-          {toolStateLabel(item.state)}
+        <ThemedText type="smallBold" style={styles.toolSummaryLabel}>
+          {toolActivitySummary(group)}
         </ThemedText>
         <AppIcon
           name={{
-            ios: expanded ? 'chevron.up' : 'chevron.down',
-            android: expanded ? 'expand_less' : 'expand_more',
-            web: expanded ? 'expand_less' : 'expand_more',
+            ios: expanded ? 'chevron.up' : 'chevron.right',
+            android: expanded ? 'expand_less' : 'chevron_right',
+            web: expanded ? 'expand_less' : 'chevron_right',
           }}
           size={16}
           tintColor={theme.textMuted}
-          fallback={expanded ? '⌃' : '⌄'}
+          fallback={expanded ? '⌃' : '›'}
         />
       </Pressable>
-    );
-  }
-
-  function ToolActivityGroupRow({ group }: { group: ToolActivityGroup }) {
-    const theme = useTheme();
-    const [expanded, setExpanded] = useState(false);
-    return (
-      <View
-        style={[
-          styles.toolGroup,
-          { backgroundColor: theme.backgroundElement, borderColor: theme.border },
-        ]}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ expanded }}
-          onPress={() => setExpanded((current) => !current)}
-          style={({ pressed }) => [styles.toolSummary, pressed && styles.pressed]}>
-          <AppIcon
-            name={{ ios: 'hammer', android: 'build', web: 'build' }}
-            size={16}
-            tintColor={theme.textMuted}
-            fallback="•"
-          />
-          <ThemedText type="smallBold" style={styles.toolSummaryLabel}>
-            {toolActivitySummary(group)}
-          </ThemedText>
-          <AppIcon
-            name={{
-              ios: expanded ? 'chevron.up' : 'chevron.right',
-              android: expanded ? 'expand_less' : 'chevron_right',
-              web: expanded ? 'expand_less' : 'chevron_right',
-            }}
-            size={16}
-            tintColor={theme.textMuted}
-            fallback={expanded ? '⌃' : '›'}
-          />
-        </Pressable>
-        {expanded ? (
-          <View style={[styles.toolDetails, { borderTopColor: theme.border }]}>
-            {group.items.map((item) => (
-              <ToolActivityRow key={item.id} item={item} />
-            ))}
-          </View>
-        ) : null}
-      </View>
-    );
-  }
-
-  return (
-    <ThemedText type="caption" themeColor="textMuted">
-      {item.text ?? statusLabel(item.status)}
-    </ThemedText>
+      {expanded ? (
+        <View style={[styles.toolDetails, { borderTopColor: theme.border }]}>
+          {group.items.map((item) => (
+            <ToolActivityRow key={item.id} item={item} />
+          ))}
+        </View>
+      ) : null}
+    </View>
   );
+}
+
+function toolStateLabel(
+  state: Extract<ConversationItem, { kind: 'tool_activity' }>['state'],
+) {
+  switch (state) {
+    case 'completed':
+      return 'Done';
+    case 'running':
+      return 'Running';
+    case 'failed':
+      return 'Failed';
+    case 'cancelled':
+      return 'Cancelled';
+    default:
+      return '';
+  }
 }
 
 function displayItemMarker(item?: ConversationDisplayItem): string {
@@ -550,14 +551,19 @@ function HumanRequestCard({ agentId, request }: { agentId: string; request: Huma
                   : [...current, option.id],
               );
             }}
-            style={[
+            style={({ pressed }) => [
               styles.option,
               {
-                backgroundColor: isSelected ? theme.backgroundSelected : theme.backgroundElement,
-                borderColor: isSelected ? theme.text : theme.border,
+                backgroundColor: isSelected ? theme.accentSoft : theme.backgroundElement,
+                borderColor: isSelected ? theme.accent : theme.border,
+                opacity: pressed ? 0.72 : 1,
               },
             ]}>
-            <ThemedText type="smallBold">{option.label}</ThemedText>
+            <ThemedText
+              type="smallBold"
+              style={{ color: isSelected ? theme.accent : theme.text }}>
+              {option.label}
+            </ThemedText>
             {option.description ? (
               <ThemedText type="caption" themeColor="textSecondary">
                 {option.description}
@@ -585,7 +591,6 @@ function Composer({
   request,
   provider,
   blurTarget,
-  dark,
   working,
   workingLabel,
 }: {
@@ -596,7 +601,6 @@ function Composer({
   request: HumanRequest | null;
   provider: string;
   blurTarget: RefObject<View | null>;
-  dark: boolean;
   working: boolean;
   workingLabel: string;
 }) {
@@ -619,7 +623,7 @@ function Composer({
         blurTarget={blurTarget}
         blurMethod="dimezisBlurViewSdk31Plus"
         intensity={72}
-        tint={dark ? 'dark' : 'light'}
+        tint="dark"
         style={[styles.inputFrame, { borderColor: theme.glassBorder }]}>
         <TextInput
           accessibilityLabel={request ? 'Write an answer' : `Message ${provider}`}

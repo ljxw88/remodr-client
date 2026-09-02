@@ -2,7 +2,7 @@
 
 1. Inspect existing code before changing it.
 2. Implement the smallest coherent slice for the current phase.
-3. Do not implement an interactive terminal or persist credentials until the current phase requires them.
+3. Do not add an interactive terminal. Persist credentials only through the Android Keystore-backed store.
 4. Do not replace Expo, React Native, or TypeScript.
 5. Do not add dependencies unless the current milestone needs them.
 6. Keep UI on React Native primitives. No large design system.

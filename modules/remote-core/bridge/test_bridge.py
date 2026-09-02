@@ -12,6 +12,49 @@ class BridgeProtocolTest(unittest.TestCase):
         self.assertNotIn("pane.agent_status_changed", SUBSCRIPTIONS)
         self.assertNotIn("pane.output_matched", SUBSCRIPTIONS)
 
+    def test_pane_subscription_reconnects_after_stream_failure(self):
+        bridge = Bridge()
+        bridge.raw_agents = {"agent-1": {"paneId": "p1"}}
+        bridge.pane_subscriptions.add("p1")
+        attempts = 0
+
+        def fail_then_stop(_pane_id):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 2:
+                bridge.running = False
+            raise OSError("stream closed")
+
+        with (
+            patch.object(bridge, "_read_pane_subscription", side_effect=fail_then_stop),
+            patch.object(bridge, "_wait_for_subscription_retry"),
+            patch.object(bridge, "_diagnostic"),
+        ):
+            bridge._pane_subscription_loop("p1")
+
+        self.assertEqual(attempts, 2)
+        self.assertNotIn("p1", bridge.pane_subscriptions)
+
+    def test_global_subscription_resynchronizes_after_reconnect(self):
+        bridge = Bridge()
+        attempts = []
+
+        def fail_then_stop(resynchronize):
+            attempts.append(resynchronize)
+            if len(attempts) == 2:
+                bridge.running = False
+                return
+            raise OSError("stream closed")
+
+        with (
+            patch.object(bridge, "_read_global_subscription", side_effect=fail_then_stop),
+            patch.object(bridge, "_wait_for_subscription_retry"),
+            patch.object(bridge, "_diagnostic"),
+        ):
+            bridge._subscription_loop()
+
+        self.assertEqual(attempts, [False, True])
+
     def test_internal_system_notifications_are_not_user_messages(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)

@@ -10,6 +10,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import type { HostProfile } from '@/domain/hosts';
 import { refreshSessions, useHostSession } from '@/features/connection/use-host-session';
+import { deleteHost } from '@/features/hosts/host-lifecycle';
 import { useTheme } from '@/hooks/use-theme';
 import { hostRepository } from '@/services/host-repository';
 import { remoteClient } from '@/services/native-remote-client';
@@ -48,7 +49,8 @@ export default function EditHostScreen() {
           onPress: () => {
             void (async () => {
               try {
-                await hostRepository.remove(target.id);
+                await deleteHost(target);
+                refreshSessions();
                 router.back();
               } catch (error) {
                 Alert.alert('Could not delete server', toUserMessage(error));
@@ -219,7 +221,9 @@ export default function EditHostScreen() {
             accessibilityHint="Removes this saved server after confirmation"
             onPress={() => confirmDelete(host)}
             style={({ pressed }) => [styles.deleteAction, pressed && styles.pressed]}>
-            <ThemedText type="smallBold">Delete server</ThemedText>
+            <ThemedText type="smallBold" themeColor="danger">
+              Delete server
+            </ThemedText>
           </Pressable>
         </View>
       </ScrollView>

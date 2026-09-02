@@ -1,54 +1,9 @@
 import { Platform } from 'react-native';
 
 import { parseRemoteError, RemoteOperationError } from '@/domain/errors';
-import type {
-  CommandResult,
-  ConnectRequest,
-  RemoteClient,
-  RemoteFile,
-  SessionSnapshot,
-  TunnelSnapshot,
-} from '@/domain/remote';
+import type { ConnectRequest, RemoteClient } from '@/domain/remote';
 
-export type RemoteCoreNativeModule = {
-  connect(options: Record<string, unknown>): Promise<SessionSnapshot>;
-  disconnect(sessionId: string): Promise<void>;
-  disconnectHost(hostId: string): Promise<void>;
-  getSession(hostId: string): SessionSnapshot | null;
-  listSessions(): SessionSnapshot[];
-  startHerdrBridge(sessionId: string): Promise<{
-    bridgeId: string;
-    hello: string;
-  }>;
-  requestHerdrBridge(bridgeId: string, requestJson: string): Promise<string>;
-  stopHerdrBridge(bridgeId: string): Promise<void>;
-  exec(sessionId: string, command: string): Promise<CommandResult>;
-  openPty(sessionId: string, cols: number, rows: number): Promise<string>;
-  writePty(ptyId: string, data: string): Promise<void>;
-  resizePty(ptyId: string, cols: number, rows: number): Promise<void>;
-  closePty(ptyId: string): Promise<void>;
-  sftpList(sessionId: string, path: string): Promise<RemoteFile[]>;
-  sftpMkdir(sessionId: string, path: string): Promise<void>;
-  sftpRename(sessionId: string, from: string, to: string): Promise<void>;
-  sftpRemove(sessionId: string, path: string): Promise<void>;
-  sftpDownload(sessionId: string, remotePath: string, localPath: string): Promise<void>;
-  sftpUpload(sessionId: string, localPath: string, remotePath: string): Promise<void>;
-  openLocalForward(
-    sessionId: string,
-    bindHost: string,
-    bindPort: number,
-    destHost: string,
-    destPort: number,
-  ): Promise<TunnelSnapshot>;
-  closeForward(tunnelId: string): Promise<void>;
-  listForwards(sessionId: string): TunnelSnapshot[];
-  saveSecret(id: string, secret: string): Promise<void>;
-  hasSecret(id: string): boolean;
-  deleteSecret(id: string): Promise<void>;
-  listKnownHosts(): { hostname: string; port: number; fingerprint: string }[];
-  removeKnownHost(hostname: string, port: number): Promise<void>;
-  addListener(event: string, listener: (event: SessionSnapshot) => void): { remove(): void };
-};
+export type RemoteCoreNativeModule = typeof import('../../modules/remote-core').default;
 
 export function getRemoteCoreNativeModule(): RemoteCoreNativeModule {
   if (Platform.OS !== 'android') {
@@ -116,18 +71,6 @@ export const remoteClient: RemoteClient = {
   },
   exec(sessionId, command) {
     return wrapAsync(() => getRemoteCoreNativeModule().exec(sessionId, command));
-  },
-  openPty(sessionId, cols, rows) {
-    return wrapAsync(() => getRemoteCoreNativeModule().openPty(sessionId, cols, rows));
-  },
-  writePty(ptyId, data) {
-    return wrapAsync(() => getRemoteCoreNativeModule().writePty(ptyId, data));
-  },
-  resizePty(ptyId, cols, rows) {
-    return wrapAsync(() => getRemoteCoreNativeModule().resizePty(ptyId, cols, rows));
-  },
-  closePty(ptyId) {
-    return wrapAsync(() => getRemoteCoreNativeModule().closePty(ptyId));
   },
   sftpList(sessionId, path) {
     return wrapAsync(() => getRemoteCoreNativeModule().sftpList(sessionId, path));
