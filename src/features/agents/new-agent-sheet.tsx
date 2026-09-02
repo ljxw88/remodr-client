@@ -234,7 +234,7 @@ export function NewAgentSheet({
             <View style={styles.permissionCopy}>
               <ThemedText type="smallBold">Allow tools automatically</ThemedText>
               <ThemedText type="caption" themeColor="textMuted">
-                Uses the provider’s trusted-workspace bypass flag.
+                Apply bypass flag
               </ThemedText>
             </View>
             <Switch
