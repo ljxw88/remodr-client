@@ -1,6 +1,13 @@
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
 
 import { AppIcon } from '@/components/ui/app-icon';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -10,29 +17,83 @@ import { Radius, Spacing } from '@/constants/theme';
 import {
   providerLabel,
   statusLabel,
-  type AgentProvider,
+  type AgentWorkspace,
   type RemoteAgent,
 } from '@/domain/herdr';
 import { connectAgentRuntime } from '@/features/agents/connect-runtime';
+import { AgentProviderIcon } from '@/features/agents/agent-provider-icon';
+import { NewAgentSheet } from '@/features/agents/new-agent-sheet';
 import { useHerdr } from '@/features/agents/use-herdr';
+import { useHostSession } from '@/features/connection/use-host-session';
+import { useHosts } from '@/features/hosts/use-hosts';
 import { useTheme } from '@/hooks/use-theme';
+import { herdrRepository } from '@/services/herdr-repository';
+import { toUserMessage } from '@/utils/user-error';
 
 export default function AgentsScreen() {
   const theme = useTheme();
   const state = useHerdr();
+  const { hosts, loading: hostsLoading } = useHosts();
+  const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null);
+  const [showNewAgent, setShowNewAgent] = useState(false);
+  const [switchingDeviceId, setSwitchingDeviceId] = useState<string | null>(null);
+  const deviceSelectionVersion = useRef(0);
+  const selectedDeviceId = state.selectedDeviceId ?? state.runtime.deviceId ?? null;
+  const selectedHost = hosts.find((host) => host.id === selectedDeviceId);
+  const runtimeMatchesDevice =
+    !selectedDeviceId || state.runtime.deviceId === selectedDeviceId;
+  const connected = state.connection === 'connected' && runtimeMatchesDevice;
+  const busy =
+    switchingDeviceId != null ||
+    [
+      'connecting',
+      'authenticating',
+      'starting_bridge',
+      'synchronizing',
+      'reconnecting',
+    ].includes(state.connection);
+  const spaces = runtimeMatchesDevice ? state.runtime.workspaces : [];
+  const activeSpaceId =
+    selectedSpaceId && spaces.some((space) => space.id === selectedSpaceId)
+      ? selectedSpaceId
+      : null;
+  const visibleAgents = useMemo(
+    () =>
+      state.runtime.agents
+        .filter(
+          (agent) =>
+            runtimeMatchesDevice &&
+            (!activeSpaceId || agent.workspaceId === activeSpaceId),
+        )
+        .sort(compareAgents),
+    [activeSpaceId, runtimeMatchesDevice, state.runtime.agents],
+  );
   const sections = useMemo(() => {
-    const grouped = new Map<string, RemoteAgent[]>();
-    for (const agent of state.runtime.agents) {
-      const agents = grouped.get(agent.workspaceName) ?? [];
-      agents.push(agent);
-      grouped.set(agent.workspaceName, agents);
+    const spacesInScope = activeSpaceId
+      ? spaces.filter((space) => space.id === activeSpaceId)
+      : spaces;
+    const result = spacesInScope.map((space) => ({
+      space,
+      agents: visibleAgents.filter((agent) => agent.workspaceId === space.id),
+    }));
+    const knownSpaceIds = new Set(spaces.map((space) => space.id));
+    const unassigned = visibleAgents.filter((agent) => !knownSpaceIds.has(agent.workspaceId));
+    if (unassigned.length > 0 && !activeSpaceId) {
+      result.push({
+        space: {
+          id: 'unassigned',
+          name: 'Other',
+          status: 'unknown',
+        },
+        agents: unassigned,
+      });
     }
-    return [...grouped.entries()].map(([title, data]) => ({ title, data }));
-  }, [state.runtime.agents]);
+    return result.filter((section) => section.agents.length > 0);
+  }, [activeSpaceId, spaces, visibleAgents]);
 
   useFocusEffect(
     useCallback(() => {
-      if (state.connection === 'connected' || state.connection === 'starting_bridge') {
+      if (state.connection !== 'disconnected' && state.connection !== 'error') {
         return;
       }
       void connectAgentRuntime().catch((error) => {
@@ -41,18 +102,70 @@ export default function AgentsScreen() {
     }, [state.connection]),
   );
 
-  const busy = ['connecting', 'starting_bridge', 'synchronizing'].includes(state.connection);
-  const connected = state.connection === 'connected';
   const connectionColor = connected ? theme.success : busy ? theme.accent : theme.warning;
   const connectionBackground = connected
     ? theme.successSoft
     : busy
       ? theme.accentSoft
       : theme.warningSoft;
+  const canCreateAgent = connected && spaces.length > 0;
+
+  async function selectDevice(deviceId: string) {
+    if (deviceId === selectedDeviceId) {
+      return;
+    }
+    const selectionVersion = ++deviceSelectionVersion.current;
+    setSelectedSpaceId(null);
+    setSwitchingDeviceId(deviceId);
+    herdrRepository.selectDevice(deviceId);
+    try {
+      const connectedDevice = await connectAgentRuntime(deviceId);
+      if (selectionVersion !== deviceSelectionVersion.current) {
+        return;
+      }
+      if (!connectedDevice) {
+        router.push({ pathname: '/connect/[id]', params: { id: deviceId } });
+      }
+    } catch (error) {
+      if (selectionVersion !== deviceSelectionVersion.current) {
+        return;
+      }
+      Alert.alert('Could not connect device', toUserMessage(error));
+    } finally {
+      if (selectionVersion === deviceSelectionVersion.current) {
+        setSwitchingDeviceId(null);
+      }
+    }
+  }
 
   return (
     <Screen includeTopSafeArea>
       <View style={styles.header}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="New agent"
+          accessibilityState={{ disabled: !canCreateAgent }}
+          disabled={!canCreateAgent}
+          onPress={() => setShowNewAgent(true)}
+          style={({ pressed }) => [
+            styles.newAgent,
+            {
+              backgroundColor: canCreateAgent ? theme.accent : theme.backgroundElement,
+              opacity: canCreateAgent ? (pressed ? 0.78 : 1) : 0.42,
+            },
+          ]}>
+          <AppIcon
+            name={{ ios: 'plus', android: 'add', web: 'add' }}
+            size={18}
+            tintColor={canCreateAgent ? theme.onAccent : theme.textMuted}
+            fallback="+"
+          />
+          <ThemedText
+            type="smallBold"
+            style={{ color: canCreateAgent ? theme.onAccent : theme.textMuted }}>
+            New agent
+          </ThemedText>
+        </Pressable>
         <View
           style={[
             styles.connection,
@@ -68,10 +181,62 @@ export default function AgentsScreen() {
             ]}
           />
           <ThemedText type="caption" style={{ color: connectionColor }}>
-            {connected ? 'Connected' : busy ? 'Connecting' : 'Offline'}
+            {connected ? 'Live' : busy ? 'Connecting' : 'Offline'}
           </ThemedText>
         </View>
       </View>
+
+      {hosts.length > 0 ? (
+        <View style={styles.filters}>
+          <FilterHeader label="Devices" value={selectedHost?.name} />
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterRow}>
+            {hosts.map((host) => (
+              <DeviceChip
+                key={host.id}
+                hostId={host.id}
+                label={host.name}
+                selected={host.id === selectedDeviceId}
+                disabled={busy}
+                onPress={() => void selectDevice(host.id)}
+              />
+            ))}
+          </ScrollView>
+
+          {spaces.length > 0 ? (
+            <>
+              <FilterHeader
+                label="Spaces"
+                value={
+                  activeSpaceId
+                    ? spaces.find((space) => space.id === activeSpaceId)?.name
+                    : 'All'
+                }
+              />
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.filterRow}>
+                <FilterChip
+                  label="All spaces"
+                  selected={activeSpaceId == null}
+                  onPress={() => setSelectedSpaceId(null)}
+                />
+                {spaces.map((space) => (
+                  <FilterChip
+                    key={space.id}
+                    label={space.name}
+                    selected={space.id === activeSpaceId}
+                    onPress={() => setSelectedSpaceId(space.id)}
+                  />
+                ))}
+              </ScrollView>
+            </>
+          ) : null}
+        </View>
+      ) : null}
 
       {state.connection === 'reconnecting' || state.connection === 'error' ? (
         <View
@@ -86,7 +251,12 @@ export default function AgentsScreen() {
           <ThemedText type="small">
             {state.connection === 'reconnecting' ? 'Reconnecting to Herdr' : 'Herdr unavailable'}
           </ThemedText>
-          <Pressable onPress={() => void connectAgentRuntime()}>
+          <Pressable
+            onPress={() => {
+              void connectAgentRuntime().catch((error) => {
+                Alert.alert('Could not reconnect', toUserMessage(error));
+              });
+            }}>
             <ThemedText type="smallBold" style={{ color: theme.accent }}>
               Retry
             </ThemedText>
@@ -94,40 +264,183 @@ export default function AgentsScreen() {
         </View>
       ) : null}
 
-      {busy && state.runtime.agents.length === 0 ? (
+      {hostsLoading || (busy && !runtimeMatchesDevice) ? (
         <View style={styles.center}>
           <ActivityIndicator color={theme.accent} />
           <ThemedText type="small" themeColor="textMuted">
             Loading agents
           </ThemedText>
         </View>
-      ) : sections.length === 0 ? (
+      ) : !selectedHost ? (
         <EmptyState
-          title="No agents available"
-          body="Connect a saved server, then Herdr agents will appear here."
+          title="Choose a device"
+          body="Add a server, then select it here to browse its spaces and agents."
           actionLabel="Open servers"
           onAction={() => router.push('/servers')}
+        />
+      ) : !connected && !busy ? (
+        <EmptyState
+          title={`${selectedHost.name} is offline`}
+          body="Connect this device to load its Herdr spaces and agents."
+          actionLabel="Connect device"
+          onAction={() =>
+            router.push({ pathname: '/connect/[id]', params: { id: selectedHost.id } })
+          }
+        />
+      ) : spaces.length === 0 ? (
+        <EmptyState
+          title="No spaces available"
+          body="Create a workspace in Herdr, then it will appear here automatically."
+          actionLabel="Refresh"
+          onAction={() => {
+            void herdrRepository.refreshRuntime().catch((error) => {
+              Alert.alert('Could not refresh spaces', toUserMessage(error));
+            });
+          }}
+        />
+      ) : sections.length === 0 ? (
+        <EmptyState
+          title={activeSpaceId ? 'No agents in this space' : 'No agents available'}
+          body="Start an agent and it will appear here as soon as Herdr detects it."
+          actionLabel="New agent"
+          onAction={() => setShowNewAgent(true)}
         />
       ) : (
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.list}>
           {sections.map((section) => (
-            <WorkspaceGroup key={section.title} title={section.title} agents={section.data} />
+            <WorkspaceGroup
+              key={section.space.id}
+              space={section.space}
+              agents={section.agents}
+            />
           ))}
         </ScrollView>
       )}
+      {showNewAgent ? (
+        <NewAgentSheet
+          manifests={state.runtime.providers}
+          spaces={spaces}
+          initialSpaceId={activeSpaceId}
+          onClose={() => setShowNewAgent(false)}
+          onCreate={async (input) => {
+            const result = await herdrRepository.createAgent(input);
+            setShowNewAgent(false);
+            if (result.agentId) {
+              router.push({
+                pathname: '/agents/[id]',
+                params: { id: result.agentId },
+              });
+            }
+          }}
+        />
+      ) : null}
     </Screen>
   );
 }
 
-function WorkspaceGroup({ title, agents }: { title: string; agents: RemoteAgent[] }) {
+function FilterHeader({ label, value }: { label: string; value?: string }) {
+  return (
+    <View style={styles.filterHeader}>
+      <ThemedText type="label" themeColor="textMuted">
+        {label.toUpperCase()}
+      </ThemedText>
+      {value ? (
+        <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1}>
+          {value}
+        </ThemedText>
+      ) : null}
+    </View>
+  );
+}
+
+function DeviceChip({
+  hostId,
+  label,
+  selected,
+  disabled,
+  onPress,
+}: {
+  hostId: string;
+  label: string;
+  selected: boolean;
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  const session = useHostSession(hostId);
+  return (
+    <FilterChip
+      label={label}
+      selected={selected}
+      disabled={disabled}
+      statusColor={session ? theme.success : theme.textMuted}
+      onPress={onPress}
+    />
+  );
+}
+
+function FilterChip({
+  label,
+  selected,
+  disabled = false,
+  statusColor,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  disabled?: boolean;
+  statusColor?: string;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled, selected }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.filterChip,
+        {
+          backgroundColor: selected ? theme.accentSoft : theme.backgroundElement,
+          borderColor: selected ? theme.accent : theme.border,
+          opacity: disabled ? 0.5 : pressed ? 0.72 : 1,
+        },
+      ]}>
+      {statusColor ? (
+        <View style={[styles.deviceDot, { backgroundColor: statusColor }]} />
+      ) : null}
+      <ThemedText
+        type="caption"
+        numberOfLines={1}
+        style={{ color: selected ? theme.accent : theme.textSecondary }}>
+        {label}
+      </ThemedText>
+    </Pressable>
+  );
+}
+
+function WorkspaceGroup({ space, agents }: { space: AgentWorkspace; agents: RemoteAgent[] }) {
   const theme = useTheme();
   return (
     <View style={styles.workspace}>
-      <ThemedText type="label" themeColor="textMuted" style={styles.sectionTitle}>
-        {title.toUpperCase()}
-      </ThemedText>
+      <View style={styles.workspaceHeader}>
+        <View style={styles.workspaceTitle}>
+          <ThemedText type="label" themeColor="textMuted" style={styles.sectionTitle}>
+            {space.name.toUpperCase()}
+          </ThemedText>
+          {space.cwd ? (
+            <ThemedText type="caption" themeColor="textMuted" numberOfLines={1}>
+              {space.cwd}
+            </ThemedText>
+          ) : null}
+        </View>
+        <ThemedText type="caption" themeColor="textMuted">
+          {agents.length}
+        </ThemedText>
+      </View>
       <View
         style={[
           styles.workspaceCard,
@@ -161,22 +474,19 @@ function AgentRow({ agent }: { agent: RemoteAgent }) {
         },
       ]}>
       <View style={[styles.providerIcon, { backgroundColor: theme.accentSoft }]}>
-        <AppIcon
-          name={providerIcon(agent.provider)}
-          size={22}
-          tintColor={theme.text}
-          fallback="A"
-        />
+        <AgentProviderIcon provider={agent.provider} tintColor={theme.text} />
       </View>
       <View style={styles.agentCopy}>
         <View style={styles.agentTitle}>
           <ThemedText type="section" numberOfLines={1} style={styles.providerName}>
-            {providerLabel(agent.provider)}
+            {agent.title}
           </ThemedText>
           <StatusBadge status={agent.status} />
         </View>
         <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1}>
-          {agent.cwd ?? agent.title}
+          {agent.title === providerLabel(agent.provider)
+            ? agent.cwd ?? agent.workspaceName
+            : `${providerLabel(agent.provider)}${agent.cwd ? ` · ${agent.cwd}` : ''}`}
         </ThemedText>
       </View>
       <AppIcon
@@ -225,42 +535,32 @@ function StatusBadge({ status }: { status: RemoteAgent['status'] }) {
   );
 }
 
-function providerIcon(provider: AgentProvider) {
-  switch (provider) {
-    case 'copilot':
-      return {
-        ios: 'chevron.left.forwardslash.chevron.right' as const,
-        android: 'code' as const,
-        web: 'code' as const,
-      };
-    case 'claude':
-      return {
-        ios: 'text.bubble' as const,
-        android: 'chat' as const,
-        web: 'chat' as const,
-      };
-    case 'codex':
-      return {
-        ios: 'terminal' as const,
-        android: 'terminal' as const,
-        web: 'terminal' as const,
-      };
-    default:
-      return {
-        ios: 'curlybraces' as const,
-        android: 'data_object' as const,
-        web: 'data_object' as const,
-      };
-  }
+function compareAgents(left: RemoteAgent, right: RemoteAgent) {
+  const priority: Record<RemoteAgent['status'], number> = {
+    blocked: 0,
+    done: 1,
+    working: 2,
+    idle: 3,
+    unknown: 4,
+  };
+  return priority[left.status] - priority[right.status] || left.title.localeCompare(right.title);
 }
 
 const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     gap: Spacing.two,
-    marginBottom: Spacing.one,
+    marginBottom: Spacing.two,
+  },
+  newAgent: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    paddingHorizontal: Spacing.two,
+    borderRadius: Radius.pill,
   },
   connection: {
     flexDirection: 'row',
@@ -275,6 +575,37 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderWidth: 1,
+    borderRadius: 3,
+  },
+  filters: {
+    gap: Spacing.one,
+    marginBottom: Spacing.three,
+  },
+  filterHeader: {
+    minHeight: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.half,
+  },
+  filterRow: {
+    gap: Spacing.one,
+    paddingRight: Spacing.two,
+  },
+  filterChip: {
+    minHeight: 38,
+    maxWidth: 190,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.half,
+    paddingHorizontal: Spacing.one + Spacing.half,
+    borderWidth: 1,
+    borderRadius: Radius.pill,
+  },
+  deviceDot: {
+    width: 6,
+    height: 6,
     borderRadius: 3,
   },
   banner: {
@@ -299,9 +630,19 @@ const styles = StyleSheet.create({
   workspace: {
     gap: Spacing.one,
   },
+  workspaceHeader: {
+    minHeight: 28,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.half,
+  },
+  workspaceTitle: {
+    flex: 1,
+    gap: 2,
+  },
   sectionTitle: {
     letterSpacing: 0.7,
-    paddingHorizontal: Spacing.half,
   },
   workspaceCard: {
     borderWidth: 1,

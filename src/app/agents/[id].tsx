@@ -74,7 +74,12 @@ export default function AgentConversationScreen() {
     if (!id) {
       return;
     }
-    void herdrRepository.loadDraft(id).then(setDraft);
+    void herdrRepository
+      .loadDraft(id)
+      .then(setDraft)
+      .catch((error) => {
+        console.warn('[CONVERSATION] Could not load draft', error);
+      });
   }, [id]);
 
   useEffect(() => {
@@ -114,11 +119,15 @@ export default function AgentConversationScreen() {
       return;
     }
     const timer = setTimeout(() => {
-      void herdrRepository.saveDraft(id, draft);
+      void herdrRepository.saveDraft(id, draft).catch((error) => {
+        console.warn('[CONVERSATION] Could not save draft', error);
+      });
     }, 250);
     return () => {
       clearTimeout(timer);
-      void herdrRepository.saveDraft(id, draft);
+      void herdrRepository.saveDraft(id, draft).catch((error) => {
+        console.warn('[CONVERSATION] Could not save draft', error);
+      });
     };
   }, [draft, id]);
 
@@ -149,7 +158,9 @@ export default function AgentConversationScreen() {
       }
       setDraft('');
       setTimeout(() => {
-        void herdrRepository.loadConversation(agent.id);
+        void herdrRepository.loadConversation(agent.id).catch((error) => {
+          console.warn('[CONVERSATION] Could not refresh after send', error);
+        });
       }, 500);
     } catch (error) {
       Alert.alert(
@@ -163,7 +174,7 @@ export default function AgentConversationScreen() {
 
   return (
     <Screen style={styles.screen}>
-      <Stack.Screen options={{ title: providerLabel(agent.provider) }} />
+      <Stack.Screen options={{ title: agent.title }} />
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -278,7 +289,14 @@ function AgentHeader({ agent }: { agent: RemoteAgent }) {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Stop current agent operation"
-          onPress={() => void herdrRepository.interrupt(agent.id)}
+          onPress={() => {
+            void herdrRepository.interrupt(agent.id).catch((error) => {
+              Alert.alert(
+                'Could not stop agent',
+                error instanceof Error ? error.message : 'The agent could not be stopped.',
+              );
+            });
+          }}
           style={({ pressed }) => [styles.stop, { borderColor: theme.border }, pressed && styles.pressed]}>
           <ThemedText type="smallBold">Stop</ThemedText>
         </Pressable>
@@ -361,26 +379,65 @@ function ConversationRow({
   }
 
   if (item.kind === 'raw_output') {
-    return (
-      <View
-        style={[
-          styles.raw,
-          { backgroundColor: theme.backgroundElement, borderColor: theme.border },
-        ]}>
-        <ThemedText type="label" themeColor="textMuted">
-          RAW AGENT OUTPUT
-        </ThemedText>
-        <ThemedText type="code" selectable>
-          {item.text}
-        </ThemedText>
-      </View>
-    );
+    return <RawOutputRow item={item} />;
   }
 
   return (
     <ThemedText type="caption" themeColor="textMuted">
       {item.text ?? statusLabel(item.status)}
     </ThemedText>
+  );
+}
+
+function RawOutputRow({
+  item,
+}: {
+  item: Extract<ConversationItem, { kind: 'raw_output' }>;
+}) {
+  const theme = useTheme();
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <View
+      style={[
+        styles.raw,
+        { backgroundColor: theme.backgroundElement, borderColor: theme.border },
+      ]}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded }}
+        onPress={() => setExpanded((current) => !current)}
+        style={({ pressed }) => [styles.rawSummary, pressed && styles.pressed]}>
+        <AppIcon
+          name={{ ios: 'terminal', android: 'terminal', web: 'terminal' }}
+          size={16}
+          tintColor={theme.textMuted}
+          fallback="›_"
+        />
+        <View style={styles.rawCopy}>
+          <ThemedText type="smallBold">Agent output</ThemedText>
+          <ThemedText type="caption" themeColor="textMuted">
+            Compatibility view
+          </ThemedText>
+        </View>
+        <AppIcon
+          name={{
+            ios: expanded ? 'chevron.up' : 'chevron.right',
+            android: expanded ? 'expand_less' : 'chevron_right',
+            web: expanded ? 'expand_less' : 'chevron_right',
+          }}
+          size={16}
+          tintColor={theme.textMuted}
+          fallback={expanded ? '⌃' : '›'}
+        />
+      </Pressable>
+      {expanded ? (
+        <View style={[styles.rawDetails, { borderTopColor: theme.border }]}>
+          <ThemedText type="code" selectable>
+            {item.text}
+          </ThemedText>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -522,9 +579,16 @@ function HumanRequestCard({ agentId, request }: { agentId: string; request: Huma
   const [selected, setSelected] = useState<string[]>([]);
 
   async function answer(optionId?: string) {
-    const selectedOptionIds = optionId ? [optionId] : selected;
-    await herdrRepository.answerHumanRequest(agentId, request.id, { selectedOptionIds });
-    await herdrRepository.loadConversation(agentId);
+    try {
+      const selectedOptionIds = optionId ? [optionId] : selected;
+      await herdrRepository.answerHumanRequest(agentId, request.id, { selectedOptionIds });
+      await herdrRepository.loadConversation(agentId);
+    } catch (error) {
+      Alert.alert(
+        'Could not answer',
+        error instanceof Error ? error.message : 'The answer could not be sent.',
+      );
+    }
   }
 
   return (
@@ -779,10 +843,24 @@ const styles = StyleSheet.create({
     borderRadius: Radius.control,
   },
   raw: {
-    gap: Spacing.one,
-    padding: Spacing.two,
     borderWidth: 1,
-    borderRadius: Radius.glass,
+    borderRadius: Radius.control,
+    overflow: 'hidden',
+  },
+  rawSummary: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    paddingHorizontal: 14,
+  },
+  rawCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  rawDetails: {
+    padding: Spacing.two,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   composer: {
     position: 'absolute',

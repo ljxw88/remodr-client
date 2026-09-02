@@ -1,8 +1,10 @@
 import type { HerdrRuntimeState } from '@/domain/herdr';
 import {
   appendOptimisticUserMessage,
+  HerdrRepository,
   reduceAgentStatus,
 } from '@/services/herdr-repository';
+import type { HerdrBridgeTransport } from '@/services/herdr-bridge-transport';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
   __esModule: true,
@@ -15,7 +17,9 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
 
 const runtime: HerdrRuntimeState = {
   connectionState: 'connected',
+  deviceId: 'device-1',
   workspaces: [{ id: 'w1', name: 'mobile', status: 'idle' }],
+  providers: [{ provider: 'copilot', available: true, aliases: [] }],
   agents: [
     {
       id: 'agent-1',
@@ -47,6 +51,42 @@ describe('Herdr runtime reducer', () => {
     ['idle'],
   ] as const)('moves an agent to %s', (status) => {
     expect(reduceAgentStatus(runtime, 'agent-1', status).agents[0].status).toBe(status);
+  });
+
+  describe('HerdrRepository agent creation', () => {
+    it('installs the refreshed runtime returned by the bridge', async () => {
+      const request = jest.fn(async () => ({
+        paneId: 'p2',
+        agentId: 'agent-2',
+        name: 'codex',
+        runtime: {
+          ...runtime,
+          providers: [
+            ...runtime.providers,
+            { provider: 'codex' as const, available: true, aliases: [] },
+          ],
+        },
+      }));
+      const transport = {
+        subscribe: jest.fn(() => () => undefined),
+        request,
+      } as unknown as HerdrBridgeTransport;
+      const repository = new HerdrRepository(transport);
+
+      const result = await repository.createAgent({
+        provider: 'codex',
+        workspaceId: 'w1',
+        bypassPermissions: true,
+      });
+
+      expect(request).toHaveBeenCalledWith('agent.create', {
+        provider: 'codex',
+        workspaceId: 'w1',
+        bypassPermissions: true,
+      });
+      expect(result.agentId).toBe('agent-2');
+      expect(repository.getSnapshot().runtime.providers).toHaveLength(2);
+    });
   });
 
   describe('optimistic conversation messages', () => {

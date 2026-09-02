@@ -12,6 +12,11 @@ provides runtime identity and status; provider adapters provide semantic
 messages, tool activity, questions, and TODOs where reliable. Raw agent output
 is a conservative fallback, not the primary interface.
 
+The Agents screen selects one saved device at a time, exposes every Herdr
+workspace as a filterable space, and can start Copilot, Claude, Codex, or
+OpenCode in a new tab inside the selected space. Herdr events refresh additions,
+removals, moves, and status changes from authoritative snapshots.
+
 ## Current remote compatibility
 
 - Herdr 0.8.2 / protocol 20
@@ -32,6 +37,8 @@ npx expo run:android
 
 This project contains the local `RemoteCore` Android module and cannot run in
 Expo Go. Rebuild and reinstall the development app after native module changes.
+For physical-device testing with Tailscale, see
+[`docs/physical-android-development.md`](docs/physical-android-development.md).
 
 ## Checks
 

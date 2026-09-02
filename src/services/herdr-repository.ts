@@ -2,12 +2,16 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
   conversationSchema,
+  createAgentInputSchema,
+  createAgentResultSchema,
   EMPTY_RUNTIME,
   runtimeStateSchema,
   type AgentConversation,
   type AgentStatus,
   type BridgeEvent,
   type BridgeHello,
+  type CreateAgentInput,
+  type CreateAgentResult,
   type HerdrConnectionState,
   type HerdrRuntimeState,
 } from '@/domain/herdr';
@@ -18,6 +22,7 @@ const DRAFT_PREFIX = 'remote-workspace.herdr.draft.';
 
 export type HerdrRepositoryState = {
   connection: HerdrConnectionState;
+  selectedDeviceId: string | null;
   runtime: HerdrRuntimeState;
   hello: BridgeHello | null;
   lastError: string | null;
@@ -26,6 +31,7 @@ export type HerdrRepositoryState = {
 
 const INITIAL_STATE: HerdrRepositoryState = {
   connection: 'disconnected',
+  selectedDeviceId: null,
   runtime: EMPTY_RUNTIME,
   hello: null,
   lastError: null,
@@ -35,7 +41,6 @@ const INITIAL_STATE: HerdrRepositoryState = {
 const EMPTY_CONVERSATIONS = new Map<string, AgentConversation>();
 
 export class HerdrRepository {
-  private readonly transport = new HerdrBridgeTransport();
   private state: HerdrRepositoryState = INITIAL_STATE;
   private conversations = EMPTY_CONVERSATIONS;
   private listeners = new Set<() => void>();
@@ -43,9 +48,11 @@ export class HerdrRepository {
   private unsubscribeTransport: (() => void) | null = null;
   private sessionId: string | null = null;
 
-  constructor() {
+  constructor(private readonly transport = new HerdrBridgeTransport()) {
     this.unsubscribeTransport = this.transport.subscribe((event) => {
-      void this.handleEvent(event);
+      void this.handleEvent(event).catch((error) => {
+        console.warn('[HERDR_RUNTIME] Could not apply bridge event', error);
+      });
     });
   }
 
@@ -64,6 +71,16 @@ export class HerdrRepository {
   getConversation = (agentId: string): AgentConversation | null =>
     this.conversations.get(agentId) ?? null;
 
+  selectDevice(deviceId: string) {
+    if (this.state.selectedDeviceId === deviceId) {
+      return;
+    }
+    this.setState({
+      ...this.state,
+      selectedDeviceId: deviceId,
+    });
+  }
+
   async hydrate(): Promise<void> {
     const raw = await AsyncStorage.getItem(RUNTIME_CACHE_KEY);
     if (!raw) {
@@ -80,8 +97,13 @@ export class HerdrRepository {
     }
   }
 
-  async connect(sessionId: string): Promise<void> {
-    if (this.sessionId === sessionId && this.state.connection === 'connected') {
+  async connect(sessionId: string, deviceId: string): Promise<void> {
+    this.selectDevice(deviceId);
+    if (
+      this.sessionId === sessionId &&
+      this.state.connection === 'connected' &&
+      this.state.runtime.deviceId === deviceId
+    ) {
       return;
     }
     this.sessionId = sessionId;
@@ -94,10 +116,7 @@ export class HerdrRepository {
         hello,
         lastError: hello.warning ?? null,
       });
-      const runtime = runtimeStateSchema.parse(
-        await this.transport.request('runtime.snapshot', {}),
-      );
-      await this.installRuntime(runtime);
+      await this.refreshRuntime();
       this.setState({
         ...this.state,
         connection: 'connected',
@@ -119,10 +138,26 @@ export class HerdrRepository {
   }
 
   async retry(): Promise<void> {
-    if (!this.sessionId) {
+    if (!this.sessionId || !this.state.selectedDeviceId) {
       throw new Error('No SSH session is available.');
     }
-    await this.connect(this.sessionId);
+    await this.connect(this.sessionId, this.state.selectedDeviceId);
+  }
+
+  async createAgent(input: CreateAgentInput): Promise<CreateAgentResult> {
+    const request = createAgentInputSchema.parse(input);
+    const result = createAgentResultSchema.parse(
+      await this.transport.request('agent.create', request),
+    );
+    await this.installRuntime(result.runtime);
+    return result;
+  }
+
+  async refreshRuntime(): Promise<void> {
+    const runtime = runtimeStateSchema.parse(
+      await this.transport.request('runtime.snapshot', {}),
+    );
+    await this.installRuntime(runtime);
   }
 
   async loadConversation(agentId: string): Promise<AgentConversation> {
@@ -203,7 +238,12 @@ export class HerdrRepository {
   private async handleEvent(event: BridgeEvent): Promise<void> {
     if (event.event === 'runtime.snapshot') {
       const parsed = runtimeStateSchema.safeParse(event.data);
-      if (parsed.success) {
+      if (
+        parsed.success &&
+        (!this.state.selectedDeviceId ||
+          !parsed.data.deviceId ||
+          parsed.data.deviceId === this.state.selectedDeviceId)
+      ) {
         await this.installRuntime(parsed.data);
         this.setConnection('connected');
       }

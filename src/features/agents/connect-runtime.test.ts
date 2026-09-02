@@ -9,7 +9,11 @@ import { remoteClient } from '@/services/native-remote-client';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
   __esModule: true,
-  default: { removeItem: jest.fn() },
+  default: {
+    getItem: jest.fn(),
+    removeItem: jest.fn(),
+    setItem: jest.fn(),
+  },
 }));
 jest.mock('@/features/connection/connect-host', () => ({
   connectHost: jest.fn(),
@@ -21,6 +25,7 @@ jest.mock('@/services/herdr-repository', () => ({
   herdrRepository: {
     hydrate: jest.fn(),
     connect: jest.fn(),
+    selectDevice: jest.fn(),
   },
 }));
 jest.mock('@/services/host-repository', () => ({
@@ -31,6 +36,7 @@ jest.mock('@/services/host-repository', () => ({
 jest.mock('@/services/native-remote-client', () => ({
   remoteClient: {
     listSessions: jest.fn(),
+    getSession: jest.fn(),
     hasSecret: jest.fn(),
     disconnect: jest.fn(),
   },
@@ -50,6 +56,8 @@ describe('connectAgentRuntime', () => {
       updatedAt: '2026-01-01T00:00:00.000Z',
     };
     jest.mocked(AsyncStorage.removeItem).mockResolvedValue();
+    jest.mocked(AsyncStorage.getItem).mockResolvedValue(null);
+    jest.mocked(AsyncStorage.setItem).mockResolvedValue();
     jest.mocked(herdrRepository.hydrate).mockResolvedValue();
     jest.mocked(remoteClient.listSessions).mockReturnValue([]);
     jest.mocked(hostRepository.list).mockResolvedValue([host]);
@@ -64,6 +72,12 @@ describe('connectAgentRuntime', () => {
 
     await expect(connectAgentRuntime()).rejects.toThrow('bridge failed');
 
+    expect(herdrRepository.selectDevice).toHaveBeenCalledWith(host.id);
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+      'remote-workspace.herdr.selected-device',
+      host.id,
+    );
+    expect(herdrRepository.connect).toHaveBeenCalledWith('session-1', host.id);
     expect(remoteClient.disconnect).toHaveBeenCalledWith('session-1');
     expect(refreshSessions).toHaveBeenCalledTimes(2);
   });

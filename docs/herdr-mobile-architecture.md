@@ -43,6 +43,16 @@ The bridge is bundled as an Android asset, hashed, and deployed with SFTP to
 `~/.local/share/remote-workspace/`. It does not expose a TCP service and stdout
 contains protocol NDJSON only.
 
+Each bridge receives the saved host ID as its device identity. Agent IDs combine
+that device identity with Herdr's stable pane ID, so provider-session discovery
+cannot change list or conversation identity. The mobile client keeps one device
+runtime selected at a time and filters its complete workspace list locally.
+
+Agent creation uses the server's `server.agent_manifests` catalog followed by
+`tab.create` and `agent.start`. A partially created pane is closed on failure.
+Workspace, tab, pane, worktree, and agent-detection events always trigger a
+fresh `session.snapshot`, keeping additions and removals authoritative.
+
 Copilot `assistant.message` chunk events are reconciled by message ID for
 streaming updates. Only the visible working conversation refreshes every
 second; unchanged transcript snapshots are cached by remote file version.

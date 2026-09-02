@@ -117,6 +117,10 @@ Status must remain understandable without color alone.
 
 ## Agents
 
+- Select one saved device at a time; changing devices replaces the active Herdr
+  runtime rather than mixing identities from different servers.
+- Show every Herdr workspace as a horizontally scrollable space filter,
+  including spaces that do not currently contain an agent.
 - Group agents by Herdr workspace in one surface rather than separate floating
   cards for every row.
 - Show provider, working directory, and explicit status.
@@ -124,6 +128,9 @@ Status must remain understandable without color alone.
   banner.
 - A violet-soft icon tile gives each row a stable visual anchor.
 - Tapping a row opens its conversation at the newest content.
+- Keep **New agent** as the only primary action. Its bottom sheet chooses one
+  of the server-advertised providers, a required space, and an explicit
+  auto-approval setting without exposing terminal controls.
 
 ## Conversation
 

@@ -4,13 +4,27 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from herdr_mobile_bridge import Bridge, SUBSCRIPTIONS
+from herdr_mobile_bridge import BYPASS_ARGUMENTS, Bridge, BridgeError, SUBSCRIPTIONS
 
 
 class BridgeProtocolTest(unittest.TestCase):
+    def test_supported_providers_have_herdrm_compatible_bypass_arguments(self):
+        self.assertEqual(
+            BYPASS_ARGUMENTS,
+            {
+                "claude": ["--dangerously-skip-permissions"],
+                "codex": ["--dangerously-bypass-approvals-and-sandbox"],
+                "copilot": ["--allow-all-tools"],
+                "opencode": ["--auto"],
+            },
+        )
+
     def test_global_subscriptions_do_not_require_pane_parameters(self):
         self.assertNotIn("pane.agent_status_changed", SUBSCRIPTIONS)
         self.assertNotIn("pane.output_matched", SUBSCRIPTIONS)
+        self.assertIn("workspace.created", SUBSCRIPTIONS)
+        self.assertIn("pane.closed", SUBSCRIPTIONS)
+        self.assertIn("worktree.opened", SUBSCRIPTIONS)
 
     def test_pane_subscription_reconnects_after_stream_failure(self):
         bridge = Bridge()
@@ -96,6 +110,10 @@ class BridgeProtocolTest(unittest.TestCase):
 
     def test_snapshot_normalizes_stable_agent_identity(self):
         bridge = Bridge()
+        bridge.device_id = "device-1"
+        bridge.agent_catalog = [
+            {"provider": "copilot", "available": True, "aliases": []}
+        ]
         snapshot = {
             "version": "0.8.2",
             "protocol": 20,
@@ -104,6 +122,19 @@ class BridgeProtocolTest(unittest.TestCase):
                     "workspace_id": "w1",
                     "label": "mobile",
                     "agent_status": "working",
+                },
+                {
+                    "workspace_id": "w2",
+                    "label": "empty-space",
+                    "agent_status": "idle",
+                    "pane_count": 1,
+                },
+            ],
+            "panes": [
+                {
+                    "pane_id": "p2",
+                    "workspace_id": "w2",
+                    "foreground_cwd": "/work/empty",
                 }
             ],
             "agents": [
@@ -122,10 +153,312 @@ class BridgeProtocolTest(unittest.TestCase):
 
         first = bridge._normalize_snapshot(snapshot)
         second = bridge._normalize_snapshot(snapshot)
+        snapshot["agents"][0]["agent_session"] = {"value": "session-2"}
+        after_session_detection = bridge._normalize_snapshot(snapshot)
 
         self.assertEqual(first["agents"][0]["id"], second["agents"][0]["id"])
+        self.assertEqual(
+            first["agents"][0]["id"],
+            after_session_detection["agents"][0]["id"],
+        )
         self.assertEqual(first["agents"][0]["provider"], "copilot")
         self.assertEqual(first["agents"][0]["status"], "working")
+        self.assertEqual(first["agents"][0]["deviceId"], "device-1")
+        self.assertEqual(first["workspaces"][1]["cwd"], "/work/empty")
+        self.assertEqual(first["providers"][0]["provider"], "copilot")
+
+    def test_creates_agent_in_selected_space_with_provider_bypass_arguments(self):
+        bridge = Bridge()
+        agent_id = bridge._stable_agent_id("p2")
+        bridge.runtime = {
+            "connectionState": "connected",
+            "deviceId": "device-1",
+            "workspaces": [{"id": "w1", "name": "project", "status": "idle"}],
+            "agents": [
+                {
+                    "id": agent_id,
+                    "paneId": "p2",
+                }
+            ],
+            "providers": [
+                {"provider": "codex", "available": True, "aliases": []}
+            ],
+        }
+        catalog = [{"provider": "codex", "available": True, "aliases": []}]
+
+        with (
+            patch.object(bridge, "_refresh_runtime"),
+            patch.object(bridge, "_agent_catalog_snapshot", return_value=catalog),
+            patch.object(
+                bridge,
+                "_herdr_request",
+                return_value={"root_pane": {"pane_id": "p2"}},
+            ) as request,
+            patch.object(bridge, "_start_agent") as start_agent,
+        ):
+            result = bridge._create_agent(
+                {
+                    "provider": "codex",
+                    "workspaceId": "w1",
+                    "bypassPermissions": True,
+                }
+            )
+
+        request.assert_called_once_with(
+            "tab.create",
+            {
+                "focus": False,
+                "workspace_id": "w1",
+                "label": "codex",
+            },
+        )
+        start_agent.assert_called_once_with(
+            "codex",
+            "codex",
+            "p2",
+            ["--dangerously-bypass-approvals-and-sandbox"],
+        )
+        self.assertEqual(result["agentId"], agent_id)
+
+    def test_create_agent_cleans_up_pane_when_post_start_refresh_fails(self):
+        bridge = Bridge()
+        bridge.runtime = {
+            "connectionState": "connected",
+            "workspaces": [{"id": "w1", "name": "project", "status": "idle"}],
+            "agents": [],
+            "providers": [
+                {"provider": "copilot", "available": True, "aliases": []}
+            ],
+        }
+        requests = []
+
+        def request(method, params):
+            requests.append((method, params))
+            if method == "tab.create":
+                return {"root_pane": {"pane_id": "p2"}}
+            if method == "pane.close":
+                return {}
+            self.fail(f"Unexpected request: {method}")
+
+        with (
+            patch.object(
+                bridge,
+                "_refresh_runtime",
+                side_effect=[None, OSError("snapshot failed")],
+            ),
+            patch.object(
+                bridge,
+                "_agent_catalog_snapshot",
+                return_value=[
+                    {"provider": "copilot", "available": True, "aliases": []}
+                ],
+            ),
+            patch.object(bridge, "_herdr_request", side_effect=request),
+            patch.object(bridge, "_start_agent"),
+        ):
+            with self.assertRaises(OSError):
+                bridge._create_agent(
+                    {
+                        "provider": "copilot",
+                        "workspaceId": "w1",
+                        "bypassPermissions": True,
+                    }
+                )
+
+        self.assertIn(("pane.close", {"pane_id": "p2"}), requests)
+
+    def test_manifest_failure_does_not_infer_remote_availability_from_path(self):
+        bridge = Bridge()
+        with (
+            patch.object(
+                bridge,
+                "_herdr_request",
+                side_effect=OSError("catalog unavailable"),
+            ),
+            patch.object(bridge, "_diagnostic"),
+        ):
+            catalog = bridge._agent_catalog_snapshot()
+
+        self.assertTrue(all(not item["available"] for item in catalog))
+        self.assertTrue(
+            all(
+                item["unavailableReason"] == "Provider catalog unavailable."
+                for item in catalog
+            )
+        )
+
+    def test_agent_start_retries_only_while_the_same_shell_is_initializing(self):
+        bridge = Bridge()
+        starts = 0
+
+        def request(method, _params):
+            nonlocal starts
+            if method == "pane.get":
+                return {"pane": {"terminal_id": "terminal-1"}}
+            if method == "pane.process_info":
+                return {
+                    "process_info": {
+                        "shell_pid": 42,
+                        "foreground_process_group_id": 42,
+                        "foreground_processes": [
+                            {"pid": 42, "name": "/bin/bash", "argv": ["-bash"]}
+                        ],
+                    }
+                }
+            if method == "agent.start":
+                starts += 1
+                if starts == 1:
+                    raise BridgeError("agent_pane_busy", "Pane is busy")
+                return {}
+            self.fail(f"Unexpected request: {method}")
+
+        with (
+            patch.object(bridge, "_herdr_request", side_effect=request),
+            patch("herdr_mobile_bridge.time.sleep"),
+        ):
+            bridge._start_agent("copilot", "copilot", "p2", [])
+
+        self.assertEqual(starts, 2)
+
+    def test_agent_start_preserves_busy_error_if_terminal_identity_changes(self):
+        bridge = Bridge()
+        terminal_ids = iter(("terminal-1", "terminal-2"))
+
+        def request(method, _params):
+            if method == "pane.get":
+                return {"pane": {"terminal_id": next(terminal_ids)}}
+            if method == "agent.start":
+                raise BridgeError("agent_pane_busy", "Pane is busy")
+            self.fail(f"Unexpected request: {method}")
+
+        with patch.object(bridge, "_herdr_request", side_effect=request):
+            with self.assertRaisesRegex(BridgeError, "Pane is busy"):
+                bridge._start_agent("copilot", "copilot", "p2", [])
+
+    def test_shell_initialization_accepts_exact_float_ids_and_argv_shell(self):
+        self.assertTrue(
+            Bridge._process_info_shows_shell_initialization(
+                {
+                    "shell_pid": 42.0,
+                    "foreground_process_group_id": 42,
+                    "foreground_processes": [
+                        {"pid": 42.0, "name": "wrapper", "argv": ["-zsh"]}
+                    ],
+                }
+            )
+        )
+
+    def test_pending_agent_survives_snapshots_until_its_pane_closes(self):
+        bridge = Bridge()
+        bridge.agent_catalog = []
+        bridge.runtime = {
+            "connectionState": "connected",
+            "workspaces": [
+                {
+                    "id": "w1",
+                    "name": "project",
+                    "cwd": "/work/project",
+                    "status": "idle",
+                }
+            ],
+            "agents": [],
+            "providers": [],
+        }
+        agent_id = bridge._stable_agent_id("p2")
+        bridge._install_pending_agent(
+            agent_id,
+            "copilot",
+            "copilot",
+            "w1",
+            "p2",
+        )
+        snapshot = {
+            "workspaces": [{"workspace_id": "w1", "label": "project"}],
+            "panes": [{"pane_id": "p2", "workspace_id": "w1"}],
+            "agents": [],
+        }
+
+        while_pending = bridge._normalize_snapshot(snapshot)
+        after_close = bridge._normalize_snapshot(
+            {**snapshot, "panes": []}
+        )
+
+        self.assertEqual(while_pending["agents"][0]["id"], agent_id)
+        self.assertEqual(after_close["agents"], [])
+
+    def test_custom_title_precedes_generated_name_and_tab_label(self):
+        bridge = Bridge()
+        self.assertEqual(
+            bridge._agent_display_title(
+                {
+                    "name": "codex-a13f",
+                    "title": "API migration",
+                    "terminal_title_stripped": "Codex",
+                },
+                "codex",
+                "codex",
+            ),
+            "API migration",
+        )
+        self.assertEqual(
+            bridge._agent_display_title(
+                {
+                    "name": "copilot-9a7f",
+                    "title": "Session Initialization - GitHub Copilot",
+                    "terminal_title_stripped": "GitHub Copilot",
+                },
+                "copilot",
+                "copilot",
+            ),
+            "copilot-9a7f",
+        )
+
+    def test_runtime_events_refresh_snapshot_for_external_agent_changes(self):
+        bridge = Bridge()
+        bridge.runtime = {
+            "connectionState": "connected",
+            "workspaces": [],
+            "agents": [],
+            "providers": [],
+        }
+
+        with (
+            patch.object(bridge, "_refresh_runtime") as refresh,
+            patch.object(bridge, "write_event") as write_event,
+        ):
+            bridge._handle_herdr_event(
+                {"event": {"type": "pane.closed"}, "data": {}}
+            )
+
+        refresh.assert_called_once_with()
+        write_event.assert_called_once_with("runtime.snapshot", bridge.runtime)
+
+    def test_working_agent_fallback_reads_visible_output_without_scrollback(self):
+        bridge = Bridge()
+        with patch.object(
+            bridge,
+            "_herdr_request",
+            return_value={"read": {"text": "Working", "revision": 2}},
+        ) as request:
+            bridge._load_fallback(
+                {
+                    "id": "agent-1",
+                    "provider": "copilot",
+                    "paneId": "p1",
+                    "status": "working",
+                }
+            )
+
+        request.assert_called_once_with(
+            "agent.read",
+            {
+                "target": "p1",
+                "source": "visible",
+                "format": "text",
+                "strip_ansi": True,
+                "lines": 240,
+            },
+        )
 
     def test_copilot_adapter_builds_semantic_items_and_question(self):
         with tempfile.TemporaryDirectory() as directory:

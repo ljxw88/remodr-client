@@ -11,7 +11,6 @@ import hashlib
 import json
 import os
 import queue
-import shutil
 import socket
 import sqlite3
 import sys
@@ -23,8 +22,13 @@ from typing import Any
 
 BRIDGE_VERSION = "0.1.0"
 PROTOCOL = 1
-HERDR_PROTOCOL = 20
 SUPPORTED_PROVIDERS = ("copilot", "claude", "codex", "opencode")
+BYPASS_ARGUMENTS = {
+    "claude": ["--dangerously-skip-permissions"],
+    "codex": ["--dangerously-bypass-approvals-and-sandbox"],
+    "copilot": ["--allow-all-tools"],
+    "opencode": ["--auto"],
+}
 SUBSCRIPTION_RETRY_INITIAL = 0.25
 SUBSCRIPTION_RETRY_MAX = 2.0
 SUBSCRIPTIONS = (
@@ -36,6 +40,9 @@ SUBSCRIPTIONS = (
     "workspace.reordered",
     "workspace.closed",
     "workspace.focused",
+    "worktree.created",
+    "worktree.opened",
+    "worktree.removed",
     "tab.created",
     "tab.closed",
     "tab.focused",
@@ -64,8 +71,10 @@ class Bridge:
             os.environ.get("HERDR_SOCKET", "~/.config/herdr/herdr.sock")
         )
         self.session_name = os.environ.get("HERDR_SESSION", "default")
+        self.device_id = os.environ.get("REMOTE_WORKSPACE_DEVICE_ID", "device")
         self.output_lock = threading.Lock()
         self.state_lock = threading.Lock()
+        self.refresh_lock = threading.Lock()
         self.buffered_events: queue.Queue[dict[str, Any]] = queue.Queue()
         self.pane_subscriptions: set[str] = set()
         self.pane_subscription_lock = threading.Lock()
@@ -76,9 +85,12 @@ class Bridge:
             "connectionState": "starting_bridge",
             "workspaces": [],
             "agents": [],
+            "providers": [],
         }
+        self.agent_catalog: list[dict[str, Any]] | None = None
         self.raw_agents: dict[str, dict[str, Any]] = {}
         self.pending_human_requests: dict[str, dict[str, Any]] = {}
+        self.pending_agents: dict[str, dict[str, Any]] = {}
         self.conversation_cache: dict[
             str, tuple[tuple[int, int, int, int], dict[str, Any]]
         ] = {}
@@ -103,7 +115,7 @@ class Bridge:
                     "type": "hello",
                     "bridgeVersion": BRIDGE_VERSION,
                     "herdrVersion": herdr_version,
-                    "herdrProtocol": HERDR_PROTOCOL,
+                    "herdrProtocol": self.runtime.get("herdrProtocol"),
                     "capabilities": self._capabilities(),
                 }
             )
@@ -115,7 +127,7 @@ class Bridge:
                     "type": "hello",
                     "bridgeVersion": BRIDGE_VERSION,
                     "herdrVersion": "unknown",
-                    "herdrProtocol": HERDR_PROTOCOL,
+                    "herdrProtocol": None,
                     "capabilities": self._capabilities(),
                     "warning": str(error),
                 }
@@ -186,6 +198,8 @@ class Bridge:
                 {"target": agent["paneId"], "text": text},
             )
             return {"accepted": True}
+        if action == "agent.create":
+            return self._create_agent(payload)
         if action == "human_request.answer":
             return self._answer_human_request(payload)
         if action == "agent.interrupt":
@@ -240,21 +254,44 @@ class Bridge:
         return agent
 
     def _refresh_runtime(self) -> None:
-        result = self._herdr_request("session.snapshot", {})
-        snapshot = result.get("snapshot")
-        if not isinstance(snapshot, dict):
-            raise BridgeError("INVALID_HERDR_RESPONSE", "Herdr snapshot is missing.")
-        normalized = self._normalize_snapshot(snapshot)
-        with self.state_lock:
-            self.runtime = normalized
-        self._ensure_pane_subscriptions()
+        with self.refresh_lock:
+            result = self._herdr_request("session.snapshot", {})
+            snapshot = result.get("snapshot")
+            if not isinstance(snapshot, dict):
+                raise BridgeError(
+                    "INVALID_HERDR_RESPONSE", "Herdr snapshot is missing."
+                )
+            self._agent_catalog_snapshot()
+            normalized = self._normalize_snapshot(snapshot)
+            with self.state_lock:
+                self.runtime = normalized
+            self._ensure_pane_subscriptions()
 
     def _normalize_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        catalog = self.agent_catalog or self._fallback_agent_catalog()
         workspace_labels = {
             item.get("workspace_id"): item.get("label") or "Workspace"
             for item in snapshot.get("workspaces", [])
             if isinstance(item, dict)
         }
+        tab_labels = {
+            item.get("tab_id"): item.get("label")
+            for item in snapshot.get("tabs", [])
+            if isinstance(item, dict) and isinstance(item.get("label"), str)
+        }
+        workspace_cwds: dict[Any, str] = {}
+        panes = snapshot.get("panes")
+        agents = snapshot.get("agents")
+        for raw in [
+            *(panes if isinstance(panes, list) else []),
+            *(agents if isinstance(agents, list) else []),
+        ]:
+            if not isinstance(raw, dict):
+                continue
+            workspace_id = raw.get("workspace_id")
+            cwd = raw.get("foreground_cwd") or raw.get("cwd")
+            if workspace_id is not None and isinstance(cwd, str) and cwd:
+                workspace_cwds.setdefault(workspace_id, cwd)
         normalized_agents: list[dict[str, Any]] = []
         raw_agents: dict[str, dict[str, Any]] = {}
         for raw in snapshot.get("agents", []):
@@ -265,19 +302,12 @@ class Bridge:
             provider_session_id = (
                 session.get("value") if isinstance(session, dict) else None
             )
-            identity = "|".join(
-                (
-                    self.session_name,
-                    str(raw.get("pane_id") or ""),
-                    provider,
-                    str(provider_session_id or raw.get("terminal_id") or ""),
-                )
-            )
-            agent_id = "agent_" + hashlib.sha256(identity.encode()).hexdigest()[:20]
+            agent_id = self._stable_agent_id(str(raw.get("pane_id") or ""))
             workspace_id = str(raw.get("workspace_id") or "")
             capabilities = self._agent_capabilities(provider, provider_session_id)
             agent = {
                 "id": agent_id,
+                "deviceId": self.device_id,
                 "provider": provider,
                 "providerSessionId": provider_session_id,
                 "herdrSessionId": self.session_name,
@@ -287,19 +317,43 @@ class Bridge:
                 "paneId": raw.get("pane_id"),
                 "cwd": raw.get("foreground_cwd") or raw.get("cwd"),
                 "status": self._status(raw.get("agent_status")),
-                "title": raw.get("terminal_title_stripped")
-                or raw.get("name")
-                or self._provider_label(provider),
+                "title": self._agent_display_title(
+                    raw,
+                    provider,
+                    tab_labels.get(raw.get("tab_id")),
+                ),
                 "focused": bool(raw.get("focused")),
                 "capabilities": capabilities,
             }
             normalized_agents.append(agent)
             raw_agents[agent_id] = {**raw, **agent}
 
+        detected_pane_ids = {
+            str(agent.get("paneId"))
+            for agent in normalized_agents
+            if agent.get("paneId")
+        }
+        live_pane_ids = {
+            str(pane.get("pane_id"))
+            for pane in (panes if isinstance(panes, list) else [])
+            if isinstance(pane, dict) and pane.get("pane_id")
+        }
+        for pane_id, pending in list(self.pending_agents.items()):
+            if pane_id in detected_pane_ids or pane_id not in live_pane_ids:
+                self.pending_agents.pop(pane_id, None)
+                continue
+            normalized_agents.append(pending)
+            raw_agents[pending["id"]] = {
+                "pane_id": pane_id,
+                "workspace_id": pending["workspaceId"],
+                **pending,
+            }
+
         with self.state_lock:
             self.raw_agents = raw_agents
         return {
             "connectionState": "connected",
+            "deviceId": self.device_id,
             "herdrVersion": snapshot.get("version", "unknown"),
             "herdrProtocol": snapshot.get("protocol"),
             "herdrSession": self.session_name,
@@ -307,15 +361,407 @@ class Bridge:
             "workspaces": [
                 {
                     "id": str(item.get("workspace_id") or ""),
+                    "deviceId": self.device_id,
                     "name": item.get("label") or "Workspace",
+                    "cwd": workspace_cwds.get(item.get("workspace_id")),
+                    "paneCount": item.get("pane_count")
+                    if isinstance(item.get("pane_count"), int)
+                    else 0,
                     "status": self._status(item.get("agent_status")),
                 }
                 for item in snapshot.get("workspaces", [])
                 if isinstance(item, dict)
             ],
             "agents": normalized_agents,
+            "providers": catalog,
             "lastRuntimeEvent": time.time(),
         }
+
+    def _agent_catalog_snapshot(self, force: bool = False) -> list[dict[str, Any]]:
+        if self.agent_catalog is not None and not force:
+            return self.agent_catalog
+        aliases_by_provider: dict[str, list[str]] = {}
+        advertised: set[str] = set()
+        manifests_loaded = False
+        catalog_error: str | None = None
+        try:
+            result = self._herdr_request("server.agent_manifests", {})
+            manifests = result.get("manifests")
+            if isinstance(manifests, list):
+                manifests_loaded = True
+                for manifest in manifests:
+                    if not isinstance(manifest, dict):
+                        continue
+                    provider = self._provider(manifest.get("agent"))
+                    if provider not in SUPPORTED_PROVIDERS:
+                        continue
+                    advertised.add(provider)
+                    aliases = manifest.get("aliases")
+                    aliases_by_provider[provider] = (
+                        [str(alias) for alias in aliases]
+                        if isinstance(aliases, list)
+                        else []
+                    )
+        except Exception as error:
+            catalog_error = "Provider catalog unavailable."
+            self._diagnostic("HERDR_MANIFESTS", repr(error))
+
+        self.agent_catalog = [
+            {
+                "provider": provider,
+                "available": manifests_loaded and provider in advertised,
+                "aliases": aliases_by_provider.get(provider, []),
+                "unavailableReason": (
+                    None
+                    if manifests_loaded and provider in advertised
+                    else catalog_error or "Not advertised by Herdr."
+                ),
+            }
+            for provider in SUPPORTED_PROVIDERS
+        ]
+        return self.agent_catalog
+
+    @staticmethod
+    def _fallback_agent_catalog() -> list[dict[str, Any]]:
+        return [
+            {
+                "provider": provider,
+                "available": False,
+                "aliases": [],
+                "unavailableReason": "Provider catalog unavailable.",
+            }
+            for provider in SUPPORTED_PROVIDERS
+        ]
+
+    def _create_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
+        provider = payload.get("provider")
+        workspace_id = payload.get("workspaceId")
+        bypass_permissions = payload.get("bypassPermissions", True)
+        if provider not in SUPPORTED_PROVIDERS:
+            raise BridgeError("INVALID_PROVIDER", "Unsupported agent provider.")
+        if not isinstance(workspace_id, str) or not workspace_id:
+            raise BridgeError("INVALID_WORKSPACE", "A space is required.")
+        if not isinstance(bypass_permissions, bool):
+            raise BridgeError("INVALID_REQUEST", "Invalid permission setting.")
+
+        self._refresh_runtime()
+        workspace_ids = {
+            workspace.get("id")
+            for workspace in self.runtime.get("workspaces", [])
+            if isinstance(workspace, dict)
+        }
+        if workspace_id not in workspace_ids:
+            raise BridgeError("WORKSPACE_NOT_FOUND", "The selected space no longer exists.")
+        catalog = self._agent_catalog_snapshot(force=True)
+        available = next(
+            (
+                item.get("available")
+                for item in catalog
+                if item.get("provider") == provider
+            ),
+            False,
+        )
+        if not available:
+            raise BridgeError(
+                "PROVIDER_UNAVAILABLE",
+                f"{self._provider_label(provider)} is not available on this device.",
+            )
+
+        tab_result = self._herdr_request(
+            "tab.create",
+            {
+                "focus": False,
+                "workspace_id": workspace_id,
+                "label": provider,
+            },
+        )
+        root_pane = tab_result.get("root_pane")
+        pane_id = (
+            root_pane.get("pane_id") if isinstance(root_pane, dict) else None
+        )
+        if not isinstance(pane_id, str) or not pane_id:
+            raise BridgeError("INVALID_HERDR_RESPONSE", "New agent pane is missing.")
+
+        name = provider
+        args = BYPASS_ARGUMENTS[provider] if bypass_permissions else []
+        try:
+            try:
+                self._start_agent(name, provider, pane_id, args)
+            except BridgeError as error:
+                if error.code.lower() != "agent_name_taken":
+                    raise
+                name = f"{provider}-{uuid.uuid4().hex[:4]}"
+                self._start_agent(name, provider, pane_id, args)
+            agent_id = self._stable_agent_id(pane_id)
+            for _ in range(20):
+                self._refresh_runtime()
+                agent = next(
+                    (
+                        item
+                        for item in self.runtime.get("agents", [])
+                        if isinstance(item, dict) and item.get("paneId") == pane_id
+                    ),
+                    None,
+                )
+                if agent:
+                    break
+                time.sleep(0.1)
+            if not agent:
+                self._install_pending_agent(
+                    agent_id,
+                    name,
+                    provider,
+                    workspace_id,
+                    pane_id,
+                )
+            return {
+                "paneId": pane_id,
+                "agentId": agent_id,
+                "name": name,
+                "runtime": self.runtime,
+            }
+        except Exception:
+            try:
+                self._herdr_request("pane.close", {"pane_id": pane_id})
+            except Exception as cleanup_error:
+                self._diagnostic("AGENT_CLEANUP", repr(cleanup_error))
+            raise
+
+    def _install_pending_agent(
+        self,
+        agent_id: str,
+        name: str,
+        provider: str,
+        workspace_id: str,
+        pane_id: str,
+    ) -> None:
+        with self.refresh_lock:
+            with self.state_lock:
+                if any(
+                    item.get("id") == agent_id
+                    for item in self.runtime.get("agents", [])
+                    if isinstance(item, dict)
+                ):
+                    return
+                workspace = next(
+                    (
+                        item
+                        for item in self.runtime.get("workspaces", [])
+                        if isinstance(item, dict) and item.get("id") == workspace_id
+                    ),
+                    {},
+                )
+                pending = {
+                    "id": agent_id,
+                    "deviceId": self.device_id,
+                    "provider": provider,
+                    "providerSessionId": None,
+                    "herdrSessionId": self.session_name,
+                    "workspaceId": workspace_id,
+                    "workspaceName": workspace.get("name", "Workspace"),
+                    "tabId": None,
+                    "paneId": pane_id,
+                    "cwd": workspace.get("cwd"),
+                    "status": "working",
+                    "title": name,
+                    "focused": False,
+                    "capabilities": self._agent_capabilities(provider, None),
+                }
+                self.runtime = {
+                    **self.runtime,
+                    "agents": [*self.runtime.get("agents", []), pending],
+                    "lastRuntimeEvent": time.time(),
+                }
+                self.raw_agents[agent_id] = {
+                    "pane_id": pane_id,
+                    "workspace_id": workspace_id,
+                    **pending,
+                }
+                self.pending_agents[pane_id] = pending
+
+    def _stable_agent_id(self, pane_id: str) -> str:
+        identity = "|".join((self.session_name, self.device_id, pane_id))
+        return "agent_" + hashlib.sha256(identity.encode()).hexdigest()[:20]
+
+    def _start_agent(
+        self,
+        name: str,
+        provider: str,
+        pane_id: str,
+        args: list[str],
+    ) -> None:
+        try:
+            pinned_terminal_id = self._pane_terminal_id(pane_id)
+        except Exception:
+            pinned_terminal_id = None
+        deadline = time.monotonic() + 2
+        while True:
+            try:
+                self._herdr_request(
+                    "agent.start",
+                    {
+                        "name": name,
+                        "kind": provider,
+                        "pane_id": pane_id,
+                        "args": args,
+                    },
+                )
+                return
+            except BridgeError as error:
+                if (
+                    error.code != "agent_pane_busy"
+                    or time.monotonic() >= deadline
+                    or pinned_terminal_id is None
+                    or not self._pane_shell_still_initializing(
+                        pane_id, pinned_terminal_id
+                    )
+                ):
+                    raise
+                time.sleep(0.1)
+
+    def _pane_terminal_id(self, pane_id: str) -> str | None:
+        result = self._herdr_request("pane.get", {"pane_id": pane_id})
+        pane = result.get("pane")
+        terminal_id = pane.get("terminal_id") if isinstance(pane, dict) else None
+        return terminal_id if isinstance(terminal_id, str) else None
+
+    def _pane_shell_still_initializing(
+        self, pane_id: str, pinned_terminal_id: str
+    ) -> bool:
+        try:
+            if self._pane_terminal_id(pane_id) != pinned_terminal_id:
+                return False
+            result = self._herdr_request(
+                "pane.process_info", {"pane_id": pane_id}
+            )
+            process_info = result.get("process_info")
+            return self._process_info_shows_shell_initialization(process_info)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _process_info_shows_shell_initialization(process_info: Any) -> bool:
+        if not isinstance(process_info, dict):
+            return False
+        shell_pid = Bridge._exact_uint64(process_info.get("shell_pid"))
+        foreground_group = Bridge._exact_uint64(
+            process_info.get("foreground_process_group_id")
+        )
+        if shell_pid is None or foreground_group != shell_pid:
+            return False
+        processes = process_info.get("foreground_processes")
+        if not isinstance(processes, list):
+            return False
+        shell_names = {
+            "sh",
+            "bash",
+            "dash",
+            "zsh",
+            "fish",
+            "ksh",
+            "mksh",
+            "csh",
+            "tcsh",
+            "elvish",
+            "xonsh",
+            "nu",
+            "pwsh",
+            "powershell",
+            "cmd",
+        }
+        for process in processes:
+            if not isinstance(process, dict):
+                continue
+            process_pid = Bridge._exact_uint64(process.get("pid"))
+            if process_pid != shell_pid:
+                continue
+            candidates = []
+            name = process.get("name")
+            argv = process.get("argv")
+            if isinstance(name, str):
+                candidates.append(name)
+            if isinstance(argv, list) and argv and isinstance(argv[0], str):
+                candidates.append(argv[0])
+            for candidate in candidates:
+                normalized = candidate.replace("\\", "/").rsplit("/", 1)[-1]
+                normalized = normalized.lstrip("-").lower()
+                if normalized.endswith(".exe"):
+                    normalized = normalized[:-4]
+                if normalized in shell_names:
+                    return True
+        return False
+
+    @staticmethod
+    def _exact_uint64(value: Any) -> int | None:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            integer = value
+        elif isinstance(value, float) and value.is_integer():
+            integer = int(value)
+        else:
+            return None
+        return integer if 0 <= integer <= 18_446_744_073_709_551_615 else None
+
+    def _agent_display_title(
+        self,
+        raw: dict[str, Any],
+        provider: str,
+        tab_label: Any,
+    ) -> str:
+        custom_title = raw.get("title")
+        if (
+            isinstance(custom_title, str)
+            and custom_title.strip()
+            and not self._is_generic_agent_title(custom_title, provider)
+        ):
+            return custom_title.strip()
+        if (
+            isinstance(tab_label, str)
+            and tab_label.strip()
+            and not self._is_generic_agent_name(tab_label, provider)
+        ):
+            return tab_label.strip()
+        name = raw.get("name")
+        if (
+            isinstance(name, str)
+            and name.strip()
+            and not self._is_generic_agent_name(name, provider)
+        ):
+            return name.strip()
+        terminal_title = raw.get("terminal_title_stripped")
+        generic_titles = {
+            provider,
+            self._provider_label(provider).lower(),
+            str(name or "").strip().lower(),
+        }
+        if (
+            isinstance(terminal_title, str)
+            and terminal_title.strip()
+            and terminal_title.strip().lower() not in generic_titles
+        ):
+            return terminal_title.strip()
+        for fallback in (name, tab_label):
+            if isinstance(fallback, str) and fallback.strip():
+                return fallback.strip()
+        return self._provider_label(provider)
+
+    @staticmethod
+    def _is_generic_agent_name(value: str, provider: str) -> bool:
+        normalized = value.strip().lower()
+        if normalized == provider:
+            return True
+        prefix = provider + "-"
+        suffix = normalized[len(prefix) :] if normalized.startswith(prefix) else ""
+        return len(suffix) == 4 and all(character in "0123456789abcdef" for character in suffix)
+
+    def _is_generic_agent_title(self, value: str, provider: str) -> bool:
+        normalized = value.strip().lower()
+        return (
+            self._is_generic_agent_name(value, provider)
+            or normalized == self._provider_label(provider).lower()
+            or normalized.startswith("session initialization -")
+        )
 
     def _load_conversation(self, agent: dict[str, Any]) -> dict[str, Any]:
         provider = agent["provider"]
@@ -663,11 +1109,12 @@ class Bridge:
         }
 
     def _load_fallback(self, agent: dict[str, Any]) -> dict[str, Any]:
+        source = "visible" if agent.get("status") == "working" else "recent_unwrapped"
         result = self._herdr_request(
             "agent.read",
             {
                 "target": agent["paneId"],
-                "source": "recent_unwrapped",
+                "source": source,
                 "format": "text",
                 "strip_ansi": True,
                 "lines": 240,
@@ -889,11 +1336,14 @@ class Bridge:
         return result
 
     def _capabilities(self) -> dict[str, Any]:
+        availability = {
+            item.get("provider"): item.get("available") is True
+            for item in self.agent_catalog or []
+        }
         provider_capabilities = {}
         for provider in SUPPORTED_PROVIDERS:
-            executable = shutil.which(provider)
             provider_capabilities[provider] = {
-                "installed": executable is not None,
+                "installed": availability.get(provider, False),
                 "structuredConversation": provider in ("copilot", "claude", "codex"),
                 "streamingConversation": provider == "copilot",
                 "structuredQuestions": provider == "copilot",

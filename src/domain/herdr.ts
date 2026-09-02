@@ -1,11 +1,16 @@
 import { z } from 'zod';
 
-export const agentProviderSchema = z.enum([
+export const launchableAgentProviderSchema = z.enum([
   'copilot',
   'claude',
   'codex',
   'opencode',
-  'unknown',
+]);
+export type LaunchableAgentProvider = z.infer<typeof launchableAgentProviderSchema>;
+
+export const agentProviderSchema = z.union([
+  launchableAgentProviderSchema,
+  z.literal('unknown'),
 ]);
 export type AgentProvider = z.infer<typeof agentProviderSchema>;
 
@@ -29,6 +34,7 @@ export const agentCapabilitiesSchema = z.object({
 
 export const remoteAgentSchema = z.object({
   id: z.string(),
+  deviceId: z.string().optional(),
   provider: agentProviderSchema,
   providerSessionId: z.string().nullable().optional(),
   herdrSessionId: z.string(),
@@ -46,10 +52,21 @@ export type RemoteAgent = z.infer<typeof remoteAgentSchema>;
 
 export const workspaceSchema = z.object({
   id: z.string(),
+  deviceId: z.string().optional(),
   name: z.string(),
+  cwd: z.string().nullable().optional(),
+  paneCount: z.number().int().nonnegative().optional(),
   status: agentStatusSchema,
 });
 export type AgentWorkspace = z.infer<typeof workspaceSchema>;
+
+export const agentManifestSchema = z.object({
+  provider: launchableAgentProviderSchema,
+  available: z.boolean(),
+  aliases: z.array(z.string()).default([]),
+  unavailableReason: z.string().nullable().optional(),
+});
+export type AgentManifest = z.infer<typeof agentManifestSchema>;
 
 export const herdrConnectionStateSchema = z.enum([
   'disconnected',
@@ -65,15 +82,32 @@ export type HerdrConnectionState = z.infer<typeof herdrConnectionStateSchema>;
 
 export const runtimeStateSchema = z.object({
   connectionState: herdrConnectionStateSchema,
+  deviceId: z.string().optional(),
   herdrVersion: z.string().optional(),
   herdrProtocol: z.number().optional(),
   herdrSession: z.string().optional(),
   socketPath: z.string().optional(),
   workspaces: z.array(workspaceSchema),
   agents: z.array(remoteAgentSchema),
+  providers: z.array(agentManifestSchema).default([]),
   lastRuntimeEvent: z.number().optional(),
 });
 export type HerdrRuntimeState = z.infer<typeof runtimeStateSchema>;
+
+export const createAgentInputSchema = z.object({
+  provider: launchableAgentProviderSchema,
+  workspaceId: z.string().min(1),
+  bypassPermissions: z.boolean().default(true),
+});
+export type CreateAgentInput = z.infer<typeof createAgentInputSchema>;
+
+export const createAgentResultSchema = z.object({
+  paneId: z.string(),
+  agentId: z.string().nullable().optional(),
+  name: z.string(),
+  runtime: runtimeStateSchema,
+});
+export type CreateAgentResult = z.infer<typeof createAgentResultSchema>;
 
 export const humanOptionSchema = z.object({
   id: z.string(),
@@ -154,7 +188,7 @@ export const bridgeHelloSchema = z.object({
   type: z.literal('hello'),
   bridgeVersion: z.string(),
   herdrVersion: z.string(),
-  herdrProtocol: z.number(),
+  herdrProtocol: z.number().nullable(),
   capabilities: z.record(z.string(), z.unknown()),
   warning: z.string().optional(),
 });
@@ -186,6 +220,7 @@ export const EMPTY_RUNTIME: HerdrRuntimeState = {
   connectionState: 'disconnected',
   workspaces: [],
   agents: [],
+  providers: [],
 };
 
 export function providerLabel(provider: AgentProvider): string {

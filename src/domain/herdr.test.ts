@@ -3,6 +3,7 @@ import {
   bridgeHelloSchema,
   bridgeResponseSchema,
   conversationSchema,
+  createAgentResultSchema,
   runtimeStateSchema,
 } from '@/domain/herdr';
 
@@ -19,6 +20,16 @@ describe('Herdr mobile protocol', () => {
         futureField: 'ignored',
       }).herdrVersion,
     ).toBe('0.8.2');
+    expect(
+      bridgeHelloSchema.parse({
+        protocol: 1,
+        type: 'hello',
+        bridgeVersion: '0.1.0',
+        herdrVersion: 'unknown',
+        herdrProtocol: null,
+        capabilities: {},
+      }).herdrProtocol,
+    ).toBeNull();
   });
 
   it('parses success, error and unknown events', () => {
@@ -53,10 +64,21 @@ describe('Herdr mobile protocol', () => {
   it('parses runtime agents and semantic conversation items', () => {
     const runtime = runtimeStateSchema.parse({
       connectionState: 'connected',
-      workspaces: [{ id: 'w1', name: 'mobile', status: 'working' }],
+      deviceId: 'device-1',
+      workspaces: [
+        {
+          id: 'w1',
+          deviceId: 'device-1',
+          name: 'mobile',
+          cwd: '/work/mobile',
+          status: 'working',
+        },
+      ],
+      providers: [{ provider: 'copilot', available: true }],
       agents: [
         {
           id: 'a1',
+          deviceId: 'device-1',
           provider: 'copilot',
           herdrSessionId: 'default',
           workspaceId: 'w1',
@@ -70,6 +92,7 @@ describe('Herdr mobile protocol', () => {
       ],
     });
     expect(runtime.agents[0].provider).toBe('copilot');
+    expect(runtime.workspaces[0].cwd).toBe('/work/mobile');
 
     const conversation = conversationSchema.parse({
       agentId: 'a1',
@@ -88,5 +111,22 @@ describe('Herdr mobile protocol', () => {
       ],
     });
     expect(conversation.items).toHaveLength(3);
+  });
+
+  it('parses a created agent with its refreshed runtime', () => {
+    const result = createAgentResultSchema.parse({
+      paneId: 'p2',
+      agentId: 'agent-2',
+      name: 'codex',
+      runtime: {
+        connectionState: 'connected',
+        deviceId: 'device-1',
+        workspaces: [],
+        agents: [],
+        providers: [{ provider: 'codex', available: true }],
+      },
+    });
+
+    expect(result.runtime.providers[0].provider).toBe('codex');
   });
 });

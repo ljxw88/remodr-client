@@ -168,8 +168,9 @@ class SessionManager(
     val session = record.client.startSession()
     val command = try {
       session.exec(
-        "HERDR_SOCKET=\"\$HOME/.config/herdr/herdr.sock\" " +
-          "HERDR_SESSION=\"default\" python3 -u \"$remotePath\"",
+        "REMOTE_WORKSPACE_DEVICE_ID=${shellQuote(record.hostId)} " +
+          "HERDR_SOCKET=\"\$HOME/.config/herdr/herdr.sock\" " +
+          "HERDR_SESSION=\"default\" python3 -u ${shellQuote(remotePath)}",
       )
     } catch (error: Exception) {
       runCatching { session.close() }
@@ -544,6 +545,10 @@ class SessionManager(
       runCatching { server.close() }
       throw error
     }
+  }
+
+  private fun shellQuote(value: String): String {
+    return "'" + value.replace("'", "'\"'\"'") + "'"
   }
 
   private fun mapConnectError(error: Exception): Exception {
