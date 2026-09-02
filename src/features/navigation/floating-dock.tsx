@@ -6,6 +6,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -33,6 +34,7 @@ type DockMotion = {
   progress: Animated.Value;
   onScroll: (offsetY: number) => void;
   expand: () => void;
+  shouldReduceMotion: () => boolean;
 };
 
 const DockMotionContext = createContext<DockMotion | null>(null);
@@ -102,6 +104,7 @@ export function DockMotionProvider({ children }: PropsWithChildren) {
     },
     [setCollapsed],
   );
+  const shouldReduceMotion = useCallback(() => reduceMotion.current, []);
 
   useEffect(() => {
     expand();
@@ -121,13 +124,71 @@ export function DockMotionProvider({ children }: PropsWithChildren) {
   }, []);
 
   const value = useMemo(
-    () => ({ progress, onScroll, expand }),
-    [expand, onScroll, progress],
+    () => ({ progress, onScroll, expand, shouldReduceMotion }),
+    [expand, onScroll, progress, shouldReduceMotion],
   );
   return (
     <DockMotionContext.Provider value={value}>
       {children}
     </DockMotionContext.Provider>
+  );
+}
+
+export function AnimatedTabContent({ children }: PropsWithChildren) {
+  const motion = useContext(DockMotionContext);
+  if (!motion) {
+    throw new Error('AnimatedTabContent must be used inside DockMotionProvider');
+  }
+  const pathname = usePathname();
+  const tabIndex = pathname === '/servers' ? 1 : pathname === '/settings' ? 2 : 0;
+  const previousIndex = useRef(tabIndex);
+  const mounted = useRef(false);
+  const [opacity] = useState(() => new Animated.Value(1));
+  const [translateX] = useState(() => new Animated.Value(0));
+
+  useLayoutEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      previousIndex.current = tabIndex;
+      return;
+    }
+    if (motion.shouldReduceMotion()) {
+      opacity.setValue(1);
+      translateX.setValue(0);
+      previousIndex.current = tabIndex;
+      return;
+    }
+    const direction = tabIndex >= previousIndex.current ? 1 : -1;
+    previousIndex.current = tabIndex;
+    opacity.setValue(0.82);
+    translateX.setValue(direction * 12);
+    Animated.parallel([
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 180,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateX, {
+        toValue: 0,
+        duration: 210,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [motion, opacity, tabIndex, translateX]);
+
+  return (
+    <Animated.View
+      style={[
+        styles.content,
+        {
+          opacity,
+          transform: [{ translateX }],
+        },
+      ]}>
+      {children}
+    </Animated.View>
   );
 }
 
@@ -216,6 +277,7 @@ export function FloatingDock({ blurTarget }: FloatingDockProps) {
           active={pathname === '/'}
           icon={{ ios: 'bubble.left.and.bubble.right', android: 'forum', web: 'forum' }}
           progress={motion.progress}
+          reduceMotion={motion.shouldReduceMotion}
           onPress={motion.expand}
         />
         <DockTab
@@ -224,6 +286,7 @@ export function FloatingDock({ blurTarget }: FloatingDockProps) {
           active={pathname === '/servers'}
           icon={{ ios: 'desktopcomputer', android: 'computer', web: 'computer' }}
           progress={motion.progress}
+          reduceMotion={motion.shouldReduceMotion}
           onPress={motion.expand}
         />
         <DockTab
@@ -232,6 +295,7 @@ export function FloatingDock({ blurTarget }: FloatingDockProps) {
           active={pathname === '/settings'}
           icon={{ ios: 'gear', android: 'settings', web: 'settings' }}
           progress={motion.progress}
+          reduceMotion={motion.shouldReduceMotion}
           onPress={motion.expand}
         />
       </BlurView>
@@ -249,6 +313,7 @@ type DockTabProps = {
     web: 'forum' | 'computer' | 'settings';
   };
   progress: Animated.Value;
+  reduceMotion: () => boolean;
   onPress: () => void;
 };
 
@@ -258,9 +323,23 @@ function DockTab({
   active,
   icon,
   progress,
+  reduceMotion,
   onPress,
 }: DockTabProps) {
   const theme = useTheme();
+  const [focusProgress] = useState(() => new Animated.Value(active ? 1 : 0));
+  useEffect(() => {
+    if (reduceMotion()) {
+      focusProgress.setValue(active ? 1 : 0);
+      return;
+    }
+    Animated.timing(focusProgress, {
+      toValue: active ? 1 : 0,
+      duration: active ? 190 : 130,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [active, focusProgress, reduceMotion]);
   const iconScale = progress.interpolate({
     inputRange: [0, 1],
     outputRange: [1, 0.82],
@@ -273,6 +352,10 @@ function DockTab({
     inputRange: [0, 0.62, 1],
     outputRange: [1, 0, 0],
   });
+  const focusScale = focusProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.9, 1],
+  });
   return (
     <TabTrigger
       name={name}
@@ -282,17 +365,29 @@ function DockTab({
       style={({ pressed }) => [
         styles.tab,
         {
-          backgroundColor: active ? theme.accentSoft : 'transparent',
           opacity: pressed ? 0.68 : 1,
         },
       ]}>
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.focusIndicator,
+          {
+            backgroundColor: theme.accentSoft,
+            opacity: focusProgress,
+            transform: [{ scale: focusScale }],
+          },
+        ]}
+      />
       <Animated.View style={{ transform: [{ scale: iconScale }] }}>
-        <AppIcon
-          name={icon}
-          size={22}
-          tintColor={active ? theme.accent : theme.textMuted}
-          fallback="•"
-        />
+        <Animated.View style={{ transform: [{ scale: focusScale }] }}>
+          <AppIcon
+            name={icon}
+            size={22}
+            tintColor={active ? theme.accent : theme.textMuted}
+            fallback="•"
+          />
+        </Animated.View>
       </Animated.View>
       <Animated.Text
         numberOfLines={1}
@@ -320,6 +415,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 1,
     shadowRadius: 30,
   },
+  content: {
+    flex: 1,
+  },
   dock: {
     flex: 1,
     flexDirection: 'row',
@@ -333,9 +431,15 @@ const styles = StyleSheet.create({
   tab: {
     flex: 1,
     minWidth: 0,
+    position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 2,
+    borderRadius: Radius.control,
+    overflow: 'hidden',
+  },
+  focusIndicator: {
+    ...StyleSheet.absoluteFill,
     borderRadius: Radius.control,
   },
   label: {

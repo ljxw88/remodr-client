@@ -4,6 +4,7 @@ import { useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import {
+  AnimatedTabContent,
   DockMotionProvider,
   FloatingDock,
 } from '@/features/navigation/floating-dock';
@@ -17,7 +18,9 @@ export default function TabsLayout() {
     <DockMotionProvider>
       <Tabs style={[styles.tabs, { backgroundColor: theme.background }]}>
         <BlurTargetView ref={blurTarget} style={styles.content}>
-          <TabSlot style={styles.content} />
+          <AnimatedTabContent>
+            <TabSlot style={styles.content} />
+          </AnimatedTabContent>
         </BlurTargetView>
 
         <FloatingDock blurTarget={blurTarget} />

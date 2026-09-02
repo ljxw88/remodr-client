@@ -31,6 +31,9 @@ the normal user flow.
   downward scroll, animate to a narrower 54dp icon-only dock.
 - Restore the expanded dock when the user scrolls upward, returns to the top, or
   changes tabs.
+- Tab changes use a short directional fade/slide while the selected dock
+  capsule scales and fades between destinations. Keep the motion under 220ms
+  and disable it when reduced motion is enabled.
 - Blur only content beneath the dock. Android uses the SDK 31+ RenderNode blur
   path and a translucent fallback on older devices.
 - Scrollable regions use short, non-interactive top and bottom edge fades so
