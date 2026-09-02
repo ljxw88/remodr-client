@@ -1,26 +1,41 @@
+import { requireOptionalNativeModule } from 'expo';
 import { Platform } from 'react-native';
 
 import { parseRemoteError, RemoteOperationError } from '@/domain/errors';
 import type { ConnectRequest, RemoteClient } from '@/domain/remote';
 
 export type RemoteCoreNativeModule = typeof import('../../modules/remote-core').default;
+type RemoteCoreLoader = (name: string) => RemoteCoreNativeModule | null;
 
-export function getRemoteCoreNativeModule(): RemoteCoreNativeModule {
-  if (Platform.OS !== 'android') {
+export function getRemoteCoreNativeModule(
+  load: RemoteCoreLoader = (name) =>
+    requireOptionalNativeModule<RemoteCoreNativeModule>(name),
+  platform = Platform.OS,
+): RemoteCoreNativeModule {
+  if (platform !== 'android') {
     throw new RemoteOperationError({
       type: 'unknown',
       message: 'SSH connectivity is only available on Android.',
     });
   }
-  // Local Expo module autolinked as RemoteCore
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  return require('../../modules/remote-core').default as RemoteCoreNativeModule;
+  const nativeModule = load('RemoteCore');
+  if (!nativeModule) {
+    throw new RemoteOperationError({
+      type: 'unknown',
+      message:
+        'Remote features are missing from this app build. Rebuild and reinstall the Android development app.',
+    });
+  }
+  return nativeModule;
 }
 
 function wrap<T>(work: () => T): T {
   try {
     return work();
   } catch (error) {
+    if (error instanceof RemoteOperationError) {
+      throw error;
+    }
     throw new RemoteOperationError(parseRemoteError(error));
   }
 }
@@ -29,6 +44,9 @@ async function wrapAsync<T>(work: () => Promise<T>): Promise<T> {
   try {
     return await work();
   } catch (error) {
+    if (error instanceof RemoteOperationError) {
+      throw error;
+    }
     throw new RemoteOperationError(parseRemoteError(error));
   }
 }

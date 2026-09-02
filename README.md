@@ -30,6 +30,9 @@ npm install
 npx expo run:android
 ```
 
+This project contains the local `RemoteCore` Android module and cannot run in
+Expo Go. Rebuild and reinstall the development app after native module changes.
+
 ## Checks
 
 ```bash
