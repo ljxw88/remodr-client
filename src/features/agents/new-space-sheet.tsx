@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   KeyboardAvoidingView,
+  Keyboard,
   Modal,
   Platform,
   Pressable,
@@ -9,29 +10,37 @@ import {
   View,
 } from 'react-native';
 
+import { ThemedText } from '@/components/themed-text';
 import { AppButton } from '@/components/ui/app-button';
 import { AppIcon } from '@/components/ui/app-icon';
 import { TextField } from '@/components/ui/text-field';
-import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
 import type { CreateSpaceInput } from '@/domain/herdr';
+import { RemoteFolderPicker } from '@/features/files/remote-folder-picker';
 import { useDockContentInset } from '@/features/navigation/floating-dock';
 import { useTheme } from '@/hooks/use-theme';
 import { toUserMessage } from '@/utils/user-error';
 
 type Props = {
+  deviceId: string;
   deviceName: string;
   onClose: () => void;
   onCreate: (input: CreateSpaceInput) => Promise<void>;
 };
 
-export function NewSpaceSheet({ deviceName, onClose, onCreate }: Props) {
+export function NewSpaceSheet({
+  deviceId,
+  deviceName,
+  onClose,
+  onCreate,
+}: Readonly<Props>) {
   const theme = useTheme();
   const dockContentInset = useDockContentInset();
   const [label, setLabel] = useState('');
   const [cwd, setCwd] = useState('~/');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showFolderPicker, setShowFolderPicker] = useState(false);
 
   async function create() {
     if (!cwd.trim() || creating) {
@@ -48,13 +57,24 @@ export function NewSpaceSheet({ deviceName, onClose, onCreate }: Props) {
     }
   }
 
+  function requestClose() {
+    if (creating) {
+      return;
+    }
+    if (showFolderPicker) {
+      setShowFolderPicker(false);
+      return;
+    }
+    onClose();
+  }
+
   return (
     <Modal
       animationType="slide"
       transparent
       statusBarTranslucent
       visible
-      onRequestClose={creating ? undefined : onClose}>
+      onRequestClose={requestClose}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.overlay}>
@@ -65,7 +85,8 @@ export function NewSpaceSheet({ deviceName, onClose, onCreate }: Props) {
           onPress={onClose}
           style={styles.backdrop}
         />
-        <View
+        {!showFolderPicker ? (
+          <View
           style={[
             styles.sheet,
             {
@@ -86,7 +107,7 @@ export function NewSpaceSheet({ deviceName, onClose, onCreate }: Props) {
             <View style={styles.titleCopy}>
               <ThemedText type="heading">New space</ThemedText>
               <ThemedText type="caption" themeColor="textSecondary">
-                Create a Herdr workspace from a folder on this device.
+                Create a Herdr workspace from a folder.
               </ThemedText>
             </View>
             <Pressable
@@ -141,6 +162,30 @@ export function NewSpaceSheet({ deviceName, onClose, onCreate }: Props) {
             placeholder="~/Projects/my-app"
             autoCapitalize="none"
             autoCorrect={false}
+            rightAccessory={
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Browse remote folders"
+                disabled={creating}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  setShowFolderPicker(true);
+                }}
+                style={({ pressed }) => [
+                  styles.folderPickerButton,
+                  {
+                    backgroundColor: theme.accentSoft,
+                    opacity: controlOpacity(creating, pressed),
+                  },
+                ]}>
+                <AppIcon
+                  name={{ ios: 'folder', android: 'folder', web: 'folder' }}
+                  size={20}
+                  tintColor={theme.accent}
+                  fallback="□"
+                />
+              </Pressable>
+            }
           />
 
           {error ? (
@@ -155,10 +200,29 @@ export function NewSpaceSheet({ deviceName, onClose, onCreate }: Props) {
             onPress={() => void create()}
           />
           </ScrollView>
-        </View>
+          </View>
+        ) : (
+          <RemoteFolderPicker
+            deviceId={deviceId}
+            deviceName={deviceName}
+            initialPath={cwd}
+            onClose={() => setShowFolderPicker(false)}
+            onSelect={(path) => {
+              setCwd(path);
+              setShowFolderPicker(false);
+            }}
+          />
+        )}
       </KeyboardAvoidingView>
     </Modal>
   );
+}
+
+function controlOpacity(disabled: boolean, pressed: boolean): number {
+  if (disabled) {
+    return 0.4;
+  }
+  return pressed ? 0.68 : 1;
 }
 
 const styles = StyleSheet.create({
@@ -227,6 +291,13 @@ const styles = StyleSheet.create({
   deviceCopy: {
     flex: 1,
     gap: 2,
+  },
+  folderPickerButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 14,
   },
   pressed: {
     opacity: 0.6,

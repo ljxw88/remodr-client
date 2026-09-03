@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { StyleSheet, TextInput, View, type KeyboardTypeOptions, type TextInputProps } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -16,6 +16,7 @@ type Props = {
   autoCorrect?: boolean;
   autoComplete?: TextInputProps['autoComplete'];
   secureTextEntry?: boolean;
+  rightAccessory?: ReactNode;
 };
 
 export function TextField({
@@ -29,6 +30,7 @@ export function TextField({
   autoCorrect = false,
   autoComplete = 'off',
   secureTextEntry = false,
+  rightAccessory,
 }: Props) {
   const theme = useTheme();
   const [focused, setFocused] = useState(false);
@@ -38,32 +40,42 @@ export function TextField({
       <ThemedText type="label" themeColor="textMuted">
         {label}
       </ThemedText>
-      <TextInput
-        accessibilityLabel={label}
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={theme.placeholder}
-        selectionColor={theme.accent}
-        keyboardType={keyboardType}
-        autoCapitalize={autoCapitalize}
-        autoCorrect={autoCorrect}
-        autoComplete={autoComplete}
-        secureTextEntry={secureTextEntry}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
+      <View
         style={[
-          styles.input,
+          styles.inputFrame,
           {
-            color: theme.text,
             backgroundColor: theme.glassStrong,
             borderColor: error ? theme.danger : focused ? theme.accent : theme.glassBorder,
-            fontFamily: Fonts.regular,
             shadowColor: focused ? theme.accent : theme.glassShadow,
             elevation: focused ? 3 : 1,
           },
-        ]}
-      />
+        ]}>
+        <TextInput
+          accessibilityLabel={label}
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor={theme.placeholder}
+          selectionColor={theme.accent}
+          keyboardType={keyboardType}
+          autoCapitalize={autoCapitalize}
+          autoCorrect={autoCorrect}
+          autoComplete={autoComplete}
+          secureTextEntry={secureTextEntry}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          style={[
+            styles.input,
+            {
+              color: theme.text,
+              fontFamily: Fonts.regular,
+            },
+          ]}
+        />
+        {rightAccessory ? (
+          <View style={styles.rightAccessory}>{rightAccessory}</View>
+        ) : null}
+      </View>
       {error ? (
         <ThemedText
           accessibilityLiveRegion="polite"
@@ -80,15 +92,24 @@ const styles = StyleSheet.create({
   wrap: {
     gap: Spacing.one,
   },
-  input: {
+  inputFrame: {
     minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
     borderWidth: 1,
     borderRadius: Radius.control,
-    paddingHorizontal: Spacing.two,
-    fontSize: 16,
-    letterSpacing: -0.16,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.14,
     shadowRadius: 10,
+  },
+  input: {
+    flex: 1,
+    minHeight: 46,
+    paddingHorizontal: Spacing.two,
+    fontSize: 16,
+    letterSpacing: -0.16,
+  },
+  rightAccessory: {
+    marginRight: Spacing.half,
   },
 });
