@@ -23,7 +23,7 @@ import { GlassSurface } from '@/components/ui/glass-surface';
 import { Screen } from '@/components/ui/screen';
 import { ScrollEdgeFrame } from '@/components/ui/scroll-edge-frame';
 import { ThemedText } from '@/components/themed-text';
-import { Fonts, Radius, Spacing } from '@/constants/theme';
+import { Colors, Fonts, Radius, Spacing } from '@/constants/theme';
 import {
   providerLabel,
   statusLabel,
@@ -39,7 +39,9 @@ import {
   type ToolActivityGroup,
 } from '@/features/agents/conversation-display';
 import { useTheme } from '@/hooks/use-theme';
+import { isBridgeUnavailable } from '@/services/herdr-bridge-transport';
 import { herdrRepository } from '@/services/herdr-repository';
+import { toUserMessage } from '@/utils/user-error';
 
 export default function AgentConversationScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -48,7 +50,16 @@ export default function AgentConversationScreen() {
   const agentId = agent?.id;
   const agentStatus = agent?.status;
   const conversation = useAgentConversation(id ?? '');
+  // A cached runtime can name an agent well before its device transport is up,
+  // and a conversation fetched in that window throws. Following the owning
+  // device's connection gives the fetch a trigger to run again on.
+  const ownerDeviceId = herdrRepository.deviceIdForAgent(id ?? '');
+  const ownerConnection = ownerDeviceId
+    ? runtime.devices[ownerDeviceId]?.connection
+    : undefined;
   const [draft, setDraft] = useState('');
+  const [conversationError, setConversationError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
   const [sending, setSending] = useState(false);
   const listRef = useRef<FlatList<ConversationDisplayItem>>(null);
   const hasFollowedInitialContent = useRef(false);
@@ -90,9 +101,17 @@ export default function AgentConversationScreen() {
       return;
     }
     const refresh = () => {
-      void herdrRepository.loadConversation(agentId).catch((error) => {
-        console.warn('[CONVERSATION] Could not load conversation', error);
-      });
+      void herdrRepository
+        .loadConversation(agentId)
+        .then(() => setConversationError(null))
+        .catch((error) => {
+          console.warn('[CONVERSATION] Could not load conversation', error);
+          setConversationError(
+            isBridgeUnavailable(error)
+              ? 'Not connected to this agent’s device.'
+              : toUserMessage(error),
+          );
+        });
     };
     refresh();
     if (agentStatus === 'working') {
@@ -100,7 +119,13 @@ export default function AgentConversationScreen() {
       const timer = setInterval(refresh, interval);
       return () => clearInterval(timer);
     }
-  }, [agent?.capabilities.streamingConversation, agentId, agentStatus]);
+  }, [
+    agent?.capabilities.streamingConversation,
+    agentId,
+    agentStatus,
+    ownerConnection,
+    reloadToken,
+  ]);
 
   useEffect(() => {
     if (!latestItemMarker) {
@@ -176,7 +201,16 @@ export default function AgentConversationScreen() {
 
   return (
     <Screen style={styles.screen}>
-      <Stack.Screen options={{ title: agent.title }} />
+      <Stack.Screen
+        options={{
+          title: agent.title,
+          headerTitleStyle: {
+            fontSize: 15,
+            fontFamily: Fonts.semibold,
+            fontWeight: 600,
+          },
+        }}
+      />
       <BlurBackdropProvider>
         <KeyboardAvoidingView
         style={styles.flex}
@@ -237,9 +271,27 @@ export default function AgentConversationScreen() {
                 }
                 ListEmptyComponent={
                   <View style={styles.empty}>
-                    <ThemedText type="small" themeColor="textMuted">
-                      No conversation yet.
-                    </ThemedText>
+                    {conversationError ? (
+                      <>
+                        <ThemedText type="small" themeColor="textMuted">
+                          {conversationError}
+                        </ThemedText>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel="Retry loading conversation"
+                          onPress={() => setReloadToken((token) => token + 1)}>
+                          <ThemedText type="smallBold" style={styles.retry}>
+                            Try again
+                          </ThemedText>
+                        </Pressable>
+                      </>
+                    ) : conversation ? (
+                      <ThemedText type="small" themeColor="textMuted">
+                        No conversation yet.
+                      </ThemedText>
+                    ) : (
+                      <ActivityIndicator color={Colors.accent} />
+                    )}
                   </View>
                 }
               />
@@ -279,40 +331,46 @@ function AgentHeader({ agent }: { agent: RemoteAgent }) {
   return (
     <View style={[styles.context, { borderBottomColor: theme.border }]}>
       <View style={styles.contextCopy}>
-        <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1}>
+        <ThemedText
+          type="caption"
+          themeColor="textSecondary"
+          numberOfLines={1}
+          style={styles.pathText}>
           {agent.cwd ?? agent.workspaceName}
         </ThemedText>
-        <View style={styles.statusLine}>
-          <View
-            style={[
-              styles.statusDot,
-              {
-                backgroundColor: agent.status === 'idle' ? 'transparent' : statusColor,
-                borderColor: statusColor,
-              },
-            ]}
-          />
-          <ThemedText type="caption" style={{ color: statusColor }}>
-            {statusLabel(agent.status)}
-          </ThemedText>
+        <View style={styles.rightGroup}>
+          <View style={styles.statusLine}>
+            <View
+              style={[
+                styles.statusDot,
+                {
+                  backgroundColor: agent.status === 'idle' ? 'transparent' : statusColor,
+                  borderColor: statusColor,
+                },
+              ]}
+            />
+            <ThemedText type="caption" style={{ color: statusColor }}>
+              {statusLabel(agent.status)}
+            </ThemedText>
+          </View>
+          {agent.status === 'working' ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Stop current agent operation"
+              onPress={() => {
+                void herdrRepository.interrupt(agent.id).catch((error) => {
+                  Alert.alert(
+                    'Could not stop agent',
+                    error instanceof Error ? error.message : 'The agent could not be stopped.',
+                  );
+                });
+              }}
+              style={({ pressed }) => [styles.stop, { borderColor: theme.border }, pressed && styles.pressed]}>
+              <ThemedText type="caption" style={styles.stopText}>Stop</ThemedText>
+            </Pressable>
+          ) : null}
         </View>
       </View>
-      {agent.status === 'working' ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Stop current agent operation"
-          onPress={() => {
-            void herdrRepository.interrupt(agent.id).catch((error) => {
-              Alert.alert(
-                'Could not stop agent',
-                error instanceof Error ? error.message : 'The agent could not be stopped.',
-              );
-            });
-          }}
-          style={({ pressed }) => [styles.stop, { borderColor: theme.border }, pressed && styles.pressed]}>
-          <ThemedText type="smallBold">Stop</ThemedText>
-        </Pressable>
-      ) : null}
     </View>
   );
 }
@@ -776,18 +834,33 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   context: {
-    minHeight: 52,
+    minHeight: 28,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.one,
     paddingHorizontal: Spacing.two + Spacing.half,
+    paddingVertical: 2,
     borderBottomWidth: 0,
   },
   contextCopy: {
     flex: 1,
-    gap: 3,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+  },
+  rightGroup: {
+    flexShrink: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one + Spacing.half,
+  },
+  pathText: {
+    flexShrink: 1,
   },
   statusLine: {
+    flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
@@ -799,11 +872,15 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   stop: {
-    minHeight: 34,
+    minHeight: 24,
     justifyContent: 'center',
-    paddingHorizontal: Spacing.two,
+    paddingHorizontal: Spacing.one + Spacing.half,
     borderWidth: 1,
     borderRadius: Radius.pill,
+  },
+  stopText: {
+    fontFamily: Fonts.semibold,
+    fontWeight: 600,
   },
   banner: {
     minHeight: 40,
@@ -961,6 +1038,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: Radius.pill,
+  },
+  retry: {
+    color: Colors.accent,
   },
   empty: {
     alignItems: 'center',

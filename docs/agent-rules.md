@@ -14,6 +14,10 @@
     effects with Skia following [`skia-effects.md`](skia-effects.md).
 11. Verify visual work from device screenshots, not from reasoning. Shader
     mistakes render plausibly rather than failing.
-12. Use `GlassSurface` or `GlassRim` for any frosted surface. Never hand-roll a
-    translucent fill plus a border, and never nest a `BlurView` inside the blur
-    target it samples — that is a native stack overflow, not a layout bug.
+12. Use `GlassSurface` or the `glassRim` style for any frosted surface. Never
+    hand-roll a translucent fill plus a border, and never nest a `BlurView`
+    inside the blur target it samples — that is a native stack overflow, not a
+    layout bug.
+13. Surface a failed fetch and give it a way to run again. An empty list that
+    cannot tell "nothing here" from "the request failed" strands the user, and
+    an effect keyed only on an id never retries once the transport comes up.

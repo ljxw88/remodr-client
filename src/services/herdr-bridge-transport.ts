@@ -18,6 +18,20 @@ export class HerdrBridgeRequestError extends Error {
   }
 }
 
+/**
+ * True when a request failed because the device's bridge is not up.
+ *
+ * The native module wraps its own rejections, so the same condition arrives
+ * either as our typed error or as an Expo "Call to function ... has been
+ * rejected" string. Callers care about the condition, not which layer noticed.
+ */
+export function isBridgeUnavailable(error: unknown): boolean {
+  if (error instanceof HerdrBridgeRequestError) {
+    return error.code === 'BRIDGE_NOT_STARTED';
+  }
+  return error instanceof Error && /bridge is not running/i.test(error.message);
+}
+
 export class HerdrBridgeTransport {
   private bridgeId: string | null = null;
   private subscription: { remove(): void } | null = null;

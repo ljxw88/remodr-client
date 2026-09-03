@@ -115,6 +115,18 @@ export class HerdrRepository {
   getConversation = (agentId: string): AgentConversation | null =>
     this.conversations.get(agentId) ?? null;
 
+  /**
+   * The device that owns an agent, or null when nothing has claimed it yet.
+   *
+   * Agent IDs are hashed from session, device, and pane, so ownership cannot be
+   * parsed back out and has to be read from the index. Screens need this to
+   * follow the owning device's connection: a cached runtime can name an agent
+   * long before its transport is up, and a conversation fetched in that window
+   * fails.
+   */
+  deviceIdForAgent = (agentId: string): string | null =>
+    this.agentIndex.get(agentId) ?? null;
+
   /** Pure view state. Selecting a device never reconnects anything. */
   selectDevice(deviceId: string) {
     if (this.selectedDeviceId === deviceId) {
