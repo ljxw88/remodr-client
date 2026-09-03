@@ -110,32 +110,31 @@ export function LiquidGlassButton({ label, disabled = false, onPress }: Props) {
             />
           </Circle>
 
-          {/* Rim light drifting around the pill, forever. */}
-          <Group
-            transform={strokeTransform}
-            origin={{ x: size.width / 2, y: size.height / 2 }}>
-            <RoundedRect
-              x={STROKE / 2}
-              y={STROKE / 2}
-              width={size.width - STROKE}
-              height={size.height - STROKE}
-              r={(size.height - STROKE) / 2}
-              style="stroke"
-              strokeWidth={STROKE}>
-              <SweepGradient
-                c={{ x: size.width / 2, y: size.height / 2 }}
-                colors={[
-                  'rgba(255,255,255,0.55)',
-                  'rgba(108,124,255,1)',
-                  'rgba(120,230,255,0.9)',
-                  'rgba(255,255,255,0.75)',
-                  'rgba(255,198,92,0.85)',
-                  'rgba(255,255,255,0.55)',
-                ]}
-              />
-              <BlurMask blur={0.6} style="solid" />
-            </RoundedRect>
-          </Group>
+          {/* Rim light. The pill is static; only the gradient rotates, so the
+              colour travels along the border instead of spinning the shape. */}
+          <RoundedRect
+            x={STROKE / 2}
+            y={STROKE / 2}
+            width={size.width - STROKE}
+            height={size.height - STROKE}
+            r={(size.height - STROKE) / 2}
+            style="stroke"
+            strokeWidth={STROKE}>
+            <SweepGradient
+              c={{ x: size.width / 2, y: size.height / 2 }}
+              origin={{ x: size.width / 2, y: size.height / 2 }}
+              transform={strokeTransform}
+              colors={[
+                'rgba(255,255,255,0.55)',
+                'rgba(108,124,255,1)',
+                'rgba(120,230,255,0.9)',
+                'rgba(255,255,255,0.75)',
+                'rgba(255,198,92,0.85)',
+                'rgba(255,255,255,0.55)',
+              ]}
+            />
+            <BlurMask blur={0.6} style="solid" />
+          </RoundedRect>
         </Canvas>
       ) : null}
 
