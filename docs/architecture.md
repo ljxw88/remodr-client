@@ -19,3 +19,7 @@ React Native must not know how SSH works internally. UI talks to `RemoteClient`,
 
 Agent conversations are normalized by the Herdr bridge. Terminal rendering is
 intentionally omitted from the mobile product surface.
+
+Assistant replies are rendered as native markdown. See
+[`markdown-rendering.md`](markdown-rendering.md) and
+[ADR 009](adr/009-assistant-markdown-rendering.md).

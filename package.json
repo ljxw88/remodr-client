@@ -7,6 +7,7 @@
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~57.0.19",
     "expo-blur": "~57.0.2",
+    "expo-clipboard": "~57.0.1",
     "expo-constants": "~57.0.17",
     "expo-dev-client": "~57.0.18",
     "expo-font": "~57.0.3",
@@ -17,13 +18,17 @@
     "expo-status-bar": "~57.0.1",
     "expo-symbols": "~57.0.2",
     "expo-system-ui": "~57.0.3",
+    "prism-react-renderer": "^2.4.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
     "react-native-gesture-handler": "~2.32.0",
+    "react-native-marked": "^8.2.0",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
+    "react-native-svg": "15.15.4",
     "react-native-web": "~0.21.0",
+    "remend": "^1.3.1",
     "zod": "^4.5.4"
   },
   "devDependencies": {
@@ -49,7 +54,17 @@
     "preset": "jest-expo",
     "testMatch": [
       "<rootDir>/src/**/*.test.ts"
-    ]
+    ],
+    "transformIgnorePatterns": [
+      "/node_modules/(?!(.pnpm|react-native|@react-native|@react-native-community|expo|@expo|@expo-google-fonts|react-navigation|@react-navigation|@sentry/react-native|native-base|standard-navigation|marked|remend|github-slugger|html-entities|@jsamr|svg-parser))",
+      "/node_modules/react-native-reanimated/plugin/",
+      "/node_modules/@react-native/babel-preset/"
+    ],
+    "moduleNameMapper": {
+      "^@react-native-async-storage/async-storage$": "<rootDir>/node_modules/@react-native-async-storage/async-storage/jest/async-storage-mock.js",
+      "^remend$": "<rootDir>/node_modules/remend/dist/index.js",
+      "\\.css$": "<rootDir>/jest/style-mock.js"
+    }
   },
   "private": true
 }

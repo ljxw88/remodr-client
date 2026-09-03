@@ -13,7 +13,7 @@ import {
   View,
 } from 'react-native';
 
-import { SafeMarkdown } from '@/components/safe-markdown';
+import { MarkdownMessage } from '@/components/markdown/markdown-message';
 import { AppButton } from '@/components/ui/app-button';
 import { AppIcon } from '@/components/ui/app-icon';
 import { Screen } from '@/components/ui/screen';
@@ -351,7 +351,7 @@ function ConversationRow({
   if (item.kind === 'assistant_message') {
     return (
       <View style={styles.assistantMessage}>
-        <SafeMarkdown>{item.markdown}</SafeMarkdown>
+        <MarkdownMessage>{item.markdown}</MarkdownMessage>
       </View>
     );
   }
