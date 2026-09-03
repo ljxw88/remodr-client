@@ -19,7 +19,8 @@ import { Radius, Spacing } from '@/constants/theme';
 import { type AgentWorkspace } from '@/domain/herdr';
 import { connectAgentRuntime } from '@/features/agents/connect-runtime';
 import { LiquidGlassButton } from '@/features/agents/liquid-glass-button';
-import { GlassRim, GlassSurface } from '@/components/ui/glass-surface';
+import { glassRim, GlassSurface } from '@/components/ui/glass-surface';
+import { LiquidGlassRim } from '@/components/ui/liquid-glass-rim';
 import {
   AgentWorkspaceList,
   compareAgents,
@@ -208,12 +209,12 @@ export default function AgentsScreen() {
             onPress={() => setShowNewSpace(true)}
             style={({ pressed }) => [
               styles.newSpace,
+              glassRim(),
               {
                 backgroundColor: theme.glassStrong,
                 opacity: canCreateSpace ? (pressed ? 0.72 : 1) : 0.42,
               },
             ]}>
-            <GlassRim radius={Radius.pill} />
             <AppIcon
               name={{ ios: 'plus', android: 'add', web: 'add' }}
               size={17}
@@ -230,7 +231,6 @@ export default function AgentsScreen() {
             styles.connection,
             { backgroundColor: connectionBackground, borderColor: connectionColor },
           ]}>
-          <GlassRim radius={Radius.pill} color="transparent" />
           <View
             style={[
               styles.connectionDot,
@@ -503,21 +503,26 @@ function FilterChip({
       onPress={onPress}
       style={({ pressed }) => [
         styles.filterChip,
+        glassRim(selected ? theme.accent : undefined),
         {
           backgroundColor: selected ? theme.accentSoft : theme.backgroundElement,
           opacity: disabled ? 0.5 : pressed ? 0.72 : 1,
         },
       ]}>
-      <GlassRim radius={Radius.pill} color={selected ? theme.accent : undefined} />
-      {statusColor ? (
-        <View style={[styles.deviceDot, { backgroundColor: statusColor }]} />
-      ) : null}
-      <ThemedText
-        type="caption"
-        numberOfLines={1}
-        style={{ color: selected ? theme.accent : theme.textSecondary }}>
-        {label}
-      </ThemedText>
+      {/* Selection quotes the New agent button: the same iridescent rim and
+          frosted body, drawn over the accent tint. */}
+      {selected ? <LiquidGlassRim active={!disabled} /> : null}
+      <View style={styles.filterChipContent}>
+        {statusColor ? (
+          <View style={[styles.deviceDot, { backgroundColor: statusColor }]} />
+        ) : null}
+        <ThemedText
+          type="caption"
+          numberOfLines={1}
+          style={{ color: selected ? theme.accent : theme.textSecondary }}>
+          {label}
+        </ThemedText>
+      </View>
     </Pressable>
   );
 }
@@ -597,14 +602,24 @@ const styles = StyleSheet.create({
     gap: Spacing.one,
     paddingRight: Spacing.two,
   },
+  /**
+   * Padding lives on the content, not here. The selected chip lays a Skia
+   * canvas over this box with `position: absolute`, and Yoga insets absolute
+   * children by their parent's padding — padding here would pull the rim
+   * inside the pill instead of tracing its edge.
+   */
   filterChip: {
     minHeight: 38,
     maxWidth: 190,
+    justifyContent: 'center',
+    borderRadius: Radius.pill,
+    overflow: 'hidden',
+  },
+  filterChipContent: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.half,
     paddingHorizontal: Spacing.one + Spacing.half,
-    borderRadius: Radius.pill,
   },
   deviceDot: {
     width: 6,

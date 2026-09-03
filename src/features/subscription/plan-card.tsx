@@ -197,10 +197,6 @@ const styles = StyleSheet.create({
     borderRadius: Radius.control,
     padding: Spacing.two,
     gap: Spacing.one + Spacing.half,
-    elevation: 3,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 1,
-    shadowRadius: 18,
   },
   header: {
     flexDirection: 'row',

@@ -46,8 +46,11 @@ export function TextField({
           {
             backgroundColor: theme.glassStrong,
             borderColor: error ? theme.danger : focused ? theme.accent : theme.glassBorder,
-            shadowColor: focused ? theme.accent : theme.glassShadow,
-            elevation: focused ? 3 : 1,
+            borderTopColor: error
+              ? theme.danger
+              : focused
+                ? theme.accent
+                : theme.glassHighlight,
           },
         ]}>
         <TextInput
@@ -98,9 +101,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderRadius: Radius.control,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.14,
-    shadowRadius: 10,
   },
   input: {
     flex: 1,

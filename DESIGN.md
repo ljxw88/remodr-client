@@ -140,11 +140,20 @@ All of them go through `GlassSurface`, or `GlassRim` when a `Pressable` needs
 the material without an extra layout node. Do not hand-roll a translucent fill
 plus a border; see [`COLOR.md`](COLOR.md) for the tokens.
 
-- Use a 24dp radius, a hairline translucent rim, and a specular top edge.
-- The rim and highlight are drawn as overlays, not as `borderWidth`, so they
-  never eat into a caller's padding and are not washed out under a blur tint.
-- The highlight is clipped to the corner radius. Unclipped it runs straight
-  past the corners of a pill and floats over the canvas as a detached line.
+- Use a 24dp radius, a hairline translucent rim, and a brighter `borderTopColor`
+  standing in for light catching the upper curve.
+- **Glass casts no shadow.** Android draws a view's shadow behind the view; an
+  opaque fill hid it, a translucent one does not, so the shadow shows straight
+  through the glass as a dark band inside its own edges. Separation comes from
+  the rim and the fill. This applies to `elevation` too, which draws a shadow
+  of its own.
+- Draw the rim as a real border, not an absolutely positioned overlay. Yoga
+  lays absolute children out against the parent's *padding* box rather than its
+  border box, so an overlay inside a padded surface traces the content instead
+  of the edge — a visible box floating inside the glass.
+- The same rule applies to any absolute child, including a Skia canvas: keep
+  padding off the positioned parent and put it on an inner content view, the
+  way `LiquidGlassButton` does.
 - Two families, chosen by what is behind the surface:
   - **Panel** — sits on the canvas. Fill and rim only, no blur, because there
     is nothing behind it but the gradient.

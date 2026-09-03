@@ -944,11 +944,6 @@ const styles = StyleSheet.create({
     paddingLeft: Spacing.two,
     paddingRight: 6,
     paddingVertical: 6,
-    elevation: 8,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.18,
-    shadowRadius: 24,
   },
   input: {
     flex: 1,

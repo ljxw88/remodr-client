@@ -168,9 +168,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     letterSpacing: 0.7,
   },
-  workspaceCard: {
-    elevation: 2,
-  },
+  workspaceCard: {},
   agent: {
     minHeight: 68,
     flexDirection: 'row',

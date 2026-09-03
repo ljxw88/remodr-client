@@ -103,6 +103,12 @@ export const GlassMaterial = {
   `systemNNNMaterialDark` value. Their alpha multipliers are listed in
   `expo-blur`'s `TintStyle.kt`; `ultraThin` is 0.55, `thin` 0.70, `dark` 0.69.
 
+Glass surfaces deliberately carry no `elevation` and no shadow. Android draws
+a shadow behind the view, and a translucent fill lets it through as a dark
+band inside the surface's own edges — the effect looks like a second rectangle
+floating in the glass. If a surface needs to feel lifted, raise its fill or its
+rim rather than adding a shadow back.
+
 `Colors.chrome` is separate again. Sheets and menus render in their own window
 and cannot blur the app behind them, so that one is opaque — tinted toward the
 canvas indigo so it still looks related.

@@ -70,6 +70,12 @@ the rows it softens, so it cannot be a sibling of the content it would blur.
 On Android `intensity` sets the tint alpha *and* the blur radius, so the two
 cannot be tuned independently without `blurReductionFactor`.
 
+Translucent fills unmask anything drawn behind them. Two long-standing details
+only became visible once the fills stopped being opaque: every surface's drop
+shadow, which Android draws behind the view and which now reads as a dark band
+inside the glass, and any absolutely positioned overlay inside a padded
+surface, which Yoga insets by that padding. Both had been there all along.
+
 ## Rules
 
 - Use `GlassSurface` or `GlassRim`. Do not hand-roll a translucent fill plus a
@@ -80,3 +86,6 @@ cannot be tuned independently without `blurReductionFactor`.
   blur tint and do not consume a caller's padding.
 - Clip the specular highlight to the corner radius.
 - Blur only where something is behind the surface worth blurring.
+- Give glass no `elevation` and no shadow. It shows through.
+- Keep padding off any view that has absolutely positioned children, including
+  Skia canvases; put it on an inner content view instead.

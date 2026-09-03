@@ -187,9 +187,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.7,
     paddingHorizontal: Spacing.half,
   },
-  card: {
-    elevation: 2,
-  },
+  card: {},
   row: {
     minHeight: 60,
     flexDirection: 'row',

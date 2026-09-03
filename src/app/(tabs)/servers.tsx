@@ -191,7 +191,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.one,
     paddingHorizontal: Spacing.two,
-    elevation: 2,
   },
   searchInput: {
     flex: 1,

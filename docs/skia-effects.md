@@ -162,3 +162,16 @@ looking, not by thinking harder.
 Watch logcat for `ReactNativeJS` errors while iterating: a failed SkSL compile
 throws at `Skia.RuntimeEffect.Make`, which returns `null` rather than raising a
 useful message on its own.
+
+## Sizing a canvas
+
+Measure a plain `View` wrapper, not the `Canvas`. Skia's `Canvas` accepts
+`onLayout` but ignores it under Fabric, where it is deprecated in favour of
+`onSize`. A canvas that never learns its size renders nothing, which looks
+identical to a shader that compiled but drew nothing.
+
+A canvas laid over a control with `position: absolute` is inset by that
+control's padding, because Yoga positions absolute children against the
+parent's padding box. Keep padding on an inner content view so the canvas can
+trace the control's actual edge — `LiquidGlassButton` and `LiquidGlassRim`
+both do this.
