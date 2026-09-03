@@ -31,3 +31,6 @@ Shader-backed visual effects use Skia. See
 Every frosted surface goes through one component, `GlassSurface`. See
 [`COLOR.md`](../COLOR.md) and
 [ADR 012](adr/012-frosted-glass-material.md).
+
+Bottom sheets are hand-rolled on React Native's `Modal` rather than taken from
+a library. See [ADR 013](adr/013-hand-rolled-bottom-sheets.md).
