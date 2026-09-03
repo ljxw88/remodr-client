@@ -138,15 +138,18 @@ logs. Do not add marketing subtitles to mobile headers.
 
 All of them go through `SheetModal` and `SheetPanel`.
 
-- The scrim fades, it never travels. `animationType="slide"` moves the whole
-  modal window, dragging the scrim up from the bottom edge as a grey rectangle;
-  a scrim is meant to darken in place, and when it moves the effect reads as a
-  sheet of paper sliding over the screen rather than the app dimming behind a
-  panel.
-- The panel does the moving, and only a little. A short rise gives it direction
-  without restating the full height of the screen.
-- Sheets render in their own window and cannot blur the app behind them, so
-  they use the opaque `chrome` surface rather than glass.
+- The panel slides up from the bottom edge; the scrim only darkens.
+  `animationType="slide"` cannot express that — it moves the whole modal
+  window, dragging the scrim up as a grey rectangle, which reads as a sheet of
+  paper sliding over the screen rather than the app dimming behind a panel.
+  The window fades and the panel animates its own travel instead.
+- The panel travels its measured height, so a short sheet and a full-height one
+  both start just off screen and arrive together, and it stays hidden until
+  that measurement lands.
+- Sheets are the one opaque surface. They render in their own window, so no
+  blur can reach what sits behind them, and a translucent panel just ghosts the
+  list's text through its own — which reads as a rendering fault rather than as
+  glass. They join the material family through the rim and the tint instead.
 
 ### Elevated surfaces
 
