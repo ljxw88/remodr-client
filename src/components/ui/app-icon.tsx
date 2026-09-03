@@ -1,6 +1,8 @@
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Text } from 'react-native';
 
+export type AppIconName = SymbolViewProps['name'];
+
 type Props = Pick<SymbolViewProps, 'name' | 'size' | 'tintColor'> & {
   fallback?: string;
 };

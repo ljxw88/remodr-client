@@ -1,6 +1,6 @@
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, Switch, View } from 'react-native';
 
 import { AppIcon } from '@/components/ui/app-icon';
 import { AppButton } from '@/components/ui/app-button';
@@ -8,10 +8,12 @@ import { Screen } from '@/components/ui/screen';
 import { ScrollEdgeFrame } from '@/components/ui/scroll-edge-frame';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
+import { PlanCard } from '@/features/subscription/plan-card';
 import {
   useDockContentInset,
   useDockScrollHandler,
 } from '@/features/navigation/floating-dock';
+import { useAppSettings } from '@/hooks/use-app-settings';
 import { useTheme } from '@/hooks/use-theme';
 
 type SettingRowProps = {
@@ -20,9 +22,10 @@ type SettingRowProps = {
       | 'key'
       | 'checkmark.shield'
       | 'info.circle'
-      | 'stethoscope';
-    android: 'key' | 'security' | 'info' | 'troubleshoot';
-    web: 'key' | 'security' | 'info' | 'troubleshoot';
+      | 'stethoscope'
+      | 'arrow.left.and.right';
+    android: 'key' | 'security' | 'info' | 'troubleshoot' | 'swap_horiz';
+    web: 'key' | 'security' | 'info' | 'troubleshoot' | 'swap_horiz';
   };
   label: string;
   value: string;
@@ -32,6 +35,7 @@ export default function SettingsScreen() {
   const version = Constants.expoConfig?.version ?? '1.0.0';
   const onDockScroll = useDockScrollHandler();
   const dockContentInset = useDockContentInset();
+  const { marqueeEnabled, setMarqueeEnabled } = useAppSettings();
 
   return (
     <Screen includeTopSafeArea>
@@ -42,6 +46,15 @@ export default function SettingsScreen() {
             scrollEventThrottle={16}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={[styles.content, { paddingBottom: dockContentInset }]}>
+            {__DEV__ ? (
+              <View style={styles.group}>
+                <ThemedText type="label" themeColor="textMuted" style={styles.groupTitle}>
+                  PLAN PREVIEW
+                </ThemedText>
+                <PlanCard />
+              </View>
+            ) : null}
+
             <SettingsGroup title="Security">
               <SettingRow
                 icon={{ ios: 'key', android: 'key', web: 'key' }}
@@ -66,6 +79,13 @@ export default function SettingsScreen() {
 
             <SettingsGroup title="Developer">
               <View>
+                <SettingSwitchRow
+                  icon={{ ios: 'arrow.left.and.right', android: 'swap_horiz', web: 'swap_horiz' }}
+                  label="MarqueeText animation"
+                  value={marqueeEnabled}
+                  onValueChange={(enabled) => void setMarqueeEnabled(enabled)}
+                />
+                <SettingDivider />
                 <SettingRow
                   icon={{ ios: 'stethoscope', android: 'troubleshoot', web: 'troubleshoot' }}
                   label="Diagnostics"
@@ -80,6 +100,35 @@ export default function SettingsScreen() {
         )}
       </ScrollEdgeFrame>
     </Screen>
+  );
+}
+
+function SettingSwitchRow({
+  icon,
+  label,
+  value,
+  onValueChange,
+}: {
+  icon: SettingRowProps['icon'];
+  label: string;
+  value: boolean;
+  onValueChange: (val: boolean) => void;
+}) {
+  const theme = useTheme();
+  return (
+    <View style={styles.row}>
+      <View style={[styles.iconFrame, { backgroundColor: theme.accentSoft }]}>
+        <AppIcon name={icon} size={20} tintColor={theme.accent} fallback="↔" />
+      </View>
+      <ThemedText type="small" style={styles.rowLabel}>
+        {label}
+      </ThemedText>
+      <Switch
+        value={value}
+        onValueChange={onValueChange}
+        trackColor={{ false: theme.border, true: theme.accent }}
+      />
+    </View>
   );
 }
 
