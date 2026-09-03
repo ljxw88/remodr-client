@@ -89,3 +89,6 @@ surface, which Yoga insets by that padding. Both had been there all along.
 - Give glass no `elevation` and no shadow. It shows through.
 - Keep padding off any view that has absolutely positioned children, including
   Skia canvases; put it on an inner content view instead.
+- Offset a duplicated canvas by its distance from the window top, so it
+  continues the gradient instead of restarting it.
+- Never put `onLayout` on a `BlurTargetView`; measure from a child.

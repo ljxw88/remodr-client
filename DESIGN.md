@@ -172,6 +172,17 @@ The blur can only see inside its target, so `BlurBackdropTarget` renders its
 own copy of the canvas gradient. With the gradient outside, frosted chrome
 blurs transparent pixels and reads as a dead grey slab.
 
+That copy is shifted up by however far the target sits below the window top,
+so it *continues* the canvas rather than restarting it. A target mounted under
+a navigation header would otherwise jump back to the gradient's brightest
+colour at the header's lower edge, leaving a band across the top of the screen.
+
+Never give a `BlurTargetView` an `onLayout` prop. Its descendants then stop
+receiving layout events entirely, which silently starves anything that sizes
+itself that way — the Skia button simply renders nothing. Measure from a child
+instead; the target's ref is a native instance without `measureInWindow`
+anyway.
+
 ### Status
 
 - Working: violet
