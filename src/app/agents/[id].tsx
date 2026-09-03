@@ -502,31 +502,12 @@ function ToolActivityGroupRow({ group }: { group: ToolActivityGroup }) {
         styles.toolGroup,
         { backgroundColor: theme.backgroundElement, borderColor: theme.border },
       ]}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ expanded }}
-        onPress={() => setExpanded((current) => !current)}
-        style={({ pressed }) => [styles.toolSummary, pressed && styles.pressed]}>
-        <AppIcon
-          name={{ ios: 'hammer', android: 'build', web: 'build' }}
-          size={16}
-          tintColor={theme.textMuted}
-          fallback="•"
+      {!expanded ? (
+        <ToolGroupToggle
+          group={group}
+          onPress={() => setExpanded(true)}
         />
-        <ThemedText type="smallBold" style={styles.toolSummaryLabel}>
-          {toolActivitySummary(group)}
-        </ThemedText>
-        <AppIcon
-          name={{
-            ios: expanded ? 'chevron.up' : 'chevron.right',
-            android: expanded ? 'expand_less' : 'chevron_right',
-            web: expanded ? 'expand_less' : 'chevron_right',
-          }}
-          size={16}
-          tintColor={theme.textMuted}
-          fallback={expanded ? '⌃' : '›'}
-        />
-      </Pressable>
+      ) : null}
       {expanded ? (
         <View
           style={[
@@ -541,13 +522,10 @@ function ToolActivityGroupRow({ group }: { group: ToolActivityGroup }) {
             {group.items.map((item) => (
               <ToolActivityRow key={item.id} item={item} />
             ))}
-            <ToolCollapseButton
-              count={group.items.length}
-              onPress={() => setExpanded(false)}
-            />
           </ScrollView>
-          <ToolCollapseButton
-            count={group.items.length}
+          <ToolGroupToggle
+            group={group}
+            expanded
             floating
             onPress={() => setExpanded(false)}
           />
@@ -557,12 +535,14 @@ function ToolActivityGroupRow({ group }: { group: ToolActivityGroup }) {
   );
 }
 
-function ToolCollapseButton({
-  count,
+function ToolGroupToggle({
+  group,
+  expanded = false,
   floating = false,
   onPress,
 }: {
-  count: number;
+  group: ToolActivityGroup;
+  expanded?: boolean;
   floating?: boolean;
   onPress: () => void;
 }) {
@@ -570,25 +550,36 @@ function ToolCollapseButton({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel="Collapse tool calls"
-      accessibilityState={{ expanded: true }}
+      accessibilityLabel={expanded ? 'Collapse tool calls' : 'Expand tool calls'}
+      accessibilityState={{ expanded }}
       onPress={onPress}
       style={({ pressed }) => [
-        floating ? styles.toolFloatingCollapse : styles.toolCollapse,
+        styles.toolSummary,
+        floating && styles.toolFloatingSummary,
         {
           backgroundColor: floating ? theme.chrome : 'transparent',
-          borderColor: theme.border,
+          borderColor: floating ? theme.border : 'transparent',
         },
         pressed && styles.pressed,
       ]}>
-      <ThemedText type="caption" style={{ color: theme.accent }}>
-        Collapse {count} tool {count === 1 ? 'call' : 'calls'}
+      <AppIcon
+        name={{ ios: 'hammer', android: 'build', web: 'build' }}
+        size={16}
+        tintColor={theme.textMuted}
+        fallback="•"
+      />
+      <ThemedText type="smallBold" style={styles.toolSummaryLabel}>
+        {toolActivitySummary(group)}
       </ThemedText>
       <AppIcon
-        name={{ ios: 'chevron.up', android: 'expand_less', web: 'expand_less' }}
-        size={17}
-        tintColor={theme.accent}
-        fallback="⌃"
+        name={{
+          ios: expanded ? 'chevron.up' : 'chevron.right',
+          android: expanded ? 'expand_less' : 'chevron_right',
+          web: expanded ? 'expand_less' : 'chevron_right',
+        }}
+        size={16}
+        tintColor={theme.textMuted}
+        fallback={expanded ? '⌃' : '›'}
       />
     </Pressable>
   );
@@ -883,25 +874,11 @@ const styles = StyleSheet.create({
   toolDetailsViewport: {
     maxHeight: 360,
   },
-  toolCollapse: {
-    minHeight: 44,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.one,
-    marginTop: Spacing.half,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  toolFloatingCollapse: {
+  toolFloatingSummary: {
     position: 'absolute',
     top: Spacing.one,
     left: Spacing.one,
     right: Spacing.one,
-    minHeight: 40,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.one,
     zIndex: 20,
     elevation: 4,
     borderWidth: 1,
