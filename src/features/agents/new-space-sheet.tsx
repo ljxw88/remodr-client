@@ -49,23 +49,15 @@ export function NewSpaceSheet({
     }
   }
 
-  function requestClose() {
-    if (creating) {
-      return;
-    }
-    if (showFolderPicker) {
-      setShowFolderPicker(false);
-      return;
-    }
-    onClose();
-  }
-
   return (
     <SheetModal
       closeLabel="Close new space"
-      onClose={requestClose}
+      onClose={onClose}
       busy={creating}
-      avoidKeyboard>
+      avoidKeyboard
+      interceptDismiss={showFolderPicker ? () => setShowFolderPicker(false) : undefined}>
+      {(close) => (
+        <>
       {!showFolderPicker ? (
         <SheetPanel>
           <ScrollView
@@ -86,7 +78,7 @@ export function NewSpaceSheet({
                 accessibilityRole="button"
                 accessibilityLabel="Close"
                 disabled={creating}
-                onPress={onClose}
+                onPress={close}
                 style={({ pressed }) => [styles.close, pressed && styles.pressed]}>
                 <AppIcon
                   name={{ ios: 'xmark', android: 'close', web: 'close' }}
@@ -184,6 +176,8 @@ export function NewSpaceSheet({
             setShowFolderPicker(false);
           }}
         />
+      )}
+        </>
       )}
     </SheetModal>
   );

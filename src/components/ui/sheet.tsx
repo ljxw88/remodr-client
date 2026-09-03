@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from 'react';
 import {
   Animated,
   Easing,
@@ -17,8 +24,25 @@ import { glassRim } from '@/components/ui/glass-surface';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
+const OPEN_MS = 340;
+const CLOSE_MS = 240;
+
+type SheetMotion = {
+  /** 0 while the sheet is off screen, 1 once it has arrived. */
+  progress: Animated.Value;
+  panelHeight: number;
+  reportPanelHeight: (height: number) => void;
+};
+
+const SheetMotionContext = createContext<SheetMotion | null>(null);
+
 type ModalProps = {
-  children: ReactNode;
+  /**
+   * Given a `close` that plays the exit before the sheet goes away. Use it for
+   * every dismissal inside the sheet — a close button, or finishing the task —
+   * so they all leave the same way.
+   */
+  children: ReactNode | ((close: () => void) => ReactNode);
   /** Accessible name for the scrim, which dismisses the sheet. */
   closeLabel: string;
   onClose: () => void;
@@ -27,17 +51,24 @@ type ModalProps = {
   avoidKeyboard?: boolean;
   /** For sheets that stay mounted and toggle, rather than mounting on demand. */
   visible?: boolean;
+  /**
+   * Handles a scrim tap or back gesture without closing the sheet, for a sheet
+   * showing a nested step that should be backed out of first.
+   */
+  interceptDismiss?: () => void;
 };
 
 /**
- * The scrim and window a sheet lives in.
+ * The scrim and window a sheet lives in, and the motion both it and its panel
+ * animate against.
  *
- * Fades rather than slides. `animationType="slide"` moves the whole modal
- * window, which drags the scrim up from the bottom edge as a travelling grey
- * rectangle. A scrim is meant to darken in place; when it moves, the effect
- * reads as a sheet of paper sliding over the screen rather than the app
- * dimming behind a panel. The panel still slides — see `SheetPanel` — but it
- * does so over a scrim that only darkens.
+ * The scrim only ever fades; the panel does the travelling. `animationType`
+ * cannot express that — `slide` moves the whole modal window and drags the
+ * scrim up from the bottom edge as a grey rectangle, which reads as a sheet of
+ * paper sliding over the screen rather than the app dimming behind a panel. So
+ * the window animates nothing and this owns both directions instead, which is
+ * also what lets the panel slide back down on the way out: React Native would
+ * otherwise tear the modal down the moment the parent stopped rendering it.
  */
 export function SheetModal({
   children,
@@ -46,40 +77,91 @@ export function SheetModal({
   busy = false,
   avoidKeyboard = false,
   visible = true,
+  interceptDismiss,
 }: ModalProps) {
+  const [progress] = useState(() => new Animated.Value(0));
+  const [panelHeight, setPanelHeight] = useState(0);
+
+  const reportPanelHeight = useCallback((height: number) => {
+    setPanelHeight((current) => (Math.abs(current - height) < 1 ? current : height));
+  }, []);
+
+  useEffect(() => {
+    if (panelHeight === 0) {
+      return;
+    }
+    if (!visible) {
+      progress.setValue(0);
+      return;
+    }
+    Animated.timing(progress, {
+      toValue: 1,
+      duration: OPEN_MS,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [panelHeight, progress, visible]);
+
+  const close = useCallback(() => {
+    Animated.timing(progress, {
+      toValue: 0,
+      duration: CLOSE_MS,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        onClose();
+      }
+    });
+  }, [onClose, progress]);
+
+  const dismiss = useCallback(() => {
+    if (busy) {
+      return;
+    }
+    if (interceptDismiss) {
+      interceptDismiss();
+      return;
+    }
+    close();
+  }, [busy, close, interceptDismiss]);
+
   const Overlay = avoidKeyboard ? KeyboardAvoidingView : View;
 
   return (
     <Modal
-      animationType="fade"
+      animationType="none"
       transparent
       statusBarTranslucent
       visible={visible}
-      onRequestClose={busy ? undefined : onClose}>
+      onRequestClose={dismiss}>
       <Overlay
         behavior={avoidKeyboard && Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.overlay}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={closeLabel}
-          disabled={busy}
-          onPress={onClose}
-          style={styles.backdrop}
-        />
-        {children}
+        <Animated.View style={[styles.backdrop, { opacity: progress }]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={closeLabel}
+            disabled={busy}
+            onPress={dismiss}
+            style={StyleSheet.absoluteFill}
+          />
+        </Animated.View>
+        <SheetMotionContext.Provider value={{ progress, panelHeight, reportPanelHeight }}>
+          {typeof children === 'function' ? children(close) : children}
+        </SheetMotionContext.Provider>
       </Overlay>
     </Modal>
   );
 }
 
 /**
- * The panel itself: grab handle, glass surface, and the slide up from the
+ * The panel itself: grab handle, surface, and the travel to and from the
  * bottom edge.
  *
- * It travels its own measured height rather than a fixed guess, so a short
- * sheet and a full-height one both start just off screen and arrive together.
- * The panel is hidden until that measurement lands, otherwise it would show
- * for one frame already at rest.
+ * It moves its own measured height, so a short sheet and a full-height one
+ * both start just off screen and arrive together. It stays hidden until that
+ * measurement lands, otherwise it shows for one frame already at rest.
  *
  * The surface is opaque, unlike every other surface in the app. A sheet renders
  * in its own window, so there is no blur available to soften what sits behind
@@ -90,43 +172,27 @@ export function SheetModal({
 export function SheetPanel({
   children,
   style,
-  visible = true,
 }: {
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
-  /** Replays the entrance for sheets that stay mounted and toggle. */
-  visible?: boolean;
 }) {
   const theme = useTheme();
-  // A state initialiser rather than a ref: React Compiler rejects reading a
-  // ref during render, and this feeds an animated style directly.
-  const [enter] = useState(() => new Animated.Value(0));
-  const [height, setHeight] = useState(0);
+  const motion = useContext(SheetMotionContext);
+  if (!motion) {
+    throw new Error('SheetPanel must be used inside SheetModal');
+  }
+  const { progress, panelHeight, reportPanelHeight } = motion;
 
-  const onLayout = useCallback((event: LayoutChangeEvent) => {
-    const next = event.nativeEvent.layout.height;
-    setHeight((current) => (Math.abs(current - next) < 1 ? current : next));
-  }, []);
+  const onLayout = useCallback(
+    (event: LayoutChangeEvent) => {
+      reportPanelHeight(event.nativeEvent.layout.height);
+    },
+    [reportPanelHeight],
+  );
 
-  useEffect(() => {
-    if (height === 0) {
-      return;
-    }
-    if (!visible) {
-      enter.setValue(0);
-      return;
-    }
-    Animated.timing(enter, {
-      toValue: 1,
-      duration: 340,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, [enter, height, visible]);
-
-  const translateY = enter.interpolate({
+  const translateY = progress.interpolate({
     inputRange: [0, 1],
-    outputRange: [height, 0],
+    outputRange: [panelHeight, 0],
   });
 
   return (
@@ -138,7 +204,7 @@ export function SheetPanel({
         {
           backgroundColor: theme.chrome,
           shadowColor: theme.glassShadow,
-          opacity: height === 0 ? 0 : 1,
+          opacity: panelHeight === 0 ? 0 : 1,
           transform: [{ translateY }],
         },
         style,

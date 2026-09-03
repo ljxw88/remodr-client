@@ -67,7 +67,8 @@ export function UpgradeSheet({ visible, onClose }: Props) {
       onClose={onClose}
       busy={loading}
       visible={visible}>
-      <SheetPanel visible={visible} style={styles.sheet}>
+      {(close) => (
+      <SheetPanel style={styles.sheet}>
         <ScrollView
             contentContainerStyle={[
               styles.sheetContent,
@@ -229,7 +230,7 @@ export function UpgradeSheet({ visible, onClose }: Props) {
           accessibilityLabel="Close"
           disabled={loading}
           hitSlop={8}
-          onPress={onClose}
+          onPress={close}
           style={({ pressed }) => [styles.close, pressed && styles.pressed]}>
           <AppIcon
             name={{ ios: 'xmark', android: 'close', web: 'close' }}
@@ -239,6 +240,7 @@ export function UpgradeSheet({ visible, onClose }: Props) {
           />
         </Pressable>
       </SheetPanel>
+      )}
     </SheetModal>
   );
 }

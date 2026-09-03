@@ -145,7 +145,14 @@ All of them go through `SheetModal` and `SheetPanel`.
   The window fades and the panel animates its own travel instead.
 - The panel travels its measured height, so a short sheet and a full-height one
   both start just off screen and arrive together, and it stays hidden until
-  that measurement lands.
+  that measurement lands. It slides back down on the way out, which means the
+  sheet has to own its exit: React Native tears a modal down the moment its
+  parent stops rendering it, so every dismissal goes through the `close` the
+  sheet hands its children.
+- Finishing the task is not a dismissal. Creating an agent pushes straight to
+  its conversation, so the sheet gets out of the way immediately rather than
+  spending a quarter of a second sliding down over a screen that is already
+  leaving.
 - Sheets are the one opaque surface. They render in their own window, so no
   blur can reach what sits behind them, and a translucent panel just ghosts the
   list's text through its own — which reads as a rendering fault rather than as

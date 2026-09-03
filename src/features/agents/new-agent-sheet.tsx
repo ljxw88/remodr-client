@@ -73,6 +73,7 @@ export function NewAgentSheet({
 
   return (
     <SheetModal closeLabel="Close new agent" onClose={onClose} busy={creating}>
+      {(close) => (
       <SheetPanel>
         <ScrollView
           contentContainerStyle={[styles.sheetContent, { paddingBottom: dockContentInset }]}
@@ -88,7 +89,7 @@ export function NewAgentSheet({
               accessibilityRole="button"
               accessibilityLabel="Close"
               disabled={creating}
-              onPress={onClose}
+              onPress={close}
               style={({ pressed }) => [styles.close, pressed && styles.pressed]}>
               <AppIcon
                 name={{ ios: 'xmark', android: 'close', web: 'close' }}
@@ -232,6 +233,7 @@ export function NewAgentSheet({
           />
         </ScrollView>
       </SheetPanel>
+      )}
     </SheetModal>
   );
 }
