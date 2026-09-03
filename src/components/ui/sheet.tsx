@@ -85,13 +85,17 @@ export function SheetModal({
   const [progress] = useState(() => new Animated.Value(0));
   const [panelHeight, setPanelHeight] = useState(0);
   const shouldReduceMotion = useReduceMotion();
+  const [closing, setClosing] = useState(false);
 
   const reportPanelHeight = useCallback((height: number) => {
     setPanelHeight((current) => (Math.abs(current - height) < 1 ? current : height));
   }, []);
 
   useEffect(() => {
-    if (panelHeight === 0) {
+    // A re-layout mid-exit — the keyboard, a content change, a rotation —
+    // would otherwise restart the entrance and cancel the close, stranding a
+    // sheet that the user has already dismissed.
+    if (panelHeight === 0 || closing) {
       return;
     }
     if (!visible) {
@@ -108,25 +112,29 @@ export function SheetModal({
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
-  }, [panelHeight, progress, shouldReduceMotion, visible]);
+  }, [closing, panelHeight, progress, shouldReduceMotion, visible]);
 
   const close = useCallback(() => {
+    if (closing) {
+      return;
+    }
+    setClosing(true);
     if (shouldReduceMotion()) {
       progress.setValue(0);
       onClose();
       return;
     }
+    // Closes on interruption too. Waiting for `finished` means an animation cut
+    // short leaves the sheet open with no way to dismiss it.
     Animated.timing(progress, {
       toValue: 0,
       duration: CLOSE_MS,
       easing: Easing.in(Easing.cubic),
       useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) {
-        onClose();
-      }
+    }).start(() => {
+      onClose();
     });
-  }, [onClose, progress, shouldReduceMotion]);
+  }, [closing, onClose, progress, shouldReduceMotion]);
 
   const dismiss = useCallback(() => {
     if (busy) {
@@ -152,8 +160,16 @@ export function SheetModal({
         behavior={avoidKeyboard && Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.overlay}>
         <Animated.View style={[styles.backdrop, { opacity: progress }]}>
+          {/*
+            Hidden from screen readers on purpose. It covers the screen and is
+            rendered before the panel, so TalkBack would otherwise land on a
+            full-screen "close" button before reaching the sheet's own title.
+            Every sheet carries a labelled close control, and the back gesture
+            works, so nothing is lost by taking this out of the traversal.
+          */}
           <Pressable
-            accessibilityRole="button"
+            accessible={false}
+            importantForAccessibility="no"
             accessibilityLabel={closeLabel}
             disabled={busy}
             onPress={dismiss}
@@ -278,8 +294,9 @@ const styles = StyleSheet.create({
     gap: Spacing.half,
   },
   headerClose: {
-    width: 44,
-    height: 44,
+    // 48dp is Android's minimum touch target; 44 is the iOS figure.
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: Radius.pill,
