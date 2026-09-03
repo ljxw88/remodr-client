@@ -27,3 +27,7 @@ Assistant replies are rendered as native markdown. See
 Shader-backed visual effects use Skia. See
 [`skia-effects.md`](skia-effects.md) and
 [ADR 011](adr/011-skia-visual-effects.md).
+
+Every frosted surface goes through one component, `GlassSurface`. See
+[`COLOR.md`](../COLOR.md) and
+[ADR 012](adr/012-frosted-glass-material.md).

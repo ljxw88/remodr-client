@@ -14,3 +14,6 @@
     effects with Skia following [`skia-effects.md`](skia-effects.md).
 11. Verify visual work from device screenshots, not from reasoning. Shader
     mistakes render plausibly rather than failing.
+12. Use `GlassSurface` or `GlassRim` for any frosted surface. Never hand-roll a
+    translucent fill plus a border, and never nest a `BlurView` inside the blur
+    target it samples — that is a native stack overflow, not a layout bug.

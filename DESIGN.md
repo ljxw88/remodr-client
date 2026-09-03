@@ -55,8 +55,12 @@ the normal user flow.
   gradient.
 - Use one violet accent for primary actions, selection, focus, and active
   states.
-- Use glass sparingly for floating or elevated modules. On Android, pair the
-  translucent surface with a subtle dark shadow so it remains legible.
+- Frosted glass is the app's one surface material. Chips, buttons, cards, the
+  dock, and the composer are all the same glass at different strengths, so the
+  interface reads as a single sheet rather than a set of unrelated widgets.
+- Glass surfaces are white at low alpha, never opaque grey. A white alpha fill
+  works at both ends of the canvas — a bright panel over the indigo, a dark
+  panel where the gradient bottoms out — so one token covers every screen.
 - Prefer grouped modules and clear spacing over a collection of small cards.
 - Keep information compact, but preserve comfortable mobile touch targets.
 - Light mode and theme switching are intentionally out of scope.
@@ -132,10 +136,32 @@ logs. Do not add marketing subtitles to mobile headers.
 
 ### Elevated surfaces
 
-- Use a 24dp radius and one-pixel translucent border.
+All of them go through `GlassSurface`, or `GlassRim` when a `Pressable` needs
+the material without an extra layout node. Do not hand-roll a translucent fill
+plus a border; see [`COLOR.md`](COLOR.md) for the tokens.
+
+- Use a 24dp radius, a hairline translucent rim, and a specular top edge.
+- The rim and highlight are drawn as overlays, not as `borderWidth`, so they
+  never eat into a caller's padding and are not washed out under a blur tint.
+- The highlight is clipped to the corner radius. Unclipped it runs straight
+  past the corners of a pill and floats over the canvas as a detached line.
+- Two families, chosen by what is behind the surface:
+  - **Panel** — sits on the canvas. Fill and rim only, no blur, because there
+    is nothing behind it but the gradient.
+  - **Chrome** — floats over scrolling content. Real backdrop blur.
 - iOS may use native Liquid Glass where supported.
-- Android uses the shared dark glass fallback with soft elevation.
 - Avoid nesting multiple elevated surfaces unless hierarchy requires it.
+
+**A `BlurView` must never be a descendant of the blur target it samples.** It
+draws that target's RenderNode, so nesting makes the RenderNode contain itself
+and Android recurses through `RenderNode::prepareTreeImpl` until the native
+stack overflows. The app dies with SIGSEGV — no JS error, no red box. Chrome is
+always a *sibling* of `BlurBackdropTarget`; see
+`src/components/ui/blur-backdrop.tsx`.
+
+The blur can only see inside its target, so `BlurBackdropTarget` renders its
+own copy of the canvas gradient. With the gradient outside, frosted chrome
+blurs transparent pixels and reads as a dead grey slab.
 
 ### Status
 
