@@ -24,6 +24,7 @@ import { AppIcon } from '@/components/ui/app-icon';
 import { glassRim } from '@/components/ui/glass-surface';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
+import { useReduceMotion } from '@/hooks/use-reduce-motion';
 import { useTheme } from '@/hooks/use-theme';
 
 const OPEN_MS = 340;
@@ -83,6 +84,7 @@ export function SheetModal({
 }: ModalProps) {
   const [progress] = useState(() => new Animated.Value(0));
   const [panelHeight, setPanelHeight] = useState(0);
+  const shouldReduceMotion = useReduceMotion();
 
   const reportPanelHeight = useCallback((height: number) => {
     setPanelHeight((current) => (Math.abs(current - height) < 1 ? current : height));
@@ -96,15 +98,24 @@ export function SheetModal({
       progress.setValue(0);
       return;
     }
+    if (shouldReduceMotion()) {
+      progress.setValue(1);
+      return;
+    }
     Animated.timing(progress, {
       toValue: 1,
       duration: OPEN_MS,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
-  }, [panelHeight, progress, visible]);
+  }, [panelHeight, progress, shouldReduceMotion, visible]);
 
   const close = useCallback(() => {
+    if (shouldReduceMotion()) {
+      progress.setValue(0);
+      onClose();
+      return;
+    }
     Animated.timing(progress, {
       toValue: 0,
       duration: CLOSE_MS,
@@ -115,7 +126,7 @@ export function SheetModal({
         onClose();
       }
     });
-  }, [onClose, progress]);
+  }, [onClose, progress, shouldReduceMotion]);
 
   const dismiss = useCallback(() => {
     if (busy) {

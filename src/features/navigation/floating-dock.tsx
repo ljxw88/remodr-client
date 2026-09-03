@@ -12,7 +12,6 @@ import {
   type PropsWithChildren,
 } from 'react';
 import {
-  AccessibilityInfo,
   Animated,
   Easing,
   StyleSheet,
@@ -25,6 +24,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppIcon, type AppIconName } from '@/components/ui/app-icon';
 import { GlassSurface } from '@/components/ui/glass-surface';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
+import { useReduceMotion } from '@/hooks/use-reduce-motion';
 import { useTheme } from '@/hooks/use-theme';
 
 type DockMotion = {
@@ -41,11 +41,11 @@ const EXPANDED_DOCK_GAP = 12;
 export function DockMotionProvider({ children }: PropsWithChildren) {
   const pathname = usePathname();
   const [progress] = useState(() => new Animated.Value(0));
+  const shouldReduceMotion = useReduceMotion();
   const collapsed = useRef(false);
   const lastOffset = useRef(0);
   const direction = useRef<1 | -1 | 0>(0);
   const directionStart = useRef(0);
-  const reduceMotion = useRef(false);
 
   const setCollapsed = useCallback(
     (next: boolean) => {
@@ -53,7 +53,7 @@ export function DockMotionProvider({ children }: PropsWithChildren) {
         return;
       }
       collapsed.current = next;
-      if (reduceMotion.current) {
+      if (shouldReduceMotion()) {
         progress.setValue(next ? 1 : 0);
         return;
       }
@@ -64,7 +64,7 @@ export function DockMotionProvider({ children }: PropsWithChildren) {
         useNativeDriver: false,
       }).start();
     },
-    [progress],
+    [progress, shouldReduceMotion],
   );
 
   const expand = useCallback(() => {
@@ -101,24 +101,10 @@ export function DockMotionProvider({ children }: PropsWithChildren) {
     },
     [setCollapsed],
   );
-  const shouldReduceMotion = useCallback(() => reduceMotion.current, []);
 
   useEffect(() => {
     expand();
   }, [expand, pathname]);
-
-  useEffect(() => {
-    void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
-      reduceMotion.current = enabled;
-    });
-    const subscription = AccessibilityInfo.addEventListener(
-      'reduceMotionChanged',
-      (enabled) => {
-        reduceMotion.current = enabled;
-      },
-    );
-    return () => subscription.remove();
-  }, []);
 
   const value = useMemo(
     () => ({ progress, onScroll, expand, shouldReduceMotion }),
