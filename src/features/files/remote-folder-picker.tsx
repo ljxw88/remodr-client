@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppButton } from '@/components/ui/app-button';
 import { AppIcon } from '@/components/ui/app-icon';
+import { SheetPanel } from '@/components/ui/sheet';
 import { ThemedText } from '@/components/themed-text';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import type { RemoteFile } from '@/domain/remote';
@@ -97,17 +98,8 @@ export function RemoteFolderPicker({
   }, []);
 
   return (
-    <View
-      style={[
-        styles.sheet,
-        {
-          backgroundColor: theme.chrome,
-          borderColor: theme.glassBorder,
-          paddingBottom: Math.max(insets.bottom, Spacing.two),
-          shadowColor: theme.glassShadow,
-        },
-      ]}>
-          <View style={[styles.handle, { backgroundColor: theme.border }]} />
+    <SheetPanel
+      style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, Spacing.two) }]}>
           <View style={styles.header}>
             <View style={styles.headerCopy}>
               <ThemedText type="heading">Choose folder</ThemedText>
@@ -256,7 +248,7 @@ export function RemoteFolderPicker({
             label="Use this folder"
             onPress={() => onSelect(path === '~' ? '~/' : path)}
           />
-    </View>
+    </SheetPanel>
   );
 }
 
@@ -264,21 +256,6 @@ const styles = StyleSheet.create({
   sheet: {
     height: '88%',
     gap: Spacing.two,
-    paddingHorizontal: Spacing.two + Spacing.half,
-    paddingTop: Spacing.one,
-    borderWidth: 1,
-    borderTopLeftRadius: Radius.glass,
-    borderTopRightRadius: Radius.glass,
-    elevation: 24,
-    shadowOffset: { width: 0, height: -12 },
-    shadowOpacity: 1,
-    shadowRadius: 30,
-  },
-  handle: {
-    width: 38,
-    height: 4,
-    alignSelf: 'center',
-    borderRadius: Radius.pill,
   },
   header: {
     flexDirection: 'row',

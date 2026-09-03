@@ -134,6 +134,20 @@ logs. Do not add marketing subtitles to mobile headers.
 - Inputs are 48dp high with an 18dp radius. Focus uses a violet border and
   subtle depth, not a glow.
 
+### Sheets
+
+All of them go through `SheetModal` and `SheetPanel`.
+
+- The scrim fades, it never travels. `animationType="slide"` moves the whole
+  modal window, dragging the scrim up from the bottom edge as a grey rectangle;
+  a scrim is meant to darken in place, and when it moves the effect reads as a
+  sheet of paper sliding over the screen rather than the app dimming behind a
+  panel.
+- The panel does the moving, and only a little. A short rise gives it direction
+  without restating the full height of the screen.
+- Sheets render in their own window and cannot blur the app behind them, so
+  they use the opaque `chrome` surface rather than glass.
+
 ### Elevated surfaces
 
 All of them go through `GlassSurface`, or `GlassRim` when a `Pressable` needs
@@ -292,6 +306,9 @@ chromatic orb.
 ## Motion, feedback, and accessibility
 
 - Use subtle press-scale and opacity feedback; avoid decorative animation.
+- Press-scale belongs to controls that stand alone on the canvas. A row that
+  fills its card edge to edge must not scale: shrinking it pulls the pressed
+  highlight inwards and leaves the card showing down both sides.
 - Use named phases rather than fake progress percentages.
 - Keep approval, failure, working, and reconnect states visible until they are
   resolved.

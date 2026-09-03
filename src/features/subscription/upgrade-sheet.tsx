@@ -1,15 +1,9 @@
 import { useState } from 'react';
-import {
-  Alert,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  View,
-} from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { AppButton } from '@/components/ui/app-button';
 import { AppIcon, type AppIconName } from '@/components/ui/app-icon';
+import { SheetModal, SheetPanel } from '@/components/ui/sheet';
 import { ThemedText } from '@/components/themed-text';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useSubscription } from '@/features/subscription/use-subscription';
@@ -68,32 +62,13 @@ export function UpgradeSheet({ visible, onClose }: Props) {
   }
 
   return (
-    <Modal
-      animationType="slide"
-      transparent
-      statusBarTranslucent
-      visible={visible}
-      onRequestClose={loading ? undefined : onClose}>
-      <View style={styles.overlay}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Close upgrade sheet"
-          disabled={loading}
-          onPress={onClose}
-          style={styles.backdrop}
-        />
-        <View
-          style={[
-            styles.sheet,
-            {
-              backgroundColor: theme.chrome,
-              borderColor: theme.glassBorder,
-              shadowColor: theme.glassShadow,
-            },
-          ]}>
-          <View style={[styles.handle, { backgroundColor: theme.border }]} />
-
-          <ScrollView
+    <SheetModal
+      closeLabel="Close upgrade sheet"
+      onClose={onClose}
+      busy={loading}
+      visible={visible}>
+      <SheetPanel visible={visible} style={styles.sheet}>
+        <ScrollView
             contentContainerStyle={[
               styles.sheetContent,
               { paddingBottom: dockContentInset + Spacing.two },
@@ -101,154 +76,153 @@ export function UpgradeSheet({ visible, onClose }: Props) {
             showsVerticalScrollIndicator={false}>
             <View style={styles.header}>
               <View style={[styles.crownFrame, { backgroundColor: theme.accentSoft }]}>
-                <AppIcon
-                  name={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
-                  size={26}
-                  tintColor={theme.accent}
-                  fallback="★"
-                />
-              </View>
-              <ThemedText type="heading" style={styles.title}>
-                Upgrade to Remote Pro
-              </ThemedText>
-              <ThemedText type="caption" themeColor="textSecondary" style={styles.subtitle}>
-                {__DEV__
-                  ? 'Preview unlimited remote devices and concurrent agents.'
-                  : 'Store purchases are not configured in this build.'}
-              </ThemedText>
-            </View>
-
-            <View style={[styles.featuresCard, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
-              <FeatureRow
-                icon={{ ios: 'desktopcomputer', android: 'computer', web: 'computer' }}
-                title="Unlimited Remote Devices"
-                description="Manage and bridge to all your servers, VMs, containers, and hosts."
-              />
-              <View style={[styles.featureDivider, { backgroundColor: theme.border }]} />
-              <FeatureRow
-                icon={{ ios: 'bolt.fill', android: 'bolt', web: 'bolt' }}
-                title="Priority Background Sync"
-                description="Real-time multi-agent bridging and active workspace monitoring."
-              />
-              <View style={[styles.featureDivider, { backgroundColor: theme.border }]} />
-              <FeatureRow
-                icon={{ ios: 'key.fill', android: 'key', web: 'key' }}
-                title="Hardware Keystore Security"
-                description="Encrypted SSH credentials and strict host key verification."
+              <AppIcon
+                name={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
+                size={26}
+                tintColor={theme.accent}
+                fallback="★"
               />
             </View>
+            <ThemedText type="heading" style={styles.title}>
+              Upgrade to Remote Pro
+            </ThemedText>
+            <ThemedText type="caption" themeColor="textSecondary" style={styles.subtitle}>
+              {__DEV__
+                ? 'Preview unlimited remote devices and concurrent agents.'
+                : 'Store purchases are not configured in this build.'}
+            </ThemedText>
+          </View>
 
-            <View style={styles.planOptions}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityState={{ selected: selectedPlan === 'monthly' }}
-                onPress={() => setSelectedPlan('monthly')}
-                style={({ pressed }) => [
-                  styles.planCard,
-                  {
-                    backgroundColor:
-                      selectedPlan === 'monthly' ? theme.accentSoft : theme.backgroundElement,
-                    borderColor: selectedPlan === 'monthly' ? theme.accent : theme.border,
-                    opacity: pressed ? 0.75 : 1,
-                  },
-                ]}>
-                <View style={styles.planCopy}>
-                  <ThemedText type="smallBold">Monthly Pro</ThemedText>
-                  <ThemedText type="caption" themeColor="textSecondary">
-                    Flexible recurring plan
-                  </ThemedText>
-                </View>
-                <View style={styles.planPrice}>
-                  <ThemedText type="section" style={{ color: selectedPlan === 'monthly' ? theme.accent : theme.text }}>
-                    $4.99
-                  </ThemedText>
-                  <ThemedText type="caption" themeColor="textMuted">
-                    /month
-                  </ThemedText>
-                </View>
-              </Pressable>
-
-              <Pressable
-                accessibilityRole="button"
-                accessibilityState={{ selected: selectedPlan === 'lifetime' }}
-                onPress={() => setSelectedPlan('lifetime')}
-                style={({ pressed }) => [
-                  styles.planCard,
-                  {
-                    backgroundColor:
-                      selectedPlan === 'lifetime' ? theme.accentSoft : theme.backgroundElement,
-                    borderColor: selectedPlan === 'lifetime' ? theme.accent : theme.border,
-                    opacity: pressed ? 0.75 : 1,
-                  },
-                ]}>
-                <View style={styles.planCopy}>
-                  <View style={styles.badgeRow}>
-                    <ThemedText type="smallBold">Lifetime Access</ThemedText>
-                    <View style={[styles.badge, { backgroundColor: theme.accent }]}>
-                      <ThemedText type="caption" style={styles.badgeText}>
-                        BEST VALUE
-                      </ThemedText>
-                    </View>
-                  </View>
-                  <ThemedText type="caption" themeColor="textSecondary">
-                    Pay once, own forever
-                  </ThemedText>
-                </View>
-                <View style={styles.planPrice}>
-                  <ThemedText type="section" style={{ color: selectedPlan === 'lifetime' ? theme.accent : theme.text }}>
-                    $29.99
-                  </ThemedText>
-                  <ThemedText type="caption" themeColor="textMuted">
-                    one-time
-                  </ThemedText>
-                </View>
-              </Pressable>
-            </View>
-
-            <AppButton
-              label={
-                loading
-                  ? 'Processing…'
-                  : isPro
-                    ? 'Development Pro Active'
-                    : __DEV__
-                      ? `Preview ${selectedPlan === 'monthly' ? 'Monthly' : 'Lifetime'} Pro`
-                      : 'Purchases unavailable'
-              }
-              disabled={loading || isPro || !__DEV__}
-              onPress={() => void handleUpgrade()}
+          <View style={[styles.featuresCard, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
+            <FeatureRow
+              icon={{ ios: 'desktopcomputer', android: 'computer', web: 'computer' }}
+              title="Unlimited Remote Devices"
+              description="Manage and bridge to all your servers, VMs, containers, and hosts."
             />
+            <View style={[styles.featureDivider, { backgroundColor: theme.border }]} />
+            <FeatureRow
+              icon={{ ios: 'bolt.fill', android: 'bolt', web: 'bolt' }}
+              title="Priority Background Sync"
+              description="Real-time multi-agent bridging and active workspace monitoring."
+            />
+            <View style={[styles.featureDivider, { backgroundColor: theme.border }]} />
+            <FeatureRow
+              icon={{ ios: 'key.fill', android: 'key', web: 'key' }}
+              title="Hardware Keystore Security"
+              description="Encrypted SSH credentials and strict host key verification."
+            />
+          </View>
 
-            {__DEV__ ? (
-              <View style={styles.secondaryActions}>
+          <View style={styles.planOptions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: selectedPlan === 'monthly' }}
+              onPress={() => setSelectedPlan('monthly')}
+              style={({ pressed }) => [
+                styles.planCard,
+                {
+                  backgroundColor:
+                    selectedPlan === 'monthly' ? theme.accentSoft : theme.backgroundElement,
+                  borderColor: selectedPlan === 'monthly' ? theme.accent : theme.border,
+                  opacity: pressed ? 0.75 : 1,
+                },
+              ]}>
+              <View style={styles.planCopy}>
+                <ThemedText type="smallBold">Monthly Pro</ThemedText>
+                <ThemedText type="caption" themeColor="textSecondary">
+                  Flexible recurring plan
+                </ThemedText>
+              </View>
+              <View style={styles.planPrice}>
+                <ThemedText type="section" style={{ color: selectedPlan === 'monthly' ? theme.accent : theme.text }}>
+                  $4.99
+                </ThemedText>
+                <ThemedText type="caption" themeColor="textMuted">
+                  /month
+                </ThemedText>
+              </View>
+            </Pressable>
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: selectedPlan === 'lifetime' }}
+              onPress={() => setSelectedPlan('lifetime')}
+              style={({ pressed }) => [
+                styles.planCard,
+                {
+                  backgroundColor:
+                    selectedPlan === 'lifetime' ? theme.accentSoft : theme.backgroundElement,
+                  borderColor: selectedPlan === 'lifetime' ? theme.accent : theme.border,
+                  opacity: pressed ? 0.75 : 1,
+                },
+              ]}>
+              <View style={styles.planCopy}>
+                <View style={styles.badgeRow}>
+                  <ThemedText type="smallBold">Lifetime Access</ThemedText>
+                  <View style={[styles.badge, { backgroundColor: theme.accent }]}>
+                    <ThemedText type="caption" style={styles.badgeText}>
+                      BEST VALUE
+                    </ThemedText>
+                  </View>
+                </View>
+                <ThemedText type="caption" themeColor="textSecondary">
+                  Pay once, own forever
+                </ThemedText>
+              </View>
+              <View style={styles.planPrice}>
+                <ThemedText type="section" style={{ color: selectedPlan === 'lifetime' ? theme.accent : theme.text }}>
+                  $29.99
+                </ThemedText>
+                <ThemedText type="caption" themeColor="textMuted">
+                  one-time
+                </ThemedText>
+              </View>
+            </Pressable>
+          </View>
+
+          <AppButton
+            label={
+              loading
+                ? 'Processing…'
+                : isPro
+                  ? 'Development Pro Active'
+                  : __DEV__
+                    ? `Preview ${selectedPlan === 'monthly' ? 'Monthly' : 'Lifetime'} Pro`
+                    : 'Purchases unavailable'
+            }
+            disabled={loading || isPro || !__DEV__}
+            onPress={() => void handleUpgrade()}
+          />
+
+          {__DEV__ ? (
+            <View style={styles.secondaryActions}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={loading}
+              onPress={() => void handleRestore()}
+              style={styles.restoreButton}>
+              <ThemedText type="caption" themeColor="textSecondary">
+                Restore purchases
+              </ThemedText>
+            </Pressable>
+
+            {isPro ? (
               <Pressable
                 accessibilityRole="button"
-                disabled={loading}
-                onPress={() => void handleRestore()}
-                style={styles.restoreButton}>
-                <ThemedText type="caption" themeColor="textSecondary">
-                  Restore purchases
+                onPress={() => {
+                  void downgradeToFree();
+                  Alert.alert('Reset to Free Trial', 'Plan reset to free trial limits.');
+                }}>
+                <ThemedText type="caption" themeColor="textMuted">
+                  Switch to Free tier (dev test)
                 </ThemedText>
               </Pressable>
-
-              {isPro ? (
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => {
-                    void downgradeToFree();
-                    Alert.alert('Reset to Free Trial', 'Plan reset to free trial limits.');
-                  }}>
-                  <ThemedText type="caption" themeColor="textMuted">
-                    Switch to Free tier (dev test)
-                  </ThemedText>
-                </Pressable>
-              ) : null}
-              </View>
             ) : null}
-          </ScrollView>
-        </View>
-      </View>
-    </Modal>
+            </View>
+          ) : null}
+        </ScrollView>
+      </SheetPanel>
+    </SheetModal>
   );
 }
 
@@ -278,36 +252,11 @@ function FeatureRow({
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  backdrop: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-  },
   sheet: {
     maxHeight: '94%',
-    gap: Spacing.one,
-    paddingHorizontal: Spacing.two + Spacing.half,
-    paddingTop: Spacing.one,
-    paddingBottom: 0,
-    borderWidth: 1,
-    borderTopLeftRadius: Radius.glass,
-    borderTopRightRadius: Radius.glass,
-    elevation: 20,
-    shadowOffset: { width: 0, height: -10 },
-    shadowOpacity: 1,
-    shadowRadius: 28,
   },
   sheetContent: {
     gap: Spacing.two + Spacing.half,
-  },
-  handle: {
-    width: 38,
-    height: 4,
-    alignSelf: 'center',
-    borderRadius: Radius.pill,
   },
   header: {
     alignItems: 'center',

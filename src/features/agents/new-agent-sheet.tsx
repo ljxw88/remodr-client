@@ -1,15 +1,9 @@
 import { useMemo, useState } from 'react';
-import {
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  View,
-} from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 
 import { AppButton } from '@/components/ui/app-button';
 import { AppIcon } from '@/components/ui/app-icon';
+import { SheetModal, SheetPanel } from '@/components/ui/sheet';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
 import {
@@ -78,36 +72,11 @@ export function NewAgentSheet({
   }
 
   return (
-    <Modal
-      animationType="slide"
-      transparent
-      statusBarTranslucent
-      visible
-      onRequestClose={creating ? undefined : onClose}>
-      <View style={styles.overlay}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Close new agent"
-          disabled={creating}
-          onPress={onClose}
-          style={styles.backdrop}
-        />
-        <View
-          style={[
-            styles.sheet,
-            {
-              backgroundColor: theme.chrome,
-              borderColor: theme.glassBorder,
-              shadowColor: theme.glassShadow,
-            },
-          ]}>
-          <View style={[styles.handle, { backgroundColor: theme.border }]} />
-          <ScrollView
-            contentContainerStyle={[
-              styles.sheetContent,
-              { paddingBottom: dockContentInset },
-            ]}
-            showsVerticalScrollIndicator={false}>
+    <SheetModal closeLabel="Close new agent" onClose={onClose} busy={creating}>
+      <SheetPanel>
+        <ScrollView
+          contentContainerStyle={[styles.sheetContent, { paddingBottom: dockContentInset }]}
+          showsVerticalScrollIndicator={false}>
           <View style={styles.header}>
             <View style={styles.titleCopy}>
               <ThemedText type="heading">New agent</ThemedText>
@@ -261,44 +230,15 @@ export function NewAgentSheet({
             disabled={creating || !spaceAvailable || !availability.get(provider)}
             onPress={() => void create()}
           />
-          </ScrollView>
-        </View>
-      </View>
-    </Modal>
+        </ScrollView>
+      </SheetPanel>
+    </SheetModal>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  backdrop: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0,0,0,0.62)',
-  },
-  sheet: {
-    maxHeight: '92%',
-    gap: Spacing.one,
-    paddingHorizontal: Spacing.two + Spacing.half,
-    paddingTop: Spacing.one,
-    paddingBottom: 0,
-    borderWidth: 1,
-    borderTopLeftRadius: Radius.glass,
-    borderTopRightRadius: Radius.glass,
-    elevation: 20,
-    shadowOffset: { width: 0, height: -10 },
-    shadowOpacity: 1,
-    shadowRadius: 28,
-  },
   sheetContent: {
     gap: Spacing.three,
-  },
-  handle: {
-    width: 38,
-    height: 4,
-    alignSelf: 'center',
-    borderRadius: Radius.pill,
   },
   header: {
     flexDirection: 'row',
