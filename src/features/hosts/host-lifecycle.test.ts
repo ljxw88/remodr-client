@@ -27,6 +27,7 @@ function dependencies() {
       ...host,
       ...input,
     })),
+    invalidateHostConnection: jest.fn(),
   };
 }
 
@@ -37,7 +38,9 @@ describe('host lifecycle', () => {
     await deleteHost(host, deps);
 
     expect(deps.disconnectHost).toHaveBeenCalledWith(host.id);
+    expect(deps.invalidateHostConnection).toHaveBeenCalledWith(host.id);
     expect(deps.deleteSecret).toHaveBeenCalledWith(host.credentialId);
+    expect(deps.disconnectHost).toHaveBeenCalledWith(host.id);
     expect(deps.removeHost).toHaveBeenCalledWith(host.id);
     expect(deps.disconnectHost.mock.invocationCallOrder[0]).toBeLessThan(
       deps.deleteSecret.mock.invocationCallOrder[0],
@@ -71,6 +74,7 @@ describe('host lifecycle', () => {
     await updateHost(host, { ...host, name: 'Renamed' }, deps);
 
     expect(deps.deleteSecret).not.toHaveBeenCalled();
+    expect(deps.disconnectHost).not.toHaveBeenCalled();
     expect(deps.updateHost).toHaveBeenCalledWith(
       host.id,
       expect.objectContaining({ credentialId: host.credentialId }),

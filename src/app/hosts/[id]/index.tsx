@@ -8,7 +8,9 @@ import { GlassSurface } from '@/components/ui/glass-surface';
 import { Screen } from '@/components/ui/screen';
 import { ThemedText } from '@/components/themed-text';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
+import { RemoteOperationError } from '@/domain/errors';
 import type { HostProfile } from '@/domain/hosts';
+import { ensureHostConnected } from '@/features/connection/saved-host-connector';
 import { refreshSessions, useHostSession } from '@/features/connection/use-host-session';
 import { deleteHost } from '@/features/hosts/host-lifecycle';
 import { useTheme } from '@/hooks/use-theme';
@@ -20,6 +22,7 @@ export default function EditHostScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const theme = useTheme();
   const [host, setHost] = useState<HostProfile | null | undefined>(undefined);
+  const [connecting, setConnecting] = useState(false);
   const session = useHostSession(id ?? '');
 
   useEffect(() => {
@@ -84,6 +87,43 @@ export default function EditHostScreen() {
     );
   }
 
+  const hasSavedCredential =
+    !!host.credentialId && remoteClient.hasSecret(host.credentialId);
+
+  async function connectSavedCredential(
+    target: HostProfile,
+    acceptedFingerprint?: string,
+  ) {
+    setConnecting(true);
+    try {
+      await ensureHostConnected(target, acceptedFingerprint);
+    } catch (error) {
+      if (
+        error instanceof RemoteOperationError &&
+        error.remoteError.type === 'hostKeyUnknown'
+      ) {
+        const fingerprint = error.remoteError.fingerprint;
+        Alert.alert(
+          'Trust this host?',
+          `${target.hostname}\n${fingerprint}`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Trust and Save',
+              onPress: () => {
+                void connectSavedCredential(target, fingerprint);
+              },
+            },
+          ],
+        );
+      } else {
+        Alert.alert('Could not connect', toUserMessage(error));
+      }
+    } finally {
+      setConnecting(false);
+    }
+  }
+
   return (
     <Screen>
       <Stack.Screen options={{ title: 'Server' }} />
@@ -132,10 +172,15 @@ export default function EditHostScreen() {
           </View>
           <View style={styles.primaryAction}>
             <AppButton
-              label={session ? 'Open agents' : 'Connect'}
+              label={session ? 'Open agents' : connecting ? 'Connecting…' : 'Connect'}
+              disabled={connecting}
               onPress={() => {
                 if (session) {
                   router.push('/');
+                  return;
+                }
+                if (hasSavedCredential) {
+                  void connectSavedCredential(host);
                   return;
                 }
                 router.push({ pathname: '/connect/[id]', params: { id: host.id } });

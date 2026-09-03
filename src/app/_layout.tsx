@@ -8,7 +8,9 @@ import { DarkTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
+import { Platform } from 'react-native';
 
+import { autoConnectSavedHosts } from '@/features/connection/saved-host-connector';
 SplashScreen.preventAutoHideAsync();
 SplashScreen.setOptions({ duration: 300, fade: true });
 
@@ -37,6 +39,14 @@ export default function RootLayout() {
       void SplashScreen.hideAsync();
     }
   }, [fontError, fontsLoaded]);
+
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      void autoConnectSavedHosts().catch((error) => {
+        console.warn('[SSH] Could not load saved hosts for auto-connect', error);
+      });
+    }
+  }, []);
 
   if (!fontsLoaded && !fontError) {
     return null;

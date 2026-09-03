@@ -171,12 +171,17 @@ Status must remain understandable without color alone.
 
 ## Server status
 
+- Reconnect all devices with saved Keystore credentials in the background when
+  the application shell starts; connection state must not depend on visiting
+  the Agents tab.
 - Start with one elevated server summary, explicit connection status, and an
   **Open agents** primary action.
 - Present Files, Monitor, Docker, and Tunnels as four large circular quick
   actions sized for touch.
 - Keep connection metadata in a simple grouped module.
 - Keep Disconnect, Edit, and Delete below the primary workflow.
+- When a saved credential exists, **Connect** uses it directly. Show the
+  authentication form only when the device has no reusable credential.
 
 ## Settings
 

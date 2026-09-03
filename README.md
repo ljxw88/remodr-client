@@ -17,6 +17,10 @@ workspace as a filterable space, and can start Copilot, Claude, Codex, or
 OpenCode in a new tab inside the selected space. Herdr events refresh additions,
 removals, moves, and status changes from authoritative snapshots.
 
+Every saved device with a Keystore credential reconnects in the background when
+the tab shell starts. Selecting a device or connecting from Server status reuses
+the same deduplicated connection attempt and does not ask for its password again.
+
 Top-level navigation uses a custom floating glass dock that collapses to compact
 icons during downward scrolling and expands on upward scrolling or tab changes.
 

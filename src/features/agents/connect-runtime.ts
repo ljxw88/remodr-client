@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { connectHost } from '@/features/connection/connect-host';
+import type { HostProfile } from '@/domain/hosts';
+import { ensureHostConnected } from '@/features/connection/saved-host-connector';
 import { refreshSessions } from '@/features/connection/use-host-session';
 import { herdrRepository } from '@/services/herdr-repository';
 import { hostRepository } from '@/services/host-repository';
@@ -38,39 +39,66 @@ async function connectAgentRuntimeOnce(preferredDeviceId?: string): Promise<bool
   const requestedHost = requestedDeviceId
     ? hosts.find((candidate) => candidate.id === requestedDeviceId)
     : undefined;
-  const existingSession = requestedHost
-    ? remoteClient.getSession(requestedHost.id)
-    : remoteClient.listSessions()[0];
-  const host =
-    requestedHost ??
-    (existingSession
-      ? hosts.find((candidate) => candidate.id === existingSession.hostId)
-      : undefined) ??
-    hosts.find(
-      (candidate) =>
-        candidate.credentialId && remoteClient.hasSecret(candidate.credentialId),
-    );
-  if (!host) {
+  if (preferredDeviceId && !requestedHost) {
     return false;
   }
+
+  const candidates: typeof hosts = [];
+  const addCandidate = (host: (typeof hosts)[number] | undefined) => {
+    if (host && !candidates.some((candidate) => candidate.id === host.id)) {
+      candidates.push(host);
+    }
+  };
+  addCandidate(requestedHost);
+  if (!preferredDeviceId) {
+    for (const session of remoteClient.listSessions()) {
+      addCandidate(hosts.find((host) => host.id === session.hostId));
+    }
+    for (const host of hosts) {
+      if (host.credentialId && remoteClient.hasSecret(host.credentialId)) {
+        addCandidate(host);
+      }
+    }
+  }
+
+  let lastError: unknown;
+  for (const host of candidates) {
+    try {
+      if (await connectRuntimeForHost(host)) {
+        return true;
+      }
+    } catch (error) {
+      lastError = error;
+      if (preferredDeviceId) {
+        throw error;
+      }
+      console.warn(`[HERDR_RUNTIME] Could not connect ${host.name}`, error);
+    }
+  }
+  if (lastError) {
+    throw lastError;
+  }
+  return false;
+}
+
+async function connectRuntimeForHost(host: HostProfile): Promise<boolean> {
   herdrRepository.selectDevice(host.id);
   await AsyncStorage.setItem(SELECTED_DEVICE_KEY, host.id);
-
+  const existingSession = remoteClient.getSession(host.id);
   if (existingSession) {
     try {
       await herdrRepository.connect(existingSession.sessionId, host.id);
+      refreshSessions();
       return true;
     } catch {
       await remoteClient.disconnect(existingSession.sessionId);
       refreshSessions();
     }
   }
-
   if (!host.credentialId || !remoteClient.hasSecret(host.credentialId)) {
     return false;
   }
-  const session = await connectHost(host, '');
-  refreshSessions();
+  const session = await ensureHostConnected(host);
   try {
     await herdrRepository.connect(session.sessionId, host.id);
     return true;
