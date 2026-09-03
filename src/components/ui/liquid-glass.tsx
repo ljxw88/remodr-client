@@ -77,7 +77,10 @@ half4 main(float2 fragCoord) {
   float edge = pow(1.0 - inward, max(u_splay, 0.001) * 3.0);
 
   float2 n = surfaceNormal(p, u_half, u_radius);
-  float2 bend = n * u_refraction * edge;
+  // Sample towards the centre, not outwards. The normal points out of the
+  // shape, so bending along it would read pixels from outside the pill and
+  // drag the surrounding canvas in as a dark crescent along the rim.
+  float2 bend = -n * u_refraction * edge;
 
   // Red bends least and blue most, so the fringe only appears where the
   // surface is steep.
@@ -87,7 +90,9 @@ half4 main(float2 fragCoord) {
   half b = image.eval(fragCoord + bend * (1.0 + spread)).b;
   half3 col = half3(r, g, b);
 
-  float sheen = u_light * pow(clamp(-n.y, 0.0, 1.0), 2.0) * edge;
+  // Light both horizontal edges. A top-only highlight biases the body's
+  // luminance upwards and reads as the fill being offset.
+  float sheen = u_light * pow(abs(n.y), 2.0) * edge;
   col += half3(half(sheen));
 
   return half4(col, 1.0);

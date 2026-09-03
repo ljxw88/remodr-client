@@ -76,7 +76,8 @@ export function LiquidGlassButton({ label, disabled = false, onPress }: Props) {
         <Canvas style={StyleSheet.absoluteFill} opaque colorSpace="srgb">
           <Fill color={Colors.background} />
 
-          {/* Backdrop the glass refracts. */}
+          {/* Backdrop the glass refracts. Kept vertically centred so the
+              refraction has similar content to bend on every edge. */}
           <Group>
             <Circle cx={orbCentre} cy={size.height / 2} r={size.height}>
               <RadialGradient
@@ -87,11 +88,11 @@ export function LiquidGlassButton({ label, disabled = false, onPress }: Props) {
             </Circle>
             <Circle
               cx={size.width - size.height * 0.35}
-              cy={size.height * 0.3}
-              r={size.height * 0.8}>
+              cy={size.height / 2}
+              r={size.height * 0.85}>
               <RadialGradient
-                c={{ x: size.width - size.height * 0.35, y: size.height * 0.3 }}
-                r={size.height * 0.8}
+                c={{ x: size.width - size.height * 0.35, y: size.height / 2 }}
+                r={size.height * 0.85}
                 colors={['rgba(255,255,255,0.16)', 'rgba(255,255,255,0)']}
               />
             </Circle>
@@ -115,7 +116,7 @@ export function LiquidGlassButton({ label, disabled = false, onPress }: Props) {
             <LinearGradient
               start={{ x: 0, y: 0 }}
               end={{ x: 0, y: size.height }}
-              colors={['rgba(255,255,255,0.20)', 'rgba(255,255,255,0.06)', 'rgba(255,255,255,0.12)']}
+              colors={['rgba(255,255,255,0.18)', 'rgba(255,255,255,0.05)', 'rgba(255,255,255,0.18)']}
             />
           </RoundedRect>
 
