@@ -92,10 +92,10 @@ function AgentRow({ agent }: Readonly<{ agent: RemoteAgent }>) {
       onPress={() => router.push({ pathname: '/agents/[id]', params: { id: agent.id } })}
       style={({ pressed }) => [
         styles.agent,
-        {
-          backgroundColor: pressed ? theme.backgroundSelected : 'transparent',
-          transform: [{ scale: pressed ? 0.99 : 1 }],
-        },
+        // No press scale. A row fills its card edge to edge, so shrinking it
+        // pulls the highlight in and leaves the card showing down both sides.
+        // Scale belongs to controls that stand alone on the canvas.
+        { backgroundColor: pressed ? theme.backgroundSelected : 'transparent' },
       ]}>
       <View style={[styles.providerIcon, { backgroundColor: theme.accentSoft }]}>
         <AgentProviderIcon provider={agent.provider} tintColor={theme.accent} />
