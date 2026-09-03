@@ -139,10 +139,14 @@ Status must remain understandable without color alone.
 
 ## Agents
 
-- Select one saved device at a time; changing devices replaces the active Herdr
-  runtime rather than mixing identities from different servers.
+- Keep a live runtime for every connected device. Selecting a device changes
+  only what is displayed; it never reconnects or reloads.
+- Show one device's spaces and agents at a time so identities from different
+  servers never mix.
 - Show every Herdr workspace as a horizontally scrollable space filter,
   including spaces that do not currently contain an agent.
+- Keep the Spaces label row at a fixed height. Selecting a space may reveal its
+  close action, but must not shift the filter chips or agent list.
 - Group agents by Herdr workspace in one surface rather than separate floating
   cards for every row.
 - Show provider, working directory, and explicit status.
@@ -156,6 +160,9 @@ Status must remain understandable without color alone.
 - Place a secondary **New space** action beside it. Space creation asks for an
   optional label and required remote root folder, then selects the new space
   and continues directly into the agent picker.
+- Keep the root-folder field editable, with a trailing folder action that opens
+  a connected-device directory browser and writes the chosen path back into
+  the field.
 
 ## Conversation
 
@@ -171,6 +178,22 @@ Status must remain understandable without color alone.
   soft depth.
 - Render questions and permissions as inline native cards.
 - Never expose terminal keys or Ctrl+C as the primary agent interaction.
+
+### Assistant markdown
+
+- Render assistant replies as real markdown, not plain text: headings, bold and
+  italic, nested lists, tables, blockquotes, links, and rules.
+- Keep headings restrained. The largest is the 24/32 detail heading; markdown
+  never introduces oversized display type.
+- Give every fenced block a header with its language and a copy action, and
+  scroll code horizontally rather than wrapping it, so indentation-sensitive
+  output stays readable.
+- Colour `diff` fences per line: green additions, red removals, violet hunk
+  headers, muted file metadata.
+- Size table columns to fit the screen and scroll wide tables horizontally.
+  Never clip a column off the edge.
+- Repair partial markdown while streaming so an unterminated emphasis or fence
+  never leaks raw markers into the transcript.
 
 ## Server status
 
