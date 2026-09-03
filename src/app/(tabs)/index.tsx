@@ -18,6 +18,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
 import { type AgentWorkspace } from '@/domain/herdr';
 import { connectAgentRuntime } from '@/features/agents/connect-runtime';
+import { LiquidGlassButton } from '@/features/agents/liquid-glass-button';
 import {
   AgentWorkspaceList,
   compareAgents,
@@ -193,31 +194,11 @@ export default function AgentsScreen() {
     <Screen includeTopSafeArea>
       <View style={styles.header}>
         <View style={styles.headerActions}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="New agent"
-            accessibilityState={{ disabled: !canCreateAgent }}
+          <LiquidGlassButton
+            label={compactHeader ? 'Agent' : 'New agent'}
             disabled={!canCreateAgent}
             onPress={() => setShowNewAgent(true)}
-            style={({ pressed }) => [
-              styles.newAgent,
-              {
-                backgroundColor: canCreateAgent ? theme.accent : theme.backgroundElement,
-                opacity: canCreateAgent ? (pressed ? 0.78 : 1) : 0.42,
-              },
-            ]}>
-            <AppIcon
-              name={{ ios: 'plus', android: 'add', web: 'add' }}
-              size={18}
-              tintColor={canCreateAgent ? theme.onAccent : theme.textMuted}
-              fallback="+"
-            />
-            <ThemedText
-              type="smallBold"
-              style={{ color: canCreateAgent ? theme.onAccent : theme.textMuted }}>
-              {compactHeader ? 'Agent' : 'New agent'}
-            </ThemedText>
-          </Pressable>
+          />
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="New space"

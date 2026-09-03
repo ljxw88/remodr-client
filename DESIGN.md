@@ -164,6 +164,22 @@ Status must remain understandable without color alone.
   a connected-device directory browser and writes the chosen path back into
   the field.
 
+### Liquid glass primary action
+
+**New agent** is the one sanctioned exception to the flat, restrained surface
+rules above. It renders through Skia as refractive glass over an animated
+chromatic orb.
+
+- Treat it as scoped to this single hero control. Do not spread refraction,
+  iridescence, or animated rim light to other buttons, rows, or the canvas.
+- Draw the refracted content and the glass in one canvas. A backdrop filter
+  reads only what that canvas already painted, so a glass pill over the bare
+  near-black canvas has nothing to bend.
+- Keep distortion strongest at the rim and near zero in the centre, so the
+  label stays readable.
+- Stop the animation when the control is disabled, the screen loses focus, or
+  the app is backgrounded. A shader that animates forever keeps the GPU awake.
+
 ## Conversation
 
 - Assistant content sits directly on the canvas for maximum reading space.
