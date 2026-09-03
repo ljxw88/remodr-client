@@ -45,8 +45,14 @@ the normal user flow.
 
 ## Visual principles
 
-- Keep the canvas a pure, solid near-black. Do not add gradients, glow blobs,
-  decorative wallpaper, or noisy texture.
+- The canvas is one indigo-to-near-black vertical gradient, rendered once
+  behind the whole navigator. Screens, stacks and headers stay transparent so
+  it never restarts per route or seams between them.
+- Keep the canvas otherwise clean. No glow blobs, decorative wallpaper, or
+  noisy texture, and no second gradient competing with the canvas.
+- Scrims and edge fades must stay low in alpha. A scrim tuned against the old
+  solid near-black reads as a grey band over the saturated top of the
+  gradient.
 - Use one violet accent for primary actions, selection, focus, and active
   states.
 - Use glass sparingly for floating or elevated modules. On Android, pair the
@@ -60,6 +66,7 @@ the normal user flow.
 | Role | Value |
 |---|---|
 | Canvas | `#08090B` |
+| Canvas gradient | `#2E3BE0` → `#232C9E` → `#0E1130` → `#08090B` |
 | Surface | `#141519` |
 | Selected surface | `#202229` |
 | Border | `#252830` |

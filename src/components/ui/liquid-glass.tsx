@@ -85,17 +85,18 @@ half4 main(float2 fragCoord) {
   // Red bends least and blue most, so the fringe only appears where the
   // surface is steep.
   float spread = u_dispersion * edge;
+  half4 centre = image.eval(fragCoord + bend);
   half r = image.eval(fragCoord + bend * (1.0 - spread)).r;
-  half g = image.eval(fragCoord + bend).g;
   half b = image.eval(fragCoord + bend * (1.0 + spread)).b;
-  half3 col = half3(r, g, b);
+  half3 col = half3(r, centre.g, b);
 
-  // Light both horizontal edges. A top-only highlight biases the body's
-  // luminance upwards and reads as the fill being offset.
+  // Colours are premultiplied, so the highlight is scaled by alpha and the
+  // sampled alpha is preserved. Returning an opaque result here would paint
+  // over whatever sits behind the canvas.
   float sheen = u_light * pow(abs(n.y), 2.0) * edge;
-  col += half3(half(sheen));
+  col += half3(half(sheen)) * centre.a;
 
-  return half4(col, 1.0);
+  return half4(col, centre.a);
 }
 `;
 

@@ -8,15 +8,13 @@ import {
   DockMotionProvider,
   FloatingDock,
 } from '@/features/navigation/floating-dock';
-import { useTheme } from '@/hooks/use-theme';
 
 export default function TabsLayout() {
-  const theme = useTheme();
   const blurTarget = useRef<View | null>(null);
 
   return (
     <DockMotionProvider>
-      <Tabs style={[styles.tabs, { backgroundColor: theme.background }]}>
+      <Tabs style={styles.tabs}>
         <BlurTargetView ref={blurTarget} style={styles.content}>
           <AnimatedTabContent>
             <TabSlot style={styles.content} />

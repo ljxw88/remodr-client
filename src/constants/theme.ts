@@ -28,6 +28,16 @@ export const Colors = {
   warningSoft: 'rgba(255,198,92,0.14)',
 } as const;
 
+/**
+ * App canvas. A saturated indigo at the top falls away to the near-black
+ * `background` well before the lower third, so content lower on a screen still
+ * sits on a neutral surface.
+ */
+export const BackgroundGradient = {
+  colors: ['#2E3BE0', '#232C9E', '#0E1130', Colors.background] as const,
+  locations: [0, 0.28, 0.58, 1] as const,
+};
+
 export type ThemeColor = keyof typeof Colors;
 
 export const Fonts = {

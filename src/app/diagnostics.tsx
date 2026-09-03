@@ -33,7 +33,7 @@ export default function DiagnosticsScreen() {
         options={{
           title: 'Diagnostics',
           headerShown: true,
-          headerStyle: { backgroundColor: theme.background },
+          headerStyle: { backgroundColor: 'transparent' },
           headerTintColor: theme.text,
           headerShadowVisible: false,
         }}

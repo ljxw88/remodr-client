@@ -1,7 +1,6 @@
 import {
   Canvas,
   Circle,
-  Fill,
   Group,
   LinearGradient,
   RadialGradient,
@@ -73,9 +72,7 @@ export function LiquidGlassButton({ label, disabled = false, onPress }: Props) {
         { opacity: disabled ? 0.45 : pressed ? 0.9 : 1 },
       ]}>
       {size ? (
-        <Canvas style={StyleSheet.absoluteFill} opaque colorSpace="srgb">
-          <Fill color={Colors.background} />
-
+        <Canvas style={StyleSheet.absoluteFill} colorSpace="srgb">
           {/* Backdrop the glass refracts. Kept vertically centred so the
               refraction has similar content to bend on every edge. */}
           <Group>
@@ -83,7 +80,7 @@ export function LiquidGlassButton({ label, disabled = false, onPress }: Props) {
               <RadialGradient
                 c={{ x: orbCentre, y: size.height / 2 }}
                 r={size.height}
-                colors={['rgba(108,124,255,0.55)', 'rgba(108,124,255,0.12)', 'rgba(8,9,11,0)']}
+                colors={['rgba(108,124,255,0.55)', 'rgba(108,124,255,0.12)', 'rgba(108,124,255,0)']}
               />
             </Circle>
             <Circle

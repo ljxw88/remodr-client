@@ -118,10 +118,10 @@ const styles = StyleSheet.create({
   },
   topFade: {
     experimental_backgroundImage:
-      'linear-gradient(180deg, rgba(8,9,11,0.30) 0%, rgba(8,9,11,0.08) 52%, rgba(8,9,11,0) 100%)',
+      'linear-gradient(180deg, rgba(8,9,11,0.16) 0%, rgba(8,9,11,0.05) 55%, rgba(8,9,11,0) 100%)',
   },
   bottomFade: {
     experimental_backgroundImage:
-      'linear-gradient(180deg, rgba(8,9,11,0) 0%, rgba(8,9,11,0.10) 48%, rgba(8,9,11,0.38) 100%)',
+      'linear-gradient(180deg, rgba(8,9,11,0) 0%, rgba(8,9,11,0.10) 48%, rgba(8,9,11,0.34) 100%)',
   },
 });

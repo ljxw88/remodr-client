@@ -3,7 +3,6 @@ import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MaxContentWidth, Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
 
 type Props = {
   children: ReactNode;
@@ -11,14 +10,14 @@ type Props = {
   includeTopSafeArea?: boolean;
 };
 
+/** Transparent so the app gradient behind the navigator shows through. */
 export function Screen({ children, style, includeTopSafeArea = false }: Props) {
-  const theme = useTheme();
   const edges = includeTopSafeArea
     ? (['top', 'left', 'right'] as const)
     : (['left', 'right'] as const);
 
   return (
-    <SafeAreaView edges={edges} style={[styles.safe, { backgroundColor: theme.background }]}>
+    <SafeAreaView edges={edges} style={styles.safe}>
       <View style={[styles.body, style]}>{children}</View>
     </SafeAreaView>
   );
