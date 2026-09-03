@@ -8,7 +8,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   TextInput,
   View,
@@ -52,10 +51,10 @@ export default function AgentConversationScreen() {
   const followLatestOnLayout = useRef(true);
   const blurTargetRef = useRef<View | null>(null);
   const displayItems = useMemo(
-    () => groupToolActivity(conversation?.items ?? []).reverse(),
+    () => groupToolActivity(conversation?.items ?? []),
     [conversation?.items],
   );
-  const latestItemMarker = displayItemMarker(displayItems[0]);
+  const latestItemMarker = displayItemMarker(displayItems[displayItems.length - 1]);
   const activeTool = useMemo(
     () =>
       [...(conversation?.items ?? [])]
@@ -106,8 +105,7 @@ export default function AgentConversationScreen() {
     }
     followLatestOnLayout.current = true;
     const timer = setTimeout(() => {
-      listRef.current?.scrollToOffset({
-        offset: 0,
+      listRef.current?.scrollToEnd({
         animated: hasFollowedInitialContent.current,
       });
       hasFollowedInitialContent.current = true;
@@ -191,13 +189,14 @@ export default function AgentConversationScreen() {
             ref={listRef}
             data={displayItems}
             keyExtractor={(item) => item.id}
-            inverted
-            maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
             renderItem={({ item }) => (
               <ConversationRow
                 item={item}
                 agent={agent}
                 onEdit={(text) => setDraft(text)}
+                onTimelineInteraction={() => {
+                  followLatestOnLayout.current = false;
+                }}
               />
             )}
             showsVerticalScrollIndicator={false}
@@ -208,17 +207,17 @@ export default function AgentConversationScreen() {
             contentContainerStyle={styles.messages}
             onLayout={() => {
               if (followLatestOnLayout.current) {
-                listRef.current?.scrollToOffset({ offset: 0, animated: false });
+                listRef.current?.scrollToEnd({ animated: false });
               }
             }}
             onContentSizeChange={() => {
               if (followLatestOnLayout.current) {
-                listRef.current?.scrollToOffset({ offset: 0, animated: false });
+                listRef.current?.scrollToEnd({ animated: false });
                 followLatestOnLayout.current = false;
                 hasFollowedInitialContent.current = true;
               }
             }}
-            ListHeaderComponent={
+            ListFooterComponent={
               <View
                 style={[
                   styles.composerSpacer,
@@ -310,15 +309,22 @@ function ConversationRow({
   item,
   agent,
   onEdit,
+  onTimelineInteraction,
 }: {
   item: ConversationDisplayItem;
   agent: RemoteAgent;
   onEdit: (text: string) => void;
+  onTimelineInteraction: () => void;
 }) {
   const theme = useTheme();
 
   if (item.kind === 'tool_group') {
-    return <ToolActivityGroupRow group={item} />;
+    return (
+      <ToolActivityGroupRow
+        group={item}
+        onToggle={onTimelineInteraction}
+      />
+    );
   }
 
   if (item.kind === 'user_message') {
@@ -493,7 +499,13 @@ function ToolActivityRow({
   );
 }
 
-function ToolActivityGroupRow({ group }: { group: ToolActivityGroup }) {
+function ToolActivityGroupRow({
+  group,
+  onToggle,
+}: {
+  group: ToolActivityGroup;
+  onToggle: () => void;
+}) {
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);
   return (
@@ -502,33 +514,19 @@ function ToolActivityGroupRow({ group }: { group: ToolActivityGroup }) {
         styles.toolGroup,
         { backgroundColor: theme.backgroundElement, borderColor: theme.border },
       ]}>
-      {!expanded ? (
-        <ToolGroupToggle
-          group={group}
-          onPress={() => setExpanded(true)}
-        />
-      ) : null}
+      <ToolGroupToggle
+        group={group}
+        expanded={expanded}
+        onPress={() => {
+          onToggle();
+          setExpanded((current) => !current);
+        }}
+      />
       {expanded ? (
-        <View
-          style={[
-            styles.toolDetailsContainer,
-            { borderTopColor: theme.border },
-          ]}>
-          <ScrollView
-            nestedScrollEnabled
-            showsVerticalScrollIndicator
-            style={styles.toolDetailsViewport}
-            contentContainerStyle={styles.toolDetails}>
-            {group.items.map((item) => (
-              <ToolActivityRow key={item.id} item={item} />
-            ))}
-          </ScrollView>
-          <ToolGroupToggle
-            group={group}
-            expanded
-            floating
-            onPress={() => setExpanded(false)}
-          />
+        <View style={[styles.toolDetails, { borderTopColor: theme.border }]}>
+          {group.items.map((item) => (
+            <ToolActivityRow key={item.id} item={item} />
+          ))}
         </View>
       ) : null}
     </View>
@@ -538,12 +536,10 @@ function ToolActivityGroupRow({ group }: { group: ToolActivityGroup }) {
 function ToolGroupToggle({
   group,
   expanded = false,
-  floating = false,
   onPress,
 }: {
   group: ToolActivityGroup;
   expanded?: boolean;
-  floating?: boolean;
   onPress: () => void;
 }) {
   const theme = useTheme();
@@ -555,11 +551,6 @@ function ToolGroupToggle({
       onPress={onPress}
       style={({ pressed }) => [
         styles.toolSummary,
-        floating && styles.toolFloatingSummary,
-        {
-          backgroundColor: floating ? theme.chrome : 'transparent',
-          borderColor: floating ? theme.border : 'transparent',
-        },
         pressed && styles.pressed,
       ]}>
       <AppIcon
@@ -864,25 +855,7 @@ const styles = StyleSheet.create({
   toolDetails: {
     gap: Spacing.one,
     padding: Spacing.one,
-    paddingTop: 52,
-  },
-  toolDetailsContainer: {
-    maxHeight: 360,
-    position: 'relative',
     borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  toolDetailsViewport: {
-    maxHeight: 360,
-  },
-  toolFloatingSummary: {
-    position: 'absolute',
-    top: Spacing.one,
-    left: Spacing.one,
-    right: Spacing.one,
-    zIndex: 20,
-    elevation: 4,
-    borderWidth: 1,
-    borderRadius: Radius.tag,
   },
   toolCopy: {
     flex: 1,
