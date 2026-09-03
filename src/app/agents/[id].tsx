@@ -8,6 +8,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   TextInput,
   View,
@@ -527,13 +528,69 @@ function ToolActivityGroupRow({ group }: { group: ToolActivityGroup }) {
         />
       </Pressable>
       {expanded ? (
-        <View style={[styles.toolDetails, { borderTopColor: theme.border }]}>
-          {group.items.map((item) => (
-            <ToolActivityRow key={item.id} item={item} />
-          ))}
+        <View
+          style={[
+            styles.toolDetailsContainer,
+            { borderTopColor: theme.border },
+          ]}>
+          <ScrollView
+            nestedScrollEnabled
+            showsVerticalScrollIndicator
+            style={styles.toolDetailsViewport}
+            contentContainerStyle={styles.toolDetails}>
+            {group.items.map((item) => (
+              <ToolActivityRow key={item.id} item={item} />
+            ))}
+            <ToolCollapseButton
+              count={group.items.length}
+              onPress={() => setExpanded(false)}
+            />
+          </ScrollView>
+          <ToolCollapseButton
+            count={group.items.length}
+            floating
+            onPress={() => setExpanded(false)}
+          />
         </View>
       ) : null}
     </View>
+  );
+}
+
+function ToolCollapseButton({
+  count,
+  floating = false,
+  onPress,
+}: {
+  count: number;
+  floating?: boolean;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Collapse tool calls"
+      accessibilityState={{ expanded: true }}
+      onPress={onPress}
+      style={({ pressed }) => [
+        floating ? styles.toolFloatingCollapse : styles.toolCollapse,
+        {
+          backgroundColor: floating ? theme.chrome : 'transparent',
+          borderColor: theme.border,
+        },
+        pressed && styles.pressed,
+      ]}>
+      <ThemedText type="caption" style={{ color: theme.accent }}>
+        Collapse {count} tool {count === 1 ? 'call' : 'calls'}
+      </ThemedText>
+      <AppIcon
+        name={{ ios: 'chevron.up', android: 'expand_less', web: 'expand_less' }}
+        size={17}
+        tintColor={theme.accent}
+        fallback="⌃"
+      />
+    </Pressable>
   );
 }
 
@@ -816,7 +873,39 @@ const styles = StyleSheet.create({
   toolDetails: {
     gap: Spacing.one,
     padding: Spacing.one,
+    paddingTop: 52,
+  },
+  toolDetailsContainer: {
+    maxHeight: 360,
+    position: 'relative',
     borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  toolDetailsViewport: {
+    maxHeight: 360,
+  },
+  toolCollapse: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.one,
+    marginTop: Spacing.half,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  toolFloatingCollapse: {
+    position: 'absolute',
+    top: Spacing.one,
+    left: Spacing.one,
+    right: Spacing.one,
+    minHeight: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.one,
+    zIndex: 20,
+    elevation: 4,
+    borderWidth: 1,
+    borderRadius: Radius.tag,
   },
   toolCopy: {
     flex: 1,
