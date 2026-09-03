@@ -56,7 +56,7 @@ export function NewSpaceSheet({ deviceName, onClose, onCreate }: Props) {
       visible
       onRequestClose={creating ? undefined : onClose}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.overlay}>
         <Pressable
           accessibilityRole="button"
