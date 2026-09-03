@@ -22,13 +22,13 @@ const AbyssTheme = {
   ...DarkTheme,
   colors: {
     ...DarkTheme.colors,
-    primary: '#6C7CFF',
+    primary: Colors.accent,
     // Transparent so the gradient behind the navigator shows through.
     background: 'transparent',
-    card: '#141519',
-    text: '#F5F6F8',
-    border: '#252830',
-    notification: '#6C7CFF',
+    card: Colors.backgroundElement,
+    text: Colors.text,
+    border: Colors.border,
+    notification: Colors.accent,
   },
 };
 

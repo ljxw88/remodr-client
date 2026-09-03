@@ -1,6 +1,5 @@
 import { Stack, useLocalSearchParams } from 'expo-router';
-import { BlurTargetView, BlurView } from 'expo-blur';
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -16,6 +15,11 @@ import {
 import { MarkdownMessage } from '@/components/markdown/markdown-message';
 import { AppButton } from '@/components/ui/app-button';
 import { AppIcon } from '@/components/ui/app-icon';
+import {
+  BlurBackdropProvider,
+  BlurBackdropTarget,
+} from '@/components/ui/blur-backdrop';
+import { GlassSurface } from '@/components/ui/glass-surface';
 import { Screen } from '@/components/ui/screen';
 import { ScrollEdgeFrame } from '@/components/ui/scroll-edge-frame';
 import { ThemedText } from '@/components/themed-text';
@@ -39,7 +43,6 @@ import { herdrRepository } from '@/services/herdr-repository';
 
 export default function AgentConversationScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const theme = useTheme();
   const runtime = useHerdr();
   const agent = runtime.runtime.agents.find((item) => item.id === id);
   const agentId = agent?.id;
@@ -50,7 +53,6 @@ export default function AgentConversationScreen() {
   const listRef = useRef<FlatList<ConversationDisplayItem>>(null);
   const hasFollowedInitialContent = useRef(false);
   const followLatestOnLayout = useRef(true);
-  const blurTargetRef = useRef<View | null>(null);
   const displayItems = useMemo(
     () => groupToolActivity(conversation?.items ?? []),
     [conversation?.items],
@@ -175,16 +177,19 @@ export default function AgentConversationScreen() {
   return (
     <Screen style={styles.screen}>
       <Stack.Screen options={{ title: agent.title }} />
-      <KeyboardAvoidingView
+      <BlurBackdropProvider>
+        <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={88}>
-        <BlurTargetView ref={blurTargetRef} style={styles.flex}>
+        {/* The composer is a sibling of the target, never a child: a BlurView
+            nested inside the target it samples crashes the render thread. */}
+        <BlurBackdropTarget>
           <AgentHeader agent={agent} />
           {runtime.connection !== 'connected' ? (
-            <View style={[styles.banner, { backgroundColor: theme.glass, borderColor: theme.glassBorder }]}>
+            <GlassSurface style={styles.banner}>
               <ThemedText type="small">Reconnecting</ThemedText>
-            </View>
+            </GlassSurface>
           ) : null}
           <ScrollEdgeFrame>
             {(onScroll) => (
@@ -240,7 +245,7 @@ export default function AgentConversationScreen() {
               />
             )}
           </ScrollEdgeFrame>
-        </BlurTargetView>
+        </BlurBackdropTarget>
         <Composer
           value={draft}
           onChangeText={setDraft}
@@ -248,7 +253,6 @@ export default function AgentConversationScreen() {
           sending={sending}
           request={conversation?.activeHumanRequest ?? null}
           provider={providerLabel(agent.provider)}
-          blurTarget={blurTargetRef}
           working={showWorking}
           workingLabel={
             activeTool?.title
@@ -256,7 +260,8 @@ export default function AgentConversationScreen() {
               : `${providerLabel(agent.provider)} is working`
           }
         />
-      </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
+      </BlurBackdropProvider>
     </Screen>
   );
 }
@@ -700,7 +705,6 @@ function Composer({
   sending,
   request,
   provider,
-  blurTarget,
   working,
   workingLabel,
 }: {
@@ -710,7 +714,6 @@ function Composer({
   sending: boolean;
   request: HumanRequest | null;
   provider: string;
-  blurTarget: RefObject<View | null>;
   working: boolean;
   workingLabel: string;
 }) {
@@ -729,12 +732,7 @@ function Composer({
           </ThemedText>
         </View>
       ) : null}
-      <BlurView
-        blurTarget={blurTarget}
-        blurMethod="dimezisBlurViewSdk31Plus"
-        intensity={72}
-        tint="dark"
-        style={[styles.inputFrame, { borderColor: theme.glassBorder }]}>
+      <GlassSurface tone="chrome" strength="strong" style={styles.inputFrame}>
         <TextInput
           accessibilityLabel={request ? 'Write an answer' : `Message ${provider}`}
           multiline
@@ -764,7 +762,7 @@ function Composer({
             fallback="↑"
           />
         </Pressable>
-      </BlurView>
+      </GlassSurface>
     </View>
   );
 }
@@ -811,7 +809,8 @@ const styles = StyleSheet.create({
     minHeight: 40,
     justifyContent: 'center',
     paddingHorizontal: Spacing.two + Spacing.half,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    marginHorizontal: Spacing.two + Spacing.half,
+    marginBottom: Spacing.one,
   },
   messages: {
     flexGrow: 1,
@@ -945,9 +944,6 @@ const styles = StyleSheet.create({
     paddingLeft: Spacing.two,
     paddingRight: 6,
     paddingVertical: 6,
-    borderWidth: 1,
-    borderRadius: Radius.glass,
-    overflow: 'hidden',
     elevation: 8,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 10 },

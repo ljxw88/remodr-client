@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 
 import { EmptyState } from '@/components/ui/empty-state';
+import { GlassSurface } from '@/components/ui/glass-surface';
 import { AppIcon } from '@/components/ui/app-icon';
 import { Screen } from '@/components/ui/screen';
 import { ScrollEdgeFrame } from '@/components/ui/scroll-edge-frame';
@@ -72,15 +73,7 @@ export default function HostsScreen() {
 
       {!loading && !error && hosts.length > 0 ? (
         <View style={styles.controls}>
-          <View
-            style={[
-              styles.search,
-              {
-                backgroundColor: theme.glassStrong,
-                borderColor: theme.glassBorder,
-                shadowColor: theme.glassShadow,
-              },
-            ]}>
+          <GlassSurface strength="strong" style={styles.search}>
             <AppIcon
               name={{ ios: 'magnifyingglass', android: 'search', web: 'search' }}
               size={19}
@@ -97,7 +90,7 @@ export default function HostsScreen() {
               autoCorrect={false}
               style={[styles.searchInput, { color: theme.text }]}
             />
-          </View>
+          </GlassSurface>
           <ThemedText type="caption" themeColor="textMuted">
             {hosts.length} {hosts.length === 1 ? 'server' : 'servers'}
           </ThemedText>
@@ -112,11 +105,7 @@ export default function HostsScreen() {
           </ThemedText>
         </View>
       ) : error ? (
-        <View
-          style={[
-            styles.errorState,
-            { backgroundColor: theme.fog, borderColor: theme.border },
-          ]}>
+        <GlassSurface style={styles.errorState}>
           <ThemedText type="section">Couldn’t load your servers</ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
             {error}
@@ -129,7 +118,7 @@ export default function HostsScreen() {
               Try again
             </ThemedText>
           </Pressable>
-        </View>
+        </GlassSurface>
       ) : hosts.length === 0 ? (
         <EmptyState
           title="Add your first server"
@@ -202,12 +191,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.one,
     paddingHorizontal: Spacing.two,
-    borderWidth: 1,
-    borderRadius: Radius.glass,
     elevation: 2,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 1,
-    shadowRadius: 14,
   },
   searchInput: {
     flex: 1,
@@ -230,7 +214,5 @@ const styles = StyleSheet.create({
   errorState: {
     gap: Spacing.one,
     padding: Spacing.three,
-    borderWidth: 1,
-    borderRadius: Radius.control,
   },
 });

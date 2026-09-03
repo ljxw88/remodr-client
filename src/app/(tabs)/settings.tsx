@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { ScrollView, StyleSheet, Switch, View } from 'react-native';
 
 import { AppIcon } from '@/components/ui/app-icon';
+import { GlassSurface } from '@/components/ui/glass-surface';
 import { AppButton } from '@/components/ui/app-button';
 import { Screen } from '@/components/ui/screen';
 import { ScrollEdgeFrame } from '@/components/ui/scroll-edge-frame';
@@ -139,23 +140,14 @@ function PressableRow({ onPress }: { onPress: () => void }) {
 }
 
 function SettingsGroup({ title, children }: { title: string; children: React.ReactNode }) {
-  const theme = useTheme();
   return (
     <View style={styles.group}>
       <ThemedText type="label" themeColor="textMuted" style={styles.groupTitle}>
         {title.toUpperCase()}
       </ThemedText>
-      <View
-        style={[
-          styles.card,
-          {
-            backgroundColor: theme.glassStrong,
-            borderColor: theme.glassBorder,
-            shadowColor: theme.glassShadow,
-          },
-        ]}>
+      <GlassSurface strength="strong" style={styles.card}>
         {children}
-      </View>
+      </GlassSurface>
     </View>
   );
 }
@@ -196,13 +188,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.half,
   },
   card: {
-    borderWidth: 1,
-    borderRadius: 22,
-    overflow: 'hidden',
     elevation: 2,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 1,
-    shadowRadius: 16,
   },
   row: {
     minHeight: 60,

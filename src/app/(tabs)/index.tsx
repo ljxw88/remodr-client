@@ -19,6 +19,7 @@ import { Radius, Spacing } from '@/constants/theme';
 import { type AgentWorkspace } from '@/domain/herdr';
 import { connectAgentRuntime } from '@/features/agents/connect-runtime';
 import { LiquidGlassButton } from '@/features/agents/liquid-glass-button';
+import { GlassRim, GlassSurface } from '@/components/ui/glass-surface';
 import {
   AgentWorkspaceList,
   compareAgents,
@@ -209,10 +210,10 @@ export default function AgentsScreen() {
               styles.newSpace,
               {
                 backgroundColor: theme.glassStrong,
-                borderColor: theme.glassBorder,
                 opacity: canCreateSpace ? (pressed ? 0.72 : 1) : 0.42,
               },
             ]}>
+            <GlassRim radius={Radius.pill} />
             <AppIcon
               name={{ ios: 'plus', android: 'add', web: 'add' }}
               size={17}
@@ -229,6 +230,7 @@ export default function AgentsScreen() {
             styles.connection,
             { backgroundColor: connectionBackground, borderColor: connectionColor },
           ]}>
+          <GlassRim radius={Radius.pill} color="transparent" />
           <View
             style={[
               styles.connectionDot,
@@ -296,15 +298,7 @@ export default function AgentsScreen() {
       ) : null}
 
       {state.connection === 'reconnecting' || state.connection === 'error' ? (
-        <View
-          style={[
-            styles.banner,
-            {
-              backgroundColor: theme.glassStrong,
-              borderColor: theme.glassBorder,
-              shadowColor: theme.glassShadow,
-            },
-          ]}>
+        <GlassSurface strength="strong" style={styles.banner}>
           <ThemedText type="small">
             {state.connection === 'reconnecting' ? 'Reconnecting to Herdr' : 'Herdr unavailable'}
           </ThemedText>
@@ -318,7 +312,7 @@ export default function AgentsScreen() {
               Retry
             </ThemedText>
           </Pressable>
-        </View>
+        </GlassSurface>
       ) : null}
 
       {hostsLoading ? (
@@ -511,10 +505,10 @@ function FilterChip({
         styles.filterChip,
         {
           backgroundColor: selected ? theme.accentSoft : theme.backgroundElement,
-          borderColor: selected ? theme.accent : theme.border,
           opacity: disabled ? 0.5 : pressed ? 0.72 : 1,
         },
       ]}>
+      <GlassRim radius={Radius.pill} color={selected ? theme.accent : undefined} />
       {statusColor ? (
         <View style={[styles.deviceDot, { backgroundColor: statusColor }]} />
       ) : null}
@@ -555,8 +549,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.half,
-    paddingHorizontal: Spacing.one,
-    borderWidth: 1,
+    paddingHorizontal: Spacing.one + Spacing.half,
     borderRadius: Radius.pill,
   },
   connection: {
@@ -611,7 +604,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.half,
     paddingHorizontal: Spacing.one + Spacing.half,
-    borderWidth: 1,
     borderRadius: Radius.pill,
   },
   deviceDot: {
@@ -627,12 +619,6 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
     paddingHorizontal: Spacing.two,
     marginBottom: Spacing.two,
-    borderWidth: 1,
-    borderRadius: Radius.glass,
-    elevation: 3,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 1,
-    shadowRadius: 18,
   },
   list: {
     gap: Spacing.three,

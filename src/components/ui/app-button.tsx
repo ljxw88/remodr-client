@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text } from 'react-native';
 
+import { GlassRim } from '@/components/ui/glass-surface';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -42,6 +43,7 @@ export function AppButton({
           transform: [{ scale: pressed ? 0.985 : 1 }],
         },
       ]}>
+      <GlassRim radius={Radius.pill} color={borderColor} highlight={variant === 'secondary'} />
       <Text style={[styles.label, { color }]}>{label}</Text>
     </Pressable>
   );
@@ -51,7 +53,6 @@ const styles = StyleSheet.create({
   button: {
     minHeight: 48,
     borderRadius: Radius.pill,
-    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: Spacing.two,

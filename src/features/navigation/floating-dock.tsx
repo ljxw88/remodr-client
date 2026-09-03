@@ -1,4 +1,3 @@
-import { BlurView } from 'expo-blur';
 import { TabTrigger } from 'expo-router/ui';
 import { usePathname } from 'expo-router';
 import {
@@ -11,22 +10,20 @@ import {
   useRef,
   useState,
   type PropsWithChildren,
-  type RefObject,
 } from 'react';
 import {
   AccessibilityInfo,
   Animated,
   Easing,
-  Platform,
   StyleSheet,
   useWindowDimensions,
-  View,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AppIcon } from '@/components/ui/app-icon';
+import { AppIcon, type AppIconName } from '@/components/ui/app-icon';
+import { GlassSurface } from '@/components/ui/glass-surface';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -215,11 +212,7 @@ export function useDockContentInset() {
   );
 }
 
-type FloatingDockProps = {
-  blurTarget: RefObject<View | null>;
-};
-
-export function FloatingDock({ blurTarget }: FloatingDockProps) {
+export function FloatingDock() {
   const motion = useContext(DockMotionContext);
   if (!motion) {
     throw new Error('FloatingDock must be used inside DockMotionProvider');
@@ -258,24 +251,12 @@ export function FloatingDock({ blurTarget }: FloatingDockProps) {
           shadowColor: theme.glassShadow,
         },
       ]}>
-      <BlurView
-        blurTarget={blurTarget}
-        blurMethod="dimezisBlurViewSdk31Plus"
-        intensity={84}
-        tint="dark"
-        style={[
-          styles.dock,
-          {
-            backgroundColor:
-              Platform.OS === 'android' ? 'rgba(25,27,32,0.82)' : theme.glass,
-            borderColor: theme.glassBorder,
-          },
-        ]}>
+      <GlassSurface tone="chrome" strength="strong" style={styles.dock}>
         <DockTab
           name="agents"
           label="Agents"
           active={pathname === '/'}
-          icon={{ ios: 'bubble.left.and.bubble.right', android: 'forum', web: 'forum' }}
+          icon={{ ios: 'terminal', android: 'smart_toy', web: 'smart_toy' }}
           progress={motion.progress}
           reduceMotion={motion.shouldReduceMotion}
           onPress={motion.expand}
@@ -298,7 +279,7 @@ export function FloatingDock({ blurTarget }: FloatingDockProps) {
           reduceMotion={motion.shouldReduceMotion}
           onPress={motion.expand}
         />
-      </BlurView>
+      </GlassSurface>
     </Animated.View>
   );
 }
@@ -307,11 +288,7 @@ type DockTabProps = {
   name: 'agents' | 'servers' | 'settings';
   label: string;
   active: boolean;
-  icon: {
-    ios: 'bubble.left.and.bubble.right' | 'desktopcomputer' | 'gear';
-    android: 'forum' | 'computer' | 'settings';
-    web: 'forum' | 'computer' | 'settings';
-  };
+  icon: AppIconName;
   progress: Animated.Value;
   reduceMotion: () => boolean;
   onPress: () => void;
@@ -374,6 +351,7 @@ function DockTab({
           styles.focusIndicator,
           {
             backgroundColor: theme.accentSoft,
+            borderColor: theme.glassBorder,
             opacity: focusProgress,
             transform: [{ scale: focusScale }],
           },
@@ -424,9 +402,6 @@ const styles = StyleSheet.create({
     alignItems: 'stretch',
     gap: Spacing.half,
     padding: 5,
-    borderWidth: 1,
-    borderRadius: Radius.glass,
-    overflow: 'hidden',
   },
   tab: {
     flex: 1,
@@ -441,6 +416,7 @@ const styles = StyleSheet.create({
   focusIndicator: {
     ...StyleSheet.absoluteFill,
     borderRadius: Radius.control,
+    borderWidth: StyleSheet.hairlineWidth * 2,
   },
   label: {
     fontFamily: Fonts.medium,

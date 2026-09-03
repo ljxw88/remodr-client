@@ -41,6 +41,13 @@ export function ScrollEdgeFrame({
     [bottomOpacity, onScroll, topOpacity],
   );
   const scrollContent = children(handleScroll);
+  /**
+   * Android gets the gradient dissolve only. The fade sits *over* the rows it
+   * softens, so a nested blur target is the one shape Android cannot draw: it
+   * would put the edge's BlurView inside the same subtree the screen's chrome
+   * already samples, and overlapping targets recurse until the render thread
+   * overflows. The dissolve alone reads almost identically.
+   */
   const supportsCroppedEdgeBlur = Platform.OS !== 'android';
 
   return (
@@ -61,7 +68,7 @@ export function ScrollEdgeFrame({
           {supportsCroppedEdgeBlur ? (
             <BlurView
               blurTarget={blurTarget}
-              intensity={14}
+              intensity={EDGE_BLUR.top}
               tint="dark"
               style={[StyleSheet.absoluteFill, styles.blur]}
             />
@@ -78,7 +85,7 @@ export function ScrollEdgeFrame({
           {supportsCroppedEdgeBlur ? (
             <BlurView
               blurTarget={blurTarget}
-              intensity={18}
+              intensity={EDGE_BLUR.bottom}
               tint="dark"
               style={[StyleSheet.absoluteFill, styles.blur]}
             />
@@ -91,6 +98,9 @@ export function ScrollEdgeFrame({
 }
 
 const { color, topHeight, topOpacity, bottomHeight, bottomOpacity } = ScrollEdgeFade;
+
+/** Rows soften as well as dim on the way out, where the platform allows it. */
+const EDGE_BLUR = { top: 14, bottom: 18 };
 
 /** Eased so the dissolve builds gradually rather than banding at the edge. */
 const TOP_FADE = [
@@ -129,11 +139,11 @@ const styles = StyleSheet.create({
     bottom: 0,
     height: bottomHeight,
   },
-  blur: {
-    opacity: 0.3,
-  },
   topFade: {
     experimental_backgroundImage: TOP_FADE,
+  },
+  blur: {
+    opacity: 0.3,
   },
   bottomFade: {
     experimental_backgroundImage: BOTTOM_FADE,

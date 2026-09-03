@@ -3,8 +3,9 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { AppIcon } from '@/components/ui/app-icon';
+import { GlassSurface } from '@/components/ui/glass-surface';
 import { MarqueeText } from '@/components/ui/marquee-text';
-import { Fonts, Radius, Spacing } from '@/constants/theme';
+import { Fonts, Spacing } from '@/constants/theme';
 import {
   providerLabel,
   statusLabel,
@@ -68,15 +69,7 @@ function WorkspaceGroup({
           {agents.length}
         </ThemedText>
       </View>
-      <View
-        style={[
-          styles.workspaceCard,
-          {
-            backgroundColor: theme.glassStrong,
-            borderColor: theme.glassBorder,
-            shadowColor: theme.glassShadow,
-          },
-        ]}>
+      <GlassSurface strength="strong" style={styles.workspaceCard}>
         {agents.map((agent, index) => (
           <View key={agent.id}>
             <AgentRow agent={agent} />
@@ -85,7 +78,7 @@ function WorkspaceGroup({
             ) : null}
           </View>
         ))}
-      </View>
+      </GlassSurface>
     </View>
   );
 }
@@ -176,13 +169,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.7,
   },
   workspaceCard: {
-    borderWidth: 1,
-    borderRadius: Radius.glass,
-    overflow: 'hidden',
     elevation: 2,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 1,
-    shadowRadius: 18,
   },
   agent: {
     minHeight: 68,
