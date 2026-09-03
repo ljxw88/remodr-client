@@ -23,3 +23,7 @@ intentionally omitted from the mobile product surface.
 Assistant replies are rendered as native markdown. See
 [`markdown-rendering.md`](markdown-rendering.md) and
 [ADR 009](adr/009-assistant-markdown-rendering.md).
+
+Shader-backed visual effects use Skia. See
+[`skia-effects.md`](skia-effects.md) and
+[ADR 011](adr/011-skia-visual-effects.md).

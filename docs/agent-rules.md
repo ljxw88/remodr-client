@@ -9,3 +9,8 @@
 7. Map native errors to typed application errors. Never show raw stack traces.
 8. Run TypeScript, tests, and Android builds that cover the change.
 9. Do not claim a feature works if it was not verified.
+10. Web and Framer designs do not port directly. Translate each technique to a
+    React Native equivalent before agreeing to a design, and build shader
+    effects with Skia following [`skia-effects.md`](skia-effects.md).
+11. Verify visual work from device screenshots, not from reasoning. Shader
+    mistakes render plausibly rather than failing.
