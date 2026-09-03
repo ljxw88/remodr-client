@@ -1,6 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
+  closeSpaceInputSchema,
+  closeSpaceResultSchema,
   conversationSchema,
   createAgentInputSchema,
   createAgentResultSchema,
@@ -8,57 +10,95 @@ import {
   createSpaceResultSchema,
   EMPTY_RUNTIME,
   runtimeStateSchema,
+  totalDeviceAgentCount,
   type AgentConversation,
   type AgentStatus,
   type BridgeEvent,
   type BridgeHello,
+  type CloseSpaceResult,
   type CreateAgentInput,
   type CreateAgentResult,
   type CreateSpaceInput,
   type CreateSpaceResult,
+  type DeviceAgentCounts,
   type HerdrConnectionState,
   type HerdrRuntimeState,
 } from '@/domain/herdr';
 import { HerdrBridgeTransport } from '@/services/herdr-bridge-transport';
 
-const RUNTIME_CACHE_KEY = 'remote-workspace.herdr.runtime.v1';
+const RUNTIME_CACHE_KEY = 'remote-workspace.herdr.runtimes.v2';
 const DRAFT_PREFIX = 'remote-workspace.herdr.draft.';
 
+/** Everything the app knows about one device's Herdr runtime. */
+export type DeviceRuntimeState = {
+  deviceId: string;
+  connection: HerdrConnectionState;
+  runtime: HerdrRuntimeState;
+  hello: BridgeHello | null;
+  lastError: string | null;
+};
+
+/**
+ * `connection`, `runtime`, `hello` and `lastError` mirror the selected device,
+ * so screens that only care about the current device keep reading one runtime.
+ */
 export type HerdrRepositoryState = {
   connection: HerdrConnectionState;
   selectedDeviceId: string | null;
   runtime: HerdrRuntimeState;
+  devices: Record<string, DeviceRuntimeState>;
+  agentCountsByDevice: DeviceAgentCounts;
   hello: BridgeHello | null;
   lastError: string | null;
   lastSemanticEvent: string | null;
 };
 
-const INITIAL_STATE: HerdrRepositoryState = {
-  connection: 'disconnected',
-  selectedDeviceId: null,
-  runtime: EMPTY_RUNTIME,
-  hello: null,
-  lastError: null,
-  lastSemanticEvent: null,
+type DeviceConnection = {
+  deviceId: string;
+  sessionId: string | null;
+  transport: HerdrBridgeTransport;
+  unsubscribe: () => void;
+  state: DeviceRuntimeState;
 };
 
 const EMPTY_CONVERSATIONS = new Map<string, AgentConversation>();
 
+function emptyDeviceState(deviceId: string): DeviceRuntimeState {
+  return {
+    deviceId,
+    connection: 'disconnected',
+    runtime: EMPTY_RUNTIME,
+    hello: null,
+    lastError: null,
+  };
+}
+
 export class HerdrRepository {
-  private state: HerdrRepositoryState = INITIAL_STATE;
+  private devices = new Map<string, DeviceConnection>();
+  private selectedDeviceId: string | null = null;
+  private lastSemanticEvent: string | null = null;
+  private state: HerdrRepositoryState = {
+    connection: 'disconnected',
+    selectedDeviceId: null,
+    runtime: EMPTY_RUNTIME,
+    devices: {},
+    agentCountsByDevice: {},
+    hello: null,
+    lastError: null,
+    lastSemanticEvent: null,
+  };
   private conversations = EMPTY_CONVERSATIONS;
   private listeners = new Set<() => void>();
   private conversationListeners = new Set<() => void>();
-  private unsubscribeTransport: (() => void) | null = null;
-  private sessionId: string | null = null;
+  /** Agent IDs are hashed, so ownership has to be indexed from snapshots. */
+  private agentIndex = new Map<string, string>();
+  private hydrateAttempt: Promise<void> | null = null;
+  private hydrated = false;
 
-  constructor(private readonly transport = new HerdrBridgeTransport()) {
-    this.unsubscribeTransport = this.transport.subscribe((event) => {
-      void this.handleEvent(event).catch((error) => {
-        console.warn('[HERDR_RUNTIME] Could not apply bridge event', error);
-      });
-    });
-  }
+  constructor(
+    private readonly createTransport: () => HerdrBridgeTransport = () =>
+      new HerdrBridgeTransport(),
+  ) {}
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -75,107 +115,179 @@ export class HerdrRepository {
   getConversation = (agentId: string): AgentConversation | null =>
     this.conversations.get(agentId) ?? null;
 
+  /** Pure view state. Selecting a device never reconnects anything. */
   selectDevice(deviceId: string) {
-    if (this.state.selectedDeviceId === deviceId) {
+    if (this.selectedDeviceId === deviceId) {
       return;
     }
-    this.setState({
-      ...this.state,
-      selectedDeviceId: deviceId,
-    });
+    this.selectedDeviceId = deviceId;
+    this.publish();
   }
 
   async hydrate(): Promise<void> {
+    if (this.hydrated) {
+      return;
+    }
+    if (this.hydrateAttempt) {
+      return this.hydrateAttempt;
+    }
+    const attempt = this.hydrateFromStorage().finally(() => {
+      this.hydrated = true;
+      if (this.hydrateAttempt === attempt) {
+        this.hydrateAttempt = null;
+      }
+    });
+    this.hydrateAttempt = attempt;
+    return attempt;
+  }
+
+  private async hydrateFromStorage(): Promise<void> {
     const raw = await AsyncStorage.getItem(RUNTIME_CACHE_KEY);
     if (!raw) {
       return;
     }
     try {
-      const runtime = runtimeStateSchema.parse(JSON.parse(raw));
-      this.setState({
-        ...this.state,
-        runtime,
-      });
+      const cached = JSON.parse(raw) as Record<string, unknown>;
+      for (const [deviceId, value] of Object.entries(cached)) {
+        const parsed = runtimeStateSchema.safeParse(value);
+        const device = this.deviceConnection(deviceId);
+        if (parsed.success && device.state.runtime === EMPTY_RUNTIME) {
+          device.state = { ...device.state, runtime: parsed.data };
+        }
+      }
+      this.reindexAgents();
+      this.publish();
     } catch (error) {
-      console.warn('[HERDR_RUNTIME] Ignored invalid cached runtime', error);
+      console.warn('[HERDR_RUNTIME] Ignored invalid cached runtimes', error);
     }
   }
 
+  private deviceConnection(deviceId: string): DeviceConnection {
+    const existing = this.devices.get(deviceId);
+    if (existing) {
+      return existing;
+    }
+    const transport = this.createTransport();
+    const connection: DeviceConnection = {
+      deviceId,
+      sessionId: null,
+      transport,
+      unsubscribe: () => undefined,
+      state: emptyDeviceState(deviceId),
+    };
+    connection.unsubscribe = transport.subscribe((event) => {
+      void this.handleEvent(deviceId, event).catch((error) => {
+        console.warn('[HERDR_RUNTIME] Could not apply bridge event', error);
+      });
+    });
+    this.devices.set(deviceId, connection);
+    return connection;
+  }
+
+  /**
+   * Starts or reuses this device's bridge. Other devices keep their bridges and
+   * runtimes, so switching back to them needs no work.
+   */
   async connect(sessionId: string, deviceId: string): Promise<void> {
-    this.selectDevice(deviceId);
-    if (
-      this.sessionId === sessionId &&
-      this.state.connection === 'connected' &&
-      this.state.runtime.deviceId === deviceId
-    ) {
+    const device = this.deviceConnection(deviceId);
+    if (device.sessionId === sessionId && device.state.connection === 'connected') {
       return;
     }
-    this.sessionId = sessionId;
-    this.setConnection(this.state.runtime.agents.length > 0 ? 'reconnecting' : 'starting_bridge');
+    device.sessionId = sessionId;
+    this.setDeviceState(deviceId, {
+      connection: device.state.runtime.agents.length > 0 ? 'reconnecting' : 'starting_bridge',
+    });
     try {
-      const hello = await this.transport.start(sessionId);
-      this.setState({
-        ...this.state,
+      const hello = await device.transport.start(sessionId);
+      this.setDeviceState(deviceId, {
         connection: 'synchronizing',
         hello,
         lastError: hello.warning ?? null,
       });
-      await this.refreshRuntime();
-      this.setState({
-        ...this.state,
+      await this.refreshDeviceRuntime(deviceId);
+      this.setDeviceState(deviceId, {
         connection: 'connected',
         hello,
         lastError: null,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not start Herdr.';
-      if (this.sessionId === sessionId) {
-        this.sessionId = null;
+      if (device.sessionId === sessionId) {
+        device.sessionId = null;
       }
-      this.setState({
-        ...this.state,
-        connection: 'error',
-        lastError: message,
-      });
+      this.setDeviceState(deviceId, { connection: 'error', lastError: message });
       throw error;
     }
   }
 
+  async disconnectDevice(deviceId: string): Promise<void> {
+    const device = this.devices.get(deviceId);
+    if (!device) {
+      return;
+    }
+    device.unsubscribe();
+    this.devices.delete(deviceId);
+    this.reindexAgents();
+    this.publish();
+    await device.transport.stop();
+  }
+
   async retry(): Promise<void> {
-    if (!this.sessionId || !this.state.selectedDeviceId) {
+    const device = this.selectedDeviceId ? this.devices.get(this.selectedDeviceId) : undefined;
+    if (!device?.sessionId) {
       throw new Error('No SSH session is available.');
     }
-    await this.connect(this.sessionId, this.state.selectedDeviceId);
+    await this.connect(device.sessionId, device.deviceId);
+  }
+
+  isDeviceConnected(deviceId: string): boolean {
+    return this.devices.get(deviceId)?.state.connection === 'connected';
   }
 
   async createAgent(input: CreateAgentInput): Promise<CreateAgentResult> {
     const request = createAgentInputSchema.parse(input);
+    const deviceId = this.requireSelectedDeviceId();
     const result = createAgentResultSchema.parse(
-      await this.transport.request('agent.create', request),
+      await this.deviceConnection(deviceId).transport.request('agent.create', request),
     );
-    await this.installRuntime(result.runtime);
+    await this.installRuntime(deviceId, result.runtime);
     return result;
   }
 
   async createSpace(input: CreateSpaceInput): Promise<CreateSpaceResult> {
     const request = createSpaceInputSchema.parse(input);
+    const deviceId = this.requireSelectedDeviceId();
     const result = createSpaceResultSchema.parse(
-      await this.transport.request('workspace.create', request),
+      await this.deviceConnection(deviceId).transport.request('workspace.create', request),
     );
-    await this.installRuntime(result.runtime);
+    await this.installRuntime(deviceId, result.runtime);
+    return result;
+  }
+
+  async closeSpace(workspaceId: string, closeGroup = false): Promise<CloseSpaceResult> {
+    const request = closeSpaceInputSchema.parse({ workspaceId, closeGroup });
+    const deviceId = this.requireSelectedDeviceId();
+    const result = closeSpaceResultSchema.parse(
+      await this.deviceConnection(deviceId).transport.request('workspace.close', request),
+    );
+    await this.installRuntime(deviceId, result.runtime);
     return result;
   }
 
   async refreshRuntime(): Promise<void> {
+    await this.refreshDeviceRuntime(this.requireSelectedDeviceId());
+  }
+
+  private async refreshDeviceRuntime(deviceId: string): Promise<void> {
     const runtime = runtimeStateSchema.parse(
-      await this.transport.request('runtime.snapshot', {}),
+      await this.deviceConnection(deviceId).transport.request('runtime.snapshot', {}),
     );
-    await this.installRuntime(runtime);
+    await this.installRuntime(deviceId, runtime);
   }
 
   async loadConversation(agentId: string): Promise<AgentConversation> {
     const conversation = conversationSchema.parse(
-      await this.transport.request('agent.conversation', { agentId }),
+      await this.transportForAgent(agentId).request('agent.conversation', { agentId }),
     );
     this.conversations = new Map(this.conversations).set(agentId, conversation);
     this.conversationListeners.forEach((listener) => listener());
@@ -192,7 +304,7 @@ export class HerdrRepository {
       this.conversationListeners.forEach((listener) => listener());
     }
     try {
-      await this.transport.request('agent.send_message', { agentId, text });
+      await this.transportForAgent(agentId).request('agent.send_message', { agentId, text });
       this.updateAgentStatus(agentId, 'working');
       await this.saveDraft(agentId, '');
     } catch (error) {
@@ -209,7 +321,7 @@ export class HerdrRepository {
     requestId: string,
     answer: { selectedOptionIds?: string[]; customText?: string | null },
   ): Promise<void> {
-    await this.transport.request('human_request.answer', {
+    await this.transportForAgent(agentId).request('human_request.answer', {
       agentId,
       requestId,
       answer,
@@ -218,7 +330,7 @@ export class HerdrRepository {
   }
 
   async interrupt(agentId: string): Promise<void> {
-    await this.transport.request('agent.interrupt', { agentId });
+    await this.transportForAgent(agentId).request('agent.interrupt', { agentId });
   }
 
   async loadDraft(agentId: string): Promise<string> {
@@ -241,24 +353,38 @@ export class HerdrRepository {
       herdrVersion: this.state.runtime.herdrVersion,
       herdrSession: this.state.runtime.herdrSession,
       herdrSocket: this.state.runtime.socketPath,
-      agents: this.state.runtime.agents.length,
+      connectedDevices: [...this.devices.values()].filter(
+        (device) => device.state.connection === 'connected',
+      ).length,
+      agents: totalDeviceAgentCount(this.state.agentCountsByDevice),
       lastRuntimeEvent: this.state.runtime.lastRuntimeEvent,
       lastSemanticEvent: this.state.lastSemanticEvent,
       lastError: this.state.lastError,
     };
   }
 
-  private async handleEvent(event: BridgeEvent): Promise<void> {
+  private requireSelectedDeviceId(): string {
+    if (!this.selectedDeviceId) {
+      throw new Error('No device is selected.');
+    }
+    return this.selectedDeviceId;
+  }
+
+  private transportForAgent(agentId: string): HerdrBridgeTransport {
+    const deviceId = this.agentIndex.get(agentId);
+    const device = deviceId ? this.devices.get(deviceId) : undefined;
+    if (!device) {
+      throw new Error('That agent is not available on a connected device.');
+    }
+    return device.transport;
+  }
+
+  private async handleEvent(deviceId: string, event: BridgeEvent): Promise<void> {
     if (event.event === 'runtime.snapshot') {
       const parsed = runtimeStateSchema.safeParse(event.data);
-      if (
-        parsed.success &&
-        (!this.state.selectedDeviceId ||
-          !parsed.data.deviceId ||
-          parsed.data.deviceId === this.state.selectedDeviceId)
-      ) {
-        await this.installRuntime(parsed.data);
-        this.setConnection('connected');
+      if (parsed.success) {
+        await this.installRuntime(deviceId, parsed.data);
+        this.setDeviceState(deviceId, { connection: 'connected' });
       }
       return;
     }
@@ -267,47 +393,87 @@ export class HerdrRepository {
       if (typeof data.agentId === 'string' && this.conversations.has(data.agentId)) {
         await this.loadConversation(data.agentId);
       }
-      this.setState({
-        ...this.state,
-        lastSemanticEvent: event.event,
-      });
+      this.lastSemanticEvent = event.event;
+      this.publish();
       return;
     }
     if (event.event === 'connection.warning') {
       const data = event.data as { message?: unknown };
-      this.setState({
-        ...this.state,
+      this.setDeviceState(deviceId, {
         connection: 'reconnecting',
         lastError: typeof data.message === 'string' ? data.message : 'Connection interrupted.',
       });
     }
   }
 
-  private async installRuntime(runtime: HerdrRuntimeState): Promise<void> {
-    this.setState({
-      ...this.state,
-      runtime,
-    });
-    await AsyncStorage.setItem(RUNTIME_CACHE_KEY, JSON.stringify(runtime));
+  private async installRuntime(
+    fallbackDeviceId: string,
+    runtime: HerdrRuntimeState,
+  ): Promise<void> {
+    const deviceId = runtime.deviceId ?? fallbackDeviceId;
+    this.setDeviceState(deviceId, { runtime });
+    this.reindexAgents();
+    this.publish();
+    await this.persistRuntimes();
+  }
+
+  private reindexAgents() {
+    this.agentIndex = new Map();
+    for (const device of this.devices.values()) {
+      for (const agent of device.state.runtime.agents) {
+        this.agentIndex.set(agent.id, device.deviceId);
+      }
+    }
+  }
+
+  private async persistRuntimes(): Promise<void> {
+    const cache: Record<string, HerdrRuntimeState> = {};
+    for (const [deviceId, device] of this.devices) {
+      if (device.state.runtime !== EMPTY_RUNTIME) {
+        cache[deviceId] = device.state.runtime;
+      }
+    }
+    await AsyncStorage.setItem(RUNTIME_CACHE_KEY, JSON.stringify(cache));
   }
 
   private updateAgentStatus(agentId: string, status: AgentStatus) {
-    const runtime = reduceAgentStatus(this.state.runtime, agentId, status);
-    this.setState({
-      ...this.state,
-      runtime,
-    });
+    const deviceId = this.agentIndex.get(agentId);
+    const device = deviceId ? this.devices.get(deviceId) : undefined;
+    if (!device) {
+      return;
+    }
+    const runtime = reduceAgentStatus(device.state.runtime, agentId, status);
+    if (runtime !== device.state.runtime) {
+      this.setDeviceState(device.deviceId, { runtime });
+    }
   }
 
-  private setConnection(connection: HerdrConnectionState) {
-    this.setState({
-      ...this.state,
-      connection,
-    });
+  private setDeviceState(deviceId: string, patch: Partial<DeviceRuntimeState>) {
+    const device = this.deviceConnection(deviceId);
+    device.state = { ...device.state, ...patch };
+    this.publish();
   }
 
-  private setState(state: HerdrRepositoryState) {
-    this.state = state;
+  private publish() {
+    const selected = this.selectedDeviceId
+      ? this.devices.get(this.selectedDeviceId)
+      : undefined;
+    const devices: Record<string, DeviceRuntimeState> = {};
+    const agentCountsByDevice: DeviceAgentCounts = {};
+    for (const [deviceId, device] of this.devices) {
+      devices[deviceId] = device.state;
+      agentCountsByDevice[deviceId] = device.state.runtime.agents.length;
+    }
+    this.state = {
+      connection: selected?.state.connection ?? 'disconnected',
+      selectedDeviceId: this.selectedDeviceId,
+      runtime: selected?.state.runtime ?? EMPTY_RUNTIME,
+      devices,
+      agentCountsByDevice,
+      hello: selected?.state.hello ?? null,
+      lastError: selected?.state.lastError ?? null,
+      lastSemanticEvent: this.lastSemanticEvent,
+    };
     this.listeners.forEach((listener) => listener());
   }
 }

@@ -45,8 +45,12 @@ contains protocol NDJSON only.
 
 Each bridge receives the saved host ID as its device identity. Agent IDs combine
 that device identity with Herdr's stable pane ID, so provider-session discovery
-cannot change list or conversation identity. The mobile client keeps one device
-runtime selected at a time and filters its complete workspace list locally.
+cannot change list or conversation identity. The mobile client holds one bridge
+and one runtime per connected device, and displays the selected device's
+workspace list. Selecting a device performs no I/O. Agent requests are routed to
+the bridge that owns the agent, resolved through an index built from snapshots
+because agent IDs are hashed. See
+[ADR 010](adr/010-multi-device-herdr-runtime.md).
 
 Agent creation uses the server's `server.agent_manifests` catalog followed by
 `tab.create` and `agent.start`. A partially created pane is closed on failure.

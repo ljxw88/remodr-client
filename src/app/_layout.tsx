@@ -11,6 +11,7 @@ import { useEffect } from 'react';
 import { Platform } from 'react-native';
 
 import { autoConnectSavedHosts } from '@/features/connection/saved-host-connector';
+import { connectAgentRuntime } from '@/features/agents/connect-runtime';
 SplashScreen.preventAutoHideAsync();
 SplashScreen.setOptions({ duration: 300, fade: true });
 
@@ -42,9 +43,11 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (Platform.OS === 'android') {
-      void autoConnectSavedHosts().catch((error) => {
-        console.warn('[SSH] Could not load saved hosts for auto-connect', error);
-      });
+      void autoConnectSavedHosts()
+        .then(() => connectAgentRuntime())
+        .catch((error) => {
+          console.warn('[SSH] Could not load saved hosts for auto-connect', error);
+        });
     }
   }, []);
 

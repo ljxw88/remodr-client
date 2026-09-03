@@ -7,83 +7,26 @@ import { herdrRepository } from '@/services/herdr-repository';
 import { hostRepository } from '@/services/host-repository';
 import { remoteClient } from '@/services/native-remote-client';
 
-let activeConnectionAttempt: Promise<boolean> | null = null;
-let activeDeviceId: string | undefined;
 const SELECTED_DEVICE_KEY = 'remote-workspace.herdr.selected-device';
 
-export function connectAgentRuntime(deviceId?: string): Promise<boolean> {
-  if (activeConnectionAttempt && activeDeviceId === deviceId) {
-    return activeConnectionAttempt;
+/** One in-flight attempt per device, so devices never block each other. */
+const attempts = new Map<string, Promise<boolean>>();
+
+function connectDevice(host: HostProfile): Promise<boolean> {
+  const active = attempts.get(host.id);
+  if (active) {
+    return active;
   }
-  const previous = activeConnectionAttempt;
-  const attempt = previous
-    ? previous.catch(() => false).then(() => connectAgentRuntimeOnce(deviceId))
-    : connectAgentRuntimeOnce(deviceId);
-  activeDeviceId = deviceId;
-  const trackedAttempt = attempt.finally(() => {
-    if (activeConnectionAttempt === trackedAttempt) {
-      activeConnectionAttempt = null;
-      activeDeviceId = undefined;
+  const attempt = connectDeviceOnce(host).finally(() => {
+    if (attempts.get(host.id) === attempt) {
+      attempts.delete(host.id);
     }
   });
-  activeConnectionAttempt = trackedAttempt;
-  return activeConnectionAttempt;
+  attempts.set(host.id, attempt);
+  return attempt;
 }
 
-async function connectAgentRuntimeOnce(preferredDeviceId?: string): Promise<boolean> {
-  await AsyncStorage.removeItem('remote-workspace.herdr-discovery');
-  await herdrRepository.hydrate();
-  const hosts = await hostRepository.list();
-  const storedDeviceId = await AsyncStorage.getItem(SELECTED_DEVICE_KEY);
-  const requestedDeviceId = preferredDeviceId ?? storedDeviceId ?? undefined;
-  const requestedHost = requestedDeviceId
-    ? hosts.find((candidate) => candidate.id === requestedDeviceId)
-    : undefined;
-  if (preferredDeviceId && !requestedHost) {
-    return false;
-  }
-
-  const candidates: typeof hosts = [];
-  const addCandidate = (host: (typeof hosts)[number] | undefined) => {
-    if (host && !candidates.some((candidate) => candidate.id === host.id)) {
-      candidates.push(host);
-    }
-  };
-  addCandidate(requestedHost);
-  if (!preferredDeviceId) {
-    for (const session of remoteClient.listSessions()) {
-      addCandidate(hosts.find((host) => host.id === session.hostId));
-    }
-    for (const host of hosts) {
-      if (host.credentialId && remoteClient.hasSecret(host.credentialId)) {
-        addCandidate(host);
-      }
-    }
-  }
-
-  let lastError: unknown;
-  for (const host of candidates) {
-    try {
-      if (await connectRuntimeForHost(host)) {
-        return true;
-      }
-    } catch (error) {
-      lastError = error;
-      if (preferredDeviceId) {
-        throw error;
-      }
-      console.warn(`[HERDR_RUNTIME] Could not connect ${host.name}`, error);
-    }
-  }
-  if (lastError) {
-    throw lastError;
-  }
-  return false;
-}
-
-async function connectRuntimeForHost(host: HostProfile): Promise<boolean> {
-  herdrRepository.selectDevice(host.id);
-  await AsyncStorage.setItem(SELECTED_DEVICE_KEY, host.id);
+async function connectDeviceOnce(host: HostProfile): Promise<boolean> {
   const existingSession = remoteClient.getSession(host.id);
   if (existingSession) {
     try {
@@ -111,4 +54,57 @@ async function connectRuntimeForHost(host: HostProfile): Promise<boolean> {
     refreshSessions();
     throw error;
   }
+}
+
+async function selectDevice(deviceId: string): Promise<void> {
+  herdrRepository.selectDevice(deviceId);
+  await AsyncStorage.setItem(SELECTED_DEVICE_KEY, deviceId);
+}
+
+/**
+ * Connects one device, or every eligible device when no device is given.
+ * Each device keeps its own bridge, so a later switch needs no reconnect.
+ */
+export async function connectAgentRuntime(deviceId?: string): Promise<boolean> {
+  await herdrRepository.hydrate();
+  const hosts = await hostRepository.list();
+
+  if (deviceId) {
+    const host = hosts.find((candidate) => candidate.id === deviceId);
+    if (!host) {
+      return false;
+    }
+    await selectDevice(host.id);
+    if (herdrRepository.isDeviceConnected(host.id)) {
+      return true;
+    }
+    return connectDevice(host);
+  }
+
+  const eligible = hosts.filter(
+    (host) =>
+      remoteClient.getSession(host.id) ||
+      (host.credentialId && remoteClient.hasSecret(host.credentialId)),
+  );
+  if (eligible.length === 0) {
+    return false;
+  }
+
+  const storedDeviceId = await AsyncStorage.getItem(SELECTED_DEVICE_KEY);
+  const preferred =
+    eligible.find((host) => host.id === storedDeviceId) ??
+    eligible.find((host) => remoteClient.getSession(host.id)) ??
+    eligible[0];
+  await selectDevice(preferred.id);
+
+  const results = await Promise.allSettled(eligible.map((host) => connectDevice(host)));
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') {
+      console.warn(
+        `[HERDR_RUNTIME] Could not connect ${eligible[index].name}`,
+        result.reason,
+      );
+    }
+  });
+  return results.some((result) => result.status === 'fulfilled' && result.value);
 }

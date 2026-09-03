@@ -12,14 +12,16 @@ provides runtime identity and status; provider adapters provide semantic
 messages, tool activity, questions, and TODOs where reliable. Raw agent output
 is a conservative fallback, not the primary interface.
 
-The Agents screen selects one saved device at a time, exposes every Herdr
+The Agents screen shows one saved device at a time, exposes every Herdr
 workspace as a filterable space, and can start Copilot, Claude, Codex, or
 OpenCode in a new tab inside the selected space. Herdr events refresh additions,
 removals, moves, and status changes from authoritative snapshots.
 
 Every saved device with a Keystore credential reconnects in the background when
-the tab shell starts. Selecting a device or connecting from Server status reuses
-the same deduplicated connection attempt and does not ask for its password again.
+the tab shell starts, and each one keeps its own Herdr bridge and runtime.
+Switching devices is therefore instant and never reloads a session. Connecting
+from Server status reuses the same deduplicated connection attempt and does not
+ask for its password again.
 
 Top-level navigation uses a custom floating glass dock that collapses to compact
 icons during downward scrolling and expands on upward scrolling or tab changes.
