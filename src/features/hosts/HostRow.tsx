@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppIcon } from '@/components/ui/app-icon';
+import { MarqueeText } from '@/components/ui/marquee-text';
 import { ThemedText } from '@/components/themed-text';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import type { HostProfile } from '@/domain/hosts';
@@ -16,7 +17,13 @@ export function HostRow({ host, onPress }: Props) {
   const theme = useTheme();
   const session = useHostSession(host.id);
   const connected = session?.status === 'connected';
-  const status = connected ? 'Connected' : session?.status === 'connecting' ? 'Connecting…' : 'Offline';
+  const connecting = session?.status === 'connecting';
+  const statusColor = connected
+    ? theme.success
+    : connecting
+      ? theme.warning
+      : theme.textMuted;
+  const status = connected ? 'Connected' : connecting ? 'Connecting…' : 'Offline';
 
   return (
     <Pressable
@@ -43,29 +50,22 @@ export function HostRow({ host, onPress }: Props) {
       </View>
       <View style={styles.content}>
         <View style={styles.top}>
-          <ThemedText type="section" style={styles.name} numberOfLines={1}>
+          <MarqueeText
+            type="caption"
+            style={styles.name}
+            containerStyle={styles.nameContainer}>
             {host.name}
-          </ThemedText>
+          </MarqueeText>
           <View
+            accessibilityLabel={status}
             style={[
-              styles.status,
+              styles.statusDot,
               {
-                backgroundColor: connected ? theme.successSoft : theme.glass,
-                borderColor: connected ? theme.success : theme.border,
+                backgroundColor: connected || connecting ? statusColor : 'transparent',
+                borderColor: statusColor,
               },
-            ]}>
-            <View
-              style={[
-                styles.statusDot,
-                { backgroundColor: connected ? theme.success : theme.textMuted },
-              ]}
-            />
-            <ThemedText
-              type="caption"
-              style={{ color: connected ? theme.success : theme.textMuted }}>
-              {status}
-            </ThemedText>
-          </View>
+            ]}
+          />
         </View>
         <ThemedText
           type="caption"
@@ -99,47 +99,43 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.two,
     paddingVertical: Spacing.two,
     gap: Spacing.two,
-    minHeight: 88,
+    minHeight: 76,
     elevation: 3,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 1,
     shadowRadius: 18,
   },
   iconFrame: {
-    width: 48,
-    height: 48,
+    width: 44,
+    height: 44,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
   content: {
     flex: 1,
-    gap: Spacing.half,
+    gap: 4,
   },
   top: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.two,
+    gap: Spacing.one,
+  },
+  nameContainer: {
+    flex: 1,
+    minWidth: 0,
   },
   name: {
-    flex: 1,
+    fontFamily: Fonts.semibold,
+    fontWeight: 600,
   },
   endpoint: {
     fontFamily: Fonts.mono,
   },
-  status: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.half,
-    borderWidth: 1,
-    borderRadius: Radius.pill,
-    paddingHorizontal: Spacing.one,
-    paddingVertical: 3,
-  },
   statusDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 3,
+    width: 7,
+    height: 7,
+    borderWidth: 1.5,
+    borderRadius: 3.5,
   },
 });

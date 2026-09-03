@@ -290,6 +290,45 @@ class BridgeProtocolTest(unittest.TestCase):
         self.assertEqual(result["workspaceId"], "w2")
         self.assertEqual(result["runtime"]["workspaces"][0]["name"], "Project")
 
+    def test_closes_workspace_and_reconciles_runtime(self):
+        bridge = Bridge()
+        bridge.runtime = {
+            "connectionState": "connected",
+            "workspaces": [],
+            "agents": [],
+            "providers": [],
+        }
+        with (
+            patch.object(bridge, "_herdr_request", return_value={}) as request,
+            patch.object(bridge, "_refresh_runtime"),
+        ):
+            result = bridge._close_workspace({"workspaceId": "w2"})
+
+        request.assert_called_once_with(
+            "workspace.close",
+            {"workspace_id": "w2", "close_group": False},
+        )
+        self.assertEqual(result["workspaceId"], "w2")
+
+    def test_closes_linked_workspace_group_after_confirmation(self):
+        bridge = Bridge()
+        bridge.runtime = {
+            "connectionState": "connected",
+            "workspaces": [],
+            "agents": [],
+            "providers": [],
+        }
+        with (
+            patch.object(bridge, "_herdr_request", return_value={}) as request,
+            patch.object(bridge, "_refresh_runtime"),
+        ):
+            bridge._close_workspace({"workspaceId": "w2", "closeGroup": True})
+
+        request.assert_called_once_with(
+            "workspace.close",
+            {"workspace_id": "w2", "close_group": True},
+        )
+
     def test_create_agent_cleans_up_pane_when_post_start_refresh_fails(self):
         bridge = Bridge()
         bridge.runtime = {

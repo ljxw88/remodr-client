@@ -202,6 +202,8 @@ class Bridge:
             return self._create_agent(payload)
         if action == "workspace.create":
             return self._create_workspace(payload)
+        if action == "workspace.close":
+            return self._close_workspace(payload)
         if action == "human_request.answer":
             return self._answer_human_request(payload)
         if action == "agent.interrupt":
@@ -512,6 +514,66 @@ class Bridge:
                     **self.runtime,
                     "workspaces": [*workspaces, workspace],
                     "lastRuntimeEvent": time.time(),
+                }
+
+    def _close_workspace(self, payload: dict[str, Any]) -> dict[str, Any]:
+        workspace_id = payload.get("workspaceId")
+        close_group = payload.get("closeGroup", False)
+        if not isinstance(workspace_id, str) or not workspace_id:
+            raise BridgeError("INVALID_WORKSPACE", "A space is required.")
+        if not isinstance(close_group, bool):
+            raise BridgeError("INVALID_WORKSPACE", "Invalid group close setting.")
+        self._herdr_request(
+            "workspace.close",
+            {
+                "workspace_id": workspace_id,
+                "close_group": close_group,
+            },
+        )
+        try:
+            self._refresh_runtime()
+        except Exception as error:
+            self._diagnostic("WORKSPACE_REFRESH", repr(error))
+            self._remove_workspace_from_runtime(workspace_id)
+        return {
+            "workspaceId": workspace_id,
+            "runtime": self.runtime,
+        }
+
+    def _remove_workspace_from_runtime(self, workspace_id: str) -> None:
+        with self.refresh_lock:
+            with self.state_lock:
+                removed_agent_ids = {
+                    agent.get("id")
+                    for agent in self.runtime.get("agents", [])
+                    if isinstance(agent, dict)
+                    and agent.get("workspaceId") == workspace_id
+                }
+                self.runtime = {
+                    **self.runtime,
+                    "workspaces": [
+                        workspace
+                        for workspace in self.runtime.get("workspaces", [])
+                        if not isinstance(workspace, dict)
+                        or workspace.get("id") != workspace_id
+                    ],
+                    "agents": [
+                        agent
+                        for agent in self.runtime.get("agents", [])
+                        if not isinstance(agent, dict)
+                        or agent.get("workspaceId") != workspace_id
+                    ],
+                    "lastRuntimeEvent": time.time(),
+                }
+                self.raw_agents = {
+                    agent_id: agent
+                    for agent_id, agent in self.raw_agents.items()
+                    if agent_id not in removed_agent_ids
+                }
+                self.pending_agents = {
+                    pane_id: agent
+                    for pane_id, agent in self.pending_agents.items()
+                    if agent.get("workspaceId") != workspace_id
                 }
 
     def _create_agent(self, payload: dict[str, Any]) -> dict[str, Any]:

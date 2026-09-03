@@ -94,6 +94,16 @@ export const runtimeStateSchema = z.object({
 });
 export type HerdrRuntimeState = z.infer<typeof runtimeStateSchema>;
 
+export const deviceAgentCountsSchema = z.record(
+  z.string(),
+  z.number().int().nonnegative(),
+);
+export type DeviceAgentCounts = z.infer<typeof deviceAgentCountsSchema>;
+
+export function totalDeviceAgentCount(counts: DeviceAgentCounts): number {
+  return Object.values(counts).reduce((total, count) => total + count, 0);
+}
+
 export const createAgentInputSchema = z.object({
   provider: launchableAgentProviderSchema,
   workspaceId: z.string().min(1),
@@ -120,6 +130,15 @@ export const createSpaceResultSchema = z.object({
   runtime: runtimeStateSchema,
 });
 export type CreateSpaceResult = z.infer<typeof createSpaceResultSchema>;
+
+export const closeSpaceInputSchema = z.object({
+  workspaceId: z.string().min(1),
+  closeGroup: z.boolean().default(false),
+});
+export type CloseSpaceInput = z.infer<typeof closeSpaceInputSchema>;
+
+export const closeSpaceResultSchema = createSpaceResultSchema;
+export type CloseSpaceResult = z.infer<typeof closeSpaceResultSchema>;
 
 export const humanOptionSchema = z.object({
   id: z.string(),

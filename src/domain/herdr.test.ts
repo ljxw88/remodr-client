@@ -2,6 +2,7 @@ import {
   bridgeEventSchema,
   bridgeHelloSchema,
   bridgeResponseSchema,
+  closeSpaceResultSchema,
   conversationSchema,
   createAgentResultSchema,
   createSpaceResultSchema,
@@ -92,6 +93,7 @@ describe('Herdr mobile protocol', () => {
         },
       ],
     });
+
     expect(runtime.agents[0].provider).toBe('copilot');
     expect(runtime.workspaces[0].cwd).toBe('/work/mobile');
 
@@ -144,5 +146,20 @@ describe('Herdr mobile protocol', () => {
     });
 
     expect(result.workspaceId).toBe('w2');
+  });
+
+  it('parses a closed space with its refreshed runtime', () => {
+    const result = closeSpaceResultSchema.parse({
+      workspaceId: 'w2',
+      runtime: {
+        connectionState: 'connected',
+        deviceId: 'device-1',
+        workspaces: [],
+        agents: [],
+        providers: [],
+      },
+    });
+
+    expect(result.runtime.workspaces).toEqual([]);
   });
 });

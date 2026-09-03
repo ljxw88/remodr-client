@@ -1,5 +1,5 @@
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -16,14 +16,12 @@ import { Screen } from '@/components/ui/screen';
 import { ScrollEdgeFrame } from '@/components/ui/scroll-edge-frame';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
-import {
-  providerLabel,
-  statusLabel,
-  type AgentWorkspace,
-  type RemoteAgent,
-} from '@/domain/herdr';
+import { type AgentWorkspace } from '@/domain/herdr';
 import { connectAgentRuntime } from '@/features/agents/connect-runtime';
-import { AgentProviderIcon } from '@/features/agents/agent-provider-icon';
+import {
+  AgentWorkspaceList,
+  compareAgents,
+} from '@/features/agents/agent-workspace-list';
 import { NewAgentSheet } from '@/features/agents/new-agent-sheet';
 import { NewSpaceSheet } from '@/features/agents/new-space-sheet';
 import { useHerdr } from '@/features/agents/use-herdr';
@@ -35,6 +33,7 @@ import { useHostSession } from '@/features/connection/use-host-session';
 import { useHosts } from '@/features/hosts/use-hosts';
 import { useTheme } from '@/hooks/use-theme';
 import { herdrRepository } from '@/services/herdr-repository';
+import { HerdrBridgeRequestError } from '@/services/herdr-bridge-transport';
 import { toUserMessage } from '@/utils/user-error';
 
 export default function AgentsScreen() {
@@ -47,37 +46,29 @@ export default function AgentsScreen() {
   const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null);
   const [showNewAgent, setShowNewAgent] = useState(false);
   const [showNewSpace, setShowNewSpace] = useState(false);
-  const [switchingDeviceId, setSwitchingDeviceId] = useState<string | null>(null);
-  const deviceSelectionVersion = useRef(0);
+  const [closingSpaceId, setClosingSpaceId] = useState<string | null>(null);
   const selectedDeviceId = state.selectedDeviceId ?? state.runtime.deviceId ?? null;
   const selectedHost = hosts.find((host) => host.id === selectedDeviceId);
-  const runtimeMatchesDevice =
-    !selectedDeviceId || state.runtime.deviceId === selectedDeviceId;
-  const connected = state.connection === 'connected' && runtimeMatchesDevice;
-  const busy =
-    switchingDeviceId != null ||
-    [
-      'connecting',
-      'authenticating',
-      'starting_bridge',
-      'synchronizing',
-      'reconnecting',
-    ].includes(state.connection);
-  const spaces = runtimeMatchesDevice ? state.runtime.workspaces : [];
+  const connected = state.connection === 'connected';
+  const busy = [
+    'connecting',
+    'authenticating',
+    'starting_bridge',
+    'synchronizing',
+    'reconnecting',
+  ].includes(state.connection);
+  const spaces = state.runtime.workspaces;
   const activeSpaceId =
     selectedSpaceId && spaces.some((space) => space.id === selectedSpaceId)
       ? selectedSpaceId
       : null;
+  const activeSpace = spaces.find((space) => space.id === activeSpaceId);
   const visibleAgents = useMemo(
     () =>
       state.runtime.agents
-        .filter(
-          (agent) =>
-            runtimeMatchesDevice &&
-            (!activeSpaceId || agent.workspaceId === activeSpaceId),
-        )
+        .filter((agent) => !activeSpaceId || agent.workspaceId === activeSpaceId)
         .sort(compareAgents),
-    [activeSpaceId, runtimeMatchesDevice, state.runtime.agents],
+    [activeSpaceId, state.runtime.agents],
   );
   const sections = useMemo(() => {
     const spacesInScope = activeSpaceId
@@ -123,31 +114,78 @@ export default function AgentsScreen() {
   const canCreateSpace = connected && selectedHost != null;
   const compactHeader = width < 360;
 
-  async function selectDevice(deviceId: string) {
+  /** Selection is local state; the device's bridge is already live. */
+  function selectDevice(deviceId: string) {
     if (deviceId === selectedDeviceId) {
       return;
     }
-    const selectionVersion = ++deviceSelectionVersion.current;
     setSelectedSpaceId(null);
-    setSwitchingDeviceId(deviceId);
     herdrRepository.selectDevice(deviceId);
+    if (herdrRepository.isDeviceConnected(deviceId)) {
+      return;
+    }
+    const stillSelected = () =>
+      herdrRepository.getSnapshot().selectedDeviceId === deviceId;
+    void connectAgentRuntime(deviceId)
+      .then((connectedDevice) => {
+        if (!connectedDevice && stillSelected()) {
+          router.push({ pathname: '/connect/[id]', params: { id: deviceId } });
+        }
+      })
+      .catch((error) => {
+        if (stillSelected()) {
+          Alert.alert('Could not connect device', toUserMessage(error));
+        }
+      });
+  }
+
+  function confirmCloseSpace(space: AgentWorkspace) {
+    Alert.alert(
+      'Close space?',
+      `Close ${space.name}? All agents and terminals in this space will be closed.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Close space',
+          style: 'destructive',
+          onPress: () => {
+            void closeSpace(space);
+          },
+        },
+      ],
+    );
+  }
+
+  async function closeSpace(space: AgentWorkspace, closeGroup = false) {
+    setClosingSpaceId(space.id);
     try {
-      const connectedDevice = await connectAgentRuntime(deviceId);
-      if (selectionVersion !== deviceSelectionVersion.current) {
-        return;
-      }
-      if (!connectedDevice) {
-        router.push({ pathname: '/connect/[id]', params: { id: deviceId } });
-      }
+      await herdrRepository.closeSpace(space.id, closeGroup);
+      setSelectedSpaceId((current) => current === space.id ? null : current);
     } catch (error) {
-      if (selectionVersion !== deviceSelectionVersion.current) {
-        return;
+      if (
+        !closeGroup &&
+        error instanceof HerdrBridgeRequestError &&
+        error.code === 'workspace_group_close_required'
+      ) {
+        Alert.alert(
+          'Close linked spaces?',
+          'This space belongs to a linked workspace group. Closing the group will close every space, agent, and terminal in it.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Close group',
+              style: 'destructive',
+              onPress: () => {
+                void closeSpace(space, true);
+              },
+            },
+          ],
+        );
+      } else {
+        Alert.alert('Could not close space', toUserMessage(error));
       }
-      Alert.alert('Could not connect device', toUserMessage(error));
     } finally {
-      if (selectionVersion === deviceSelectionVersion.current) {
-        setSwitchingDeviceId(null);
-      }
+      setClosingSpaceId((current) => current === space.id ? null : current);
     }
   }
 
@@ -238,8 +276,7 @@ export default function AgentsScreen() {
                 hostId={host.id}
                 label={host.name}
                 selected={host.id === selectedDeviceId}
-                disabled={busy}
-                onPress={() => void selectDevice(host.id)}
+                onPress={() => selectDevice(host.id)}
               />
             ))}
           </ScrollView>
@@ -248,10 +285,10 @@ export default function AgentsScreen() {
             <>
               <FilterHeader
                 label="Spaces"
-                value={
-                  activeSpaceId
-                    ? spaces.find((space) => space.id === activeSpaceId)?.name
-                    : 'All'
+                value={activeSpace?.name ?? 'All'}
+                closing={activeSpace?.id === closingSpaceId}
+                onCloseValue={
+                  activeSpace ? () => confirmCloseSpace(activeSpace) : undefined
                 }
               />
               <ScrollView
@@ -303,7 +340,7 @@ export default function AgentsScreen() {
         </View>
       ) : null}
 
-      {hostsLoading || (busy && !runtimeMatchesDevice) ? (
+      {hostsLoading ? (
         <View style={styles.center}>
           <ActivityIndicator color={theme.accent} />
           <ThemedText type="small" themeColor="textMuted">
@@ -352,13 +389,7 @@ export default function AgentsScreen() {
               scrollEventThrottle={16}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={[styles.list, { paddingBottom: dockContentInset }]}>
-              {sections.map((section) => (
-                <WorkspaceGroup
-                  key={section.space.id}
-                  space={section.space}
-                  agents={section.agents}
-                />
-              ))}
+              <AgentWorkspaceList sections={sections} />
             </ScrollView>
           )}
         </ScrollEdgeFrame>
@@ -383,6 +414,7 @@ export default function AgentsScreen() {
       ) : null}
       {showNewSpace && selectedHost ? (
         <NewSpaceSheet
+          deviceId={selectedHost.id}
           deviceName={selectedHost.name}
           onClose={() => setShowNewSpace(false)}
           onCreate={async (input) => {
@@ -397,16 +429,52 @@ export default function AgentsScreen() {
   );
 }
 
-function FilterHeader({ label, value }: { label: string; value?: string }) {
+function FilterHeader({
+  label,
+  value,
+  closing = false,
+  onCloseValue,
+}: {
+  label: string;
+  value?: string;
+  closing?: boolean;
+  onCloseValue?: () => void;
+}) {
+  const theme = useTheme();
   return (
     <View style={styles.filterHeader}>
       <ThemedText type="label" themeColor="textMuted">
         {label.toUpperCase()}
       </ThemedText>
       {value ? (
-        <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1}>
-          {value}
-        </ThemedText>
+        <View style={styles.filterValue}>
+          <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1}>
+            {value}
+          </ThemedText>
+          {onCloseValue ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Close ${value} space`}
+              disabled={closing}
+              onPress={onCloseValue}
+              hitSlop={8}
+              style={({ pressed }) => [
+                styles.closeSpace,
+                pressed && styles.pressed,
+              ]}>
+              {closing ? (
+                <ActivityIndicator size="small" color={theme.danger} />
+              ) : (
+                <AppIcon
+                  name={{ ios: 'xmark', android: 'close', web: 'close' }}
+                  size={15}
+                  tintColor={theme.danger}
+                  fallback="×"
+                />
+              )}
+            </Pressable>
+          ) : null}
+        </View>
       ) : null}
     </View>
   );
@@ -416,13 +484,13 @@ function DeviceChip({
   hostId,
   label,
   selected,
-  disabled,
+  disabled = false,
   onPress,
 }: {
   hostId: string;
   label: string;
   selected: boolean;
-  disabled: boolean;
+  disabled?: boolean;
   onPress: () => void;
 }) {
   const theme = useTheme();
@@ -479,134 +547,6 @@ function FilterChip({
   );
 }
 
-function WorkspaceGroup({ space, agents }: { space: AgentWorkspace; agents: RemoteAgent[] }) {
-  const theme = useTheme();
-  return (
-    <View style={styles.workspace}>
-      <View style={styles.workspaceHeader}>
-        <View style={styles.workspaceTitle}>
-          <ThemedText type="label" themeColor="textMuted" style={styles.sectionTitle}>
-            {space.name.toUpperCase()}
-          </ThemedText>
-          {space.cwd ? (
-            <ThemedText type="caption" themeColor="textMuted" numberOfLines={1}>
-              {space.cwd}
-            </ThemedText>
-          ) : null}
-        </View>
-        <ThemedText type="caption" themeColor="textMuted">
-          {agents.length}
-        </ThemedText>
-      </View>
-      <View
-        style={[
-          styles.workspaceCard,
-          {
-            backgroundColor: theme.glassStrong,
-            borderColor: theme.glassBorder,
-            shadowColor: theme.glassShadow,
-          },
-        ]}>
-        {agents.map((agent, index) => (
-          <View key={agent.id}>
-            <AgentRow agent={agent} />
-            {index < agents.length - 1 ? (
-              <View style={[styles.divider, { backgroundColor: theme.border }]} />
-            ) : null}
-          </View>
-        ))}
-      </View>
-    </View>
-  );
-}
-
-function AgentRow({ agent }: { agent: RemoteAgent }) {
-  const theme = useTheme();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`${providerLabel(agent.provider)}, ${statusLabel(agent.status)}`}
-      onPress={() => router.push({ pathname: '/agents/[id]', params: { id: agent.id } })}
-      style={({ pressed }) => [
-        styles.agent,
-        {
-          backgroundColor: pressed ? theme.backgroundSelected : 'transparent',
-          transform: [{ scale: pressed ? 0.99 : 1 }],
-        },
-      ]}>
-      <View style={[styles.providerIcon, { backgroundColor: theme.accentSoft }]}>
-        <AgentProviderIcon provider={agent.provider} tintColor={theme.accent} />
-      </View>
-      <View style={styles.agentCopy}>
-        <View style={styles.agentTitle}>
-          <ThemedText type="section" numberOfLines={1} style={styles.providerName}>
-            {agent.title}
-          </ThemedText>
-          <StatusBadge status={agent.status} />
-        </View>
-        <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1}>
-          {agent.title === providerLabel(agent.provider)
-            ? agent.cwd ?? agent.workspaceName
-            : `${providerLabel(agent.provider)}${agent.cwd ? ` · ${agent.cwd}` : ''}`}
-        </ThemedText>
-      </View>
-      <AppIcon
-        name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
-        size={18}
-        tintColor={theme.textMuted}
-        fallback="›"
-      />
-    </Pressable>
-  );
-}
-
-function StatusBadge({ status }: { status: RemoteAgent['status'] }) {
-  const theme = useTheme();
-  const color =
-    status === 'working'
-      ? theme.accent
-      : status === 'blocked'
-        ? theme.warning
-        : status === 'done'
-          ? theme.success
-          : theme.textMuted;
-  const backgroundColor =
-    status === 'working'
-      ? theme.accentSoft
-      : status === 'blocked'
-        ? theme.warningSoft
-        : status === 'done'
-          ? theme.successSoft
-          : theme.glass;
-  return (
-    <View style={[styles.status, { backgroundColor, borderColor: color }]}>
-      <View
-        style={[
-          styles.statusDot,
-          {
-            backgroundColor: status === 'idle' ? 'transparent' : color,
-            borderColor: color,
-          },
-        ]}
-      />
-      <ThemedText type="caption" style={{ color }}>
-        {statusLabel(status)}
-      </ThemedText>
-    </View>
-  );
-}
-
-function compareAgents(left: RemoteAgent, right: RemoteAgent) {
-  const priority: Record<RemoteAgent['status'], number> = {
-    blocked: 0,
-    done: 1,
-    working: 2,
-    idle: 3,
-    unknown: 4,
-  };
-  return priority[left.status] - priority[right.status] || left.title.localeCompare(right.title);
-}
-
 const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
@@ -659,12 +599,25 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.three,
   },
   filterHeader: {
-    minHeight: 18,
+    minHeight: 32,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: Spacing.two,
     paddingHorizontal: Spacing.half,
+  },
+  filterValue: {
+    maxWidth: '62%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.half,
+  },
+  closeSpace: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radius.pill,
   },
   filterRow: {
     gap: Spacing.one,
@@ -704,81 +657,13 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
     paddingTop: Spacing.one,
   },
-  workspace: {
-    gap: Spacing.one,
-  },
-  workspaceHeader: {
-    minHeight: 28,
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: Spacing.two,
-    paddingHorizontal: Spacing.half,
-  },
-  workspaceTitle: {
-    flex: 1,
-    gap: 2,
-  },
-  sectionTitle: {
-    letterSpacing: 0.7,
-  },
-  workspaceCard: {
-    borderWidth: 1,
-    borderRadius: Radius.glass,
-    overflow: 'hidden',
-    elevation: 2,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 1,
-    shadowRadius: 18,
-  },
-  agent: {
-    minHeight: 76,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-    paddingHorizontal: Spacing.two,
-  },
-  providerIcon: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 14,
-  },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    marginLeft: 76,
-  },
-  agentCopy: {
-    flex: 1,
-    gap: 4,
-  },
-  agentTitle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
-  },
-  providerName: {
-    flex: 1,
-  },
-  status: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: Spacing.one,
-    paddingVertical: 3,
-    borderWidth: 1,
-    borderRadius: Radius.pill,
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderWidth: 1,
-    borderRadius: 3,
-  },
   center: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     gap: Spacing.one,
+  },
+  pressed: {
+    opacity: 0.6,
   },
 });
