@@ -9,7 +9,7 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 
-import { Spacing } from '@/constants/theme';
+import { ScrollEdgeFade, Spacing, withAlpha } from '@/constants/theme';
 
 type ScrollHandler = (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
 
@@ -90,6 +90,22 @@ export function ScrollEdgeFrame({
   );
 }
 
+const { color, topHeight, topOpacity, bottomHeight, bottomOpacity } = ScrollEdgeFade;
+
+/** Eased so the dissolve builds gradually rather than banding at the edge. */
+const TOP_FADE = [
+  `linear-gradient(180deg, ${withAlpha(color, topOpacity)} 0%`,
+  `${withAlpha(color, topOpacity * 0.34)} 55%`,
+  `${withAlpha(color, 0)} 100%)`,
+].join(', ');
+
+const BOTTOM_FADE = [
+  `linear-gradient(180deg, ${withAlpha(color, 0)} 0%`,
+  `${withAlpha(color, bottomOpacity * 0.16)} 38%`,
+  `${withAlpha(color, bottomOpacity * 0.52)} 68%`,
+  `${withAlpha(color, bottomOpacity)} 100%)`,
+].join(', ');
+
 const styles = StyleSheet.create({
   frame: {
     flex: 1,
@@ -107,21 +123,19 @@ const styles = StyleSheet.create({
   },
   top: {
     top: 0,
-    height: 18,
+    height: topHeight,
   },
   bottom: {
     bottom: 0,
-    height: 32,
+    height: bottomHeight,
   },
   blur: {
     opacity: 0.3,
   },
   topFade: {
-    experimental_backgroundImage:
-      'linear-gradient(180deg, rgba(8,9,11,0.16) 0%, rgba(8,9,11,0.05) 55%, rgba(8,9,11,0) 100%)',
+    experimental_backgroundImage: TOP_FADE,
   },
   bottomFade: {
-    experimental_backgroundImage:
-      'linear-gradient(180deg, rgba(8,9,11,0) 0%, rgba(8,9,11,0.10) 48%, rgba(8,9,11,0.34) 100%)',
+    experimental_backgroundImage: BOTTOM_FADE,
   },
 });

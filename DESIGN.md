@@ -63,6 +63,9 @@ the normal user flow.
 
 ## Core tokens
 
+Defined in `src/constants/theme.ts`. See [`COLOR.md`](COLOR.md) for every place
+a colour lives and which value to tune.
+
 | Role | Value |
 |---|---|
 | Canvas | `#08090B` |

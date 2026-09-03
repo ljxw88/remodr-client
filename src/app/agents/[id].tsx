@@ -17,6 +17,7 @@ import { MarkdownMessage } from '@/components/markdown/markdown-message';
 import { AppButton } from '@/components/ui/app-button';
 import { AppIcon } from '@/components/ui/app-icon';
 import { Screen } from '@/components/ui/screen';
+import { ScrollEdgeFrame } from '@/components/ui/scroll-edge-frame';
 import { ThemedText } from '@/components/themed-text';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import {
@@ -185,54 +186,60 @@ export default function AgentConversationScreen() {
               <ThemedText type="small">Reconnecting</ThemedText>
             </View>
           ) : null}
-          <FlatList
-            ref={listRef}
-            data={displayItems}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <ConversationRow
-                item={item}
-                agent={agent}
-                onEdit={(text) => setDraft(text)}
-                onTimelineInteraction={() => {
-                  followLatestOnLayout.current = false;
+          <ScrollEdgeFrame>
+            {(onScroll) => (
+              <FlatList
+                ref={listRef}
+                data={displayItems}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => (
+                  <ConversationRow
+                    item={item}
+                    agent={agent}
+                    onEdit={(text) => setDraft(text)}
+                    onTimelineInteraction={() => {
+                      followLatestOnLayout.current = false;
+                    }}
+                  />
+                )}
+                onScroll={onScroll}
+                scrollEventThrottle={16}
+                showsVerticalScrollIndicator={false}
+                initialNumToRender={20}
+                initialScrollIndex={0}
+                maxToRenderPerBatch={20}
+                windowSize={7}
+                contentContainerStyle={styles.messages}
+                onLayout={() => {
+                  if (followLatestOnLayout.current) {
+                    listRef.current?.scrollToEnd({ animated: false });
+                  }
                 }}
+                onContentSizeChange={() => {
+                  if (followLatestOnLayout.current) {
+                    listRef.current?.scrollToEnd({ animated: false });
+                    followLatestOnLayout.current = false;
+                    hasFollowedInitialContent.current = true;
+                  }
+                }}
+                ListFooterComponent={
+                  <View
+                    style={[
+                      styles.composerSpacer,
+                      showWorking && styles.composerSpacerWorking,
+                    ]}
+                  />
+                }
+                ListEmptyComponent={
+                  <View style={styles.empty}>
+                    <ThemedText type="small" themeColor="textMuted">
+                      No conversation yet.
+                    </ThemedText>
+                  </View>
+                }
               />
             )}
-            showsVerticalScrollIndicator={false}
-            initialNumToRender={20}
-            initialScrollIndex={0}
-            maxToRenderPerBatch={20}
-            windowSize={7}
-            contentContainerStyle={styles.messages}
-            onLayout={() => {
-              if (followLatestOnLayout.current) {
-                listRef.current?.scrollToEnd({ animated: false });
-              }
-            }}
-            onContentSizeChange={() => {
-              if (followLatestOnLayout.current) {
-                listRef.current?.scrollToEnd({ animated: false });
-                followLatestOnLayout.current = false;
-                hasFollowedInitialContent.current = true;
-              }
-            }}
-            ListFooterComponent={
-              <View
-                style={[
-                  styles.composerSpacer,
-                  showWorking && styles.composerSpacerWorking,
-                ]}
-              />
-            }
-            ListEmptyComponent={
-              <View style={styles.empty}>
-                <ThemedText type="small" themeColor="textMuted">
-                  No conversation yet.
-                </ThemedText>
-              </View>
-            }
-          />
+          </ScrollEdgeFrame>
         </BlurTargetView>
         <Composer
           value={draft}
