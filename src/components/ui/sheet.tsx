@@ -20,7 +20,9 @@ import {
   type ViewStyle,
 } from 'react-native';
 
+import { AppIcon } from '@/components/ui/app-icon';
 import { glassRim } from '@/components/ui/glass-surface';
+import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -215,7 +217,62 @@ export function SheetPanel({
   );
 }
 
+/** Title, supporting line, and the close control every sheet opens with. */
+export function SheetHeader({
+  title,
+  subtitle,
+  onClose,
+  busy = false,
+}: {
+  title: string;
+  subtitle: string;
+  onClose: () => void;
+  busy?: boolean;
+}) {
+  const theme = useTheme();
+
+  return (
+    <View style={styles.header}>
+      <View style={styles.headerCopy}>
+        <ThemedText type="heading">{title}</ThemedText>
+        <ThemedText type="caption" themeColor="textSecondary">
+          {subtitle}
+        </ThemedText>
+      </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+        disabled={busy}
+        onPress={onClose}
+        style={({ pressed }) => [styles.headerClose, { opacity: pressed ? 0.6 : 1 }]}>
+        <AppIcon
+          name={{ ios: 'xmark', android: 'close', web: 'close' }}
+          size={20}
+          tintColor={theme.textSecondary}
+          fallback="×"
+        />
+      </Pressable>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  header: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.two,
+  },
+  headerCopy: {
+    flex: 1,
+    gap: Spacing.half,
+  },
+  headerClose: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radius.pill,
+  },
   overlay: {
     flex: 1,
     justifyContent: 'flex-end',

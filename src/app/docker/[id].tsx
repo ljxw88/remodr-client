@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Alert, FlatList, StyleSheet, View } from 'react-native';
 
 import { AppButton } from '@/components/ui/app-button';
+import { NeedsSession } from '@/components/ui/needs-session';
 import { Screen } from '@/components/ui/screen';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
@@ -44,12 +45,7 @@ export default function DockerScreen() {
   }, [session]);
 
   if (!session) {
-    return (
-      <Screen>
-        <Stack.Screen options={{ title: 'Docker' }} />
-        <ThemedText>Connect to this host first.</ThemedText>
-      </Screen>
-    );
+    return <NeedsSession title="Docker" />;
   }
 
   return (

@@ -4,7 +4,7 @@ import { Keyboard, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { ThemedText } from '@/components/themed-text';
 import { AppButton } from '@/components/ui/app-button';
 import { AppIcon } from '@/components/ui/app-icon';
-import { SheetModal, SheetPanel } from '@/components/ui/sheet';
+import { SheetHeader, SheetModal, SheetPanel } from '@/components/ui/sheet';
 import { TextField } from '@/components/ui/text-field';
 import { Radius, Spacing } from '@/constants/theme';
 import type { CreateSpaceInput } from '@/domain/herdr';
@@ -67,27 +67,12 @@ export function NewSpaceSheet({
               styles.sheetContent,
               { paddingBottom: dockContentInset },
             ]}>
-            <View style={styles.header}>
-              <View style={styles.titleCopy}>
-                <ThemedText type="heading">New space</ThemedText>
-                <ThemedText type="caption" themeColor="textSecondary">
-                  Create a Herdr workspace from a folder.
-                </ThemedText>
-              </View>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Close"
-                disabled={creating}
-                onPress={close}
-                style={({ pressed }) => [styles.close, pressed && styles.pressed]}>
-                <AppIcon
-                  name={{ ios: 'xmark', android: 'close', web: 'close' }}
-                  size={20}
-                  tintColor={theme.textSecondary}
-                  fallback="×"
-                />
-              </Pressable>
-            </View>
+            <SheetHeader
+              title="New space"
+              subtitle="Create a Herdr workspace from a folder."
+              onClose={close}
+              busy={creating}
+            />
 
             <View
               style={[
@@ -194,22 +179,6 @@ const styles = StyleSheet.create({
   sheetContent: {
     gap: Spacing.three,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Spacing.two,
-  },
-  titleCopy: {
-    flex: 1,
-    gap: Spacing.half,
-  },
-  close: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: Radius.pill,
-  },
   device: {
     minHeight: 62,
     flexDirection: 'row',
@@ -236,8 +205,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 14,
-  },
-  pressed: {
-    opacity: 0.6,
   },
 });

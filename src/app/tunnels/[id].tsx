@@ -3,6 +3,7 @@ import { useCallback, useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
 
 import { AppButton } from '@/components/ui/app-button';
+import { NeedsSession } from '@/components/ui/needs-session';
 import { Screen } from '@/components/ui/screen';
 import { TextField } from '@/components/ui/text-field';
 import { ThemedText } from '@/components/themed-text';
@@ -32,12 +33,7 @@ export default function TunnelsScreen() {
   }, [session]);
 
   if (!session) {
-    return (
-      <Screen>
-        <Stack.Screen options={{ title: 'Tunnels' }} />
-        <ThemedText>Connect to this host first.</ThemedText>
-      </Screen>
-    );
+    return <NeedsSession title="Tunnels" />;
   }
 
   return (

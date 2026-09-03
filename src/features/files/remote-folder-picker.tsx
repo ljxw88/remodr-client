@@ -10,9 +10,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppButton } from '@/components/ui/app-button';
 import { AppIcon } from '@/components/ui/app-icon';
+import { RemotePathBar } from '@/features/files/remote-path-bar';
 import { SheetPanel } from '@/components/ui/sheet';
 import { ThemedText } from '@/components/themed-text';
-import { Fonts, Radius, Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
 import type { RemoteFile } from '@/domain/remote';
 import {
   childRemoteFolderPath,
@@ -121,49 +122,7 @@ export function RemoteFolderPicker({
             </Pressable>
           </View>
 
-          <View style={styles.pathRow}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Parent folder"
-              accessibilityState={{ disabled: parent == null }}
-              disabled={parent == null}
-              onPress={() => {
-                if (parent) {
-                  navigate(parent);
-                }
-              }}
-              style={({ pressed }) => [
-                styles.iconButton,
-                styles.parentButton,
-                {
-                  backgroundColor: theme.backgroundElement,
-                  borderColor: theme.border,
-                  opacity: parent == null ? 0.38 : pressed ? 0.68 : 1,
-                },
-              ]}>
-              <AppIcon
-                name={{ ios: 'chevron.up', android: 'arrow_upward', web: 'arrow_upward' }}
-                size={19}
-                tintColor={theme.textSecondary}
-                fallback="↑"
-              />
-            </Pressable>
-            <View
-              style={[
-                styles.path,
-                { backgroundColor: theme.backgroundElement, borderColor: theme.border },
-              ]}>
-              <AppIcon
-                name={{ ios: 'folder', android: 'folder', web: 'folder' }}
-                size={18}
-                tintColor={theme.accent}
-                fallback="□"
-              />
-              <ThemedText type="code" numberOfLines={1} style={styles.pathText}>
-                {path === '~' ? '~/' : path}
-              </ThemedText>
-            </View>
-          </View>
+          <RemotePathBar path={path} parent={parent} onNavigate={navigate} />
 
           {loading ? (
             <View style={styles.center}>
@@ -272,28 +231,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: Radius.pill,
-  },
-  pathRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
-  },
-  parentButton: {
-    borderWidth: 1,
-  },
-  path: {
-    minHeight: 44,
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
-    paddingHorizontal: Spacing.two,
-    borderWidth: 1,
-    borderRadius: Radius.control,
-  },
-  pathText: {
-    flex: 1,
-    fontFamily: Fonts.mono,
   },
   list: {
     gap: Spacing.one,

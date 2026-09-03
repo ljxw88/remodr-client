@@ -4,6 +4,8 @@ import { Alert, FlatList, Pressable, StyleSheet, View } from 'react-native';
 
 import { AppButton } from '@/components/ui/app-button';
 import { AppIcon } from '@/components/ui/app-icon';
+import { NeedsSession } from '@/components/ui/needs-session';
+import { RemotePathBar } from '@/features/files/remote-path-bar';
 import { Screen } from '@/components/ui/screen';
 import { TextField } from '@/components/ui/text-field';
 import { ThemedText } from '@/components/themed-text';
@@ -107,60 +109,14 @@ export default function FilesScreen() {
   }, [commitFiles, path, reportLoadError, session]);
 
   if (!session) {
-    return (
-      <Screen>
-        <Stack.Screen options={{ title: 'Files' }} />
-        <ThemedText>Connect to this host first.</ThemedText>
-      </Screen>
-    );
+    return <NeedsSession title="Files" />;
   }
 
   return (
     <Screen>
       <Stack.Screen options={{ title: 'Files' }} />
       <View style={styles.toolbar}>
-        <View style={styles.pathRow}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Parent folder"
-            accessibilityState={{ disabled: parent == null }}
-            disabled={parent == null}
-            onPress={() => {
-              if (parent) {
-                navigate(parent);
-              }
-            }}
-            style={({ pressed }) => [
-              styles.parentButton,
-              {
-                backgroundColor: theme.glassStrong,
-                borderColor: theme.glassBorder,
-                opacity: parent == null ? 0.38 : pressed ? 0.68 : 1,
-              },
-            ]}>
-            <AppIcon
-              name={{ ios: 'chevron.up', android: 'arrow_upward', web: 'arrow_upward' }}
-              size={19}
-              tintColor={theme.textSecondary}
-              fallback="↑"
-            />
-          </Pressable>
-          <View
-            style={[
-              styles.path,
-              { backgroundColor: theme.glassStrong, borderColor: theme.glassBorder },
-            ]}>
-            <AppIcon
-              name={{ ios: 'folder', android: 'folder', web: 'folder' }}
-              size={18}
-              tintColor={theme.accent}
-              fallback="□"
-            />
-            <ThemedText type="code" numberOfLines={1} style={styles.pathText}>
-              {path === '~' ? '~/' : path}
-            </ThemedText>
-          </View>
-        </View>
+        <RemotePathBar path={path} parent={parent} onNavigate={navigate} />
         <View style={styles.newFolder}>
           <View style={styles.folderField}>
             <TextField label="New folder" value={name} onChangeText={setName} />
@@ -312,32 +268,6 @@ const styles = StyleSheet.create({
   toolbar: {
     gap: Spacing.two,
     marginBottom: Spacing.three,
-  },
-  pathRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
-  },
-  parentButton: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderRadius: Radius.pill,
-  },
-  path: {
-    minHeight: 44,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
-    flex: 1,
-    paddingHorizontal: Spacing.two,
-    borderWidth: 1,
-    borderRadius: Radius.control,
-  },
-  pathText: {
-    flex: 1,
   },
   newFolder: {
     flexDirection: 'row',

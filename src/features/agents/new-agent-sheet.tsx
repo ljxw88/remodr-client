@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 
 import { AppButton } from '@/components/ui/app-button';
 import { AppIcon } from '@/components/ui/app-icon';
-import { SheetModal, SheetPanel } from '@/components/ui/sheet';
+import { SheetHeader, SheetModal, SheetPanel } from '@/components/ui/sheet';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
 import {
@@ -78,27 +78,12 @@ export function NewAgentSheet({
         <ScrollView
           contentContainerStyle={[styles.sheetContent, { paddingBottom: dockContentInset }]}
           showsVerticalScrollIndicator={false}>
-          <View style={styles.header}>
-            <View style={styles.titleCopy}>
-              <ThemedText type="heading">New agent</ThemedText>
-              <ThemedText type="caption" themeColor="textSecondary">
-                Choose an agent and the space it should work in.
-              </ThemedText>
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Close"
-              disabled={creating}
-              onPress={close}
-              style={({ pressed }) => [styles.close, pressed && styles.pressed]}>
-              <AppIcon
-                name={{ ios: 'xmark', android: 'close', web: 'close' }}
-                size={20}
-                tintColor={theme.textSecondary}
-                fallback="×"
-              />
-            </Pressable>
-          </View>
+          <SheetHeader
+            title="New agent"
+            subtitle="Choose an agent and the space it should work in."
+            onClose={close}
+            busy={creating}
+          />
 
           <View style={styles.section}>
             <ThemedText type="label" themeColor="textMuted">
@@ -242,22 +227,6 @@ const styles = StyleSheet.create({
   sheetContent: {
     gap: Spacing.three,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Spacing.two,
-  },
-  titleCopy: {
-    flex: 1,
-    gap: Spacing.half,
-  },
-  close: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: Radius.pill,
-  },
   section: {
     gap: Spacing.one,
   },
@@ -311,8 +280,5 @@ const styles = StyleSheet.create({
   permissionCopy: {
     flex: 1,
     gap: 2,
-  },
-  pressed: {
-    opacity: 0.6,
   },
 });
