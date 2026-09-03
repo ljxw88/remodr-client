@@ -220,6 +220,76 @@ class BridgeProtocolTest(unittest.TestCase):
         )
         self.assertEqual(result["agentId"], agent_id)
 
+    def test_creates_workspace_from_remote_root_folder(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bridge = Bridge()
+            bridge.runtime = {
+                "connectionState": "connected",
+                "workspaces": [
+                    {"id": "w2", "name": "project", "status": "idle"}
+                ],
+                "agents": [],
+                "providers": [],
+            }
+            with (
+                patch.object(
+                    bridge,
+                    "_herdr_request",
+                    return_value={"workspace": {"workspace_id": "w2"}},
+                ) as request,
+                patch.object(bridge, "_refresh_runtime"),
+            ):
+                result = bridge._create_workspace(
+                    {"cwd": directory, "label": "Project"}
+                )
+
+        request.assert_called_once_with(
+            "workspace.create",
+            {
+                "focus": False,
+                "cwd": directory,
+                "label": "Project",
+            },
+        )
+        self.assertEqual(result["workspaceId"], "w2")
+
+    def test_rejects_missing_workspace_root_folder(self):
+        bridge = Bridge()
+        with self.assertRaisesRegex(BridgeError, "does not exist"):
+            bridge._create_workspace(
+                {"cwd": "/definitely/missing/remote-workspace", "label": ""}
+            )
+
+    def test_workspace_creation_survives_post_create_refresh_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bridge = Bridge()
+            bridge.runtime = {
+                "connectionState": "connected",
+                "deviceId": "device-1",
+                "workspaces": [],
+                "agents": [],
+                "providers": [],
+            }
+            with (
+                patch.object(
+                    bridge,
+                    "_herdr_request",
+                    return_value={"workspace_id": "w2"},
+                ),
+                patch.object(
+                    bridge,
+                    "_refresh_runtime",
+                    side_effect=OSError("snapshot unavailable"),
+                ),
+                patch.object(bridge, "_diagnostic"),
+            ):
+                result = bridge._create_workspace(
+                    {"cwd": directory, "label": "Project"}
+                )
+
+        self.assertEqual(result["workspaceId"], "w2")
+        self.assertEqual(result["runtime"]["workspaces"][0]["name"], "Project")
+
     def test_create_agent_cleans_up_pane_when_post_start_refresh_fails(self):
         bridge = Bridge()
         bridge.runtime = {

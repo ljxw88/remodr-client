@@ -6,6 +6,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  useWindowDimensions,
   View,
 } from 'react-native';
 
@@ -24,6 +25,7 @@ import {
 import { connectAgentRuntime } from '@/features/agents/connect-runtime';
 import { AgentProviderIcon } from '@/features/agents/agent-provider-icon';
 import { NewAgentSheet } from '@/features/agents/new-agent-sheet';
+import { NewSpaceSheet } from '@/features/agents/new-space-sheet';
 import { useHerdr } from '@/features/agents/use-herdr';
 import {
   useDockContentInset,
@@ -37,12 +39,14 @@ import { toUserMessage } from '@/utils/user-error';
 
 export default function AgentsScreen() {
   const theme = useTheme();
+  const { width } = useWindowDimensions();
   const state = useHerdr();
   const { hosts, loading: hostsLoading } = useHosts();
   const onDockScroll = useDockScrollHandler();
   const dockContentInset = useDockContentInset();
   const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null);
   const [showNewAgent, setShowNewAgent] = useState(false);
+  const [showNewSpace, setShowNewSpace] = useState(false);
   const [switchingDeviceId, setSwitchingDeviceId] = useState<string | null>(null);
   const deviceSelectionVersion = useRef(0);
   const selectedDeviceId = state.selectedDeviceId ?? state.runtime.deviceId ?? null;
@@ -116,6 +120,8 @@ export default function AgentsScreen() {
       ? theme.accentSoft
       : theme.warningSoft;
   const canCreateAgent = connected && spaces.length > 0;
+  const canCreateSpace = connected && selectedHost != null;
+  const compactHeader = width < 360;
 
   async function selectDevice(deviceId: string) {
     if (deviceId === selectedDeviceId) {
@@ -148,31 +154,57 @@ export default function AgentsScreen() {
   return (
     <Screen includeTopSafeArea>
       <View style={styles.header}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="New agent"
-          accessibilityState={{ disabled: !canCreateAgent }}
-          disabled={!canCreateAgent}
-          onPress={() => setShowNewAgent(true)}
-          style={({ pressed }) => [
-            styles.newAgent,
-            {
-              backgroundColor: canCreateAgent ? theme.accent : theme.backgroundElement,
-              opacity: canCreateAgent ? (pressed ? 0.78 : 1) : 0.42,
-            },
-          ]}>
-          <AppIcon
-            name={{ ios: 'plus', android: 'add', web: 'add' }}
-            size={18}
-            tintColor={canCreateAgent ? theme.onAccent : theme.textMuted}
-            fallback="+"
-          />
-          <ThemedText
-            type="smallBold"
-            style={{ color: canCreateAgent ? theme.onAccent : theme.textMuted }}>
-            New agent
-          </ThemedText>
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="New agent"
+            accessibilityState={{ disabled: !canCreateAgent }}
+            disabled={!canCreateAgent}
+            onPress={() => setShowNewAgent(true)}
+            style={({ pressed }) => [
+              styles.newAgent,
+              {
+                backgroundColor: canCreateAgent ? theme.accent : theme.backgroundElement,
+                opacity: canCreateAgent ? (pressed ? 0.78 : 1) : 0.42,
+              },
+            ]}>
+            <AppIcon
+              name={{ ios: 'plus', android: 'add', web: 'add' }}
+              size={18}
+              tintColor={canCreateAgent ? theme.onAccent : theme.textMuted}
+              fallback="+"
+            />
+            <ThemedText
+              type="smallBold"
+              style={{ color: canCreateAgent ? theme.onAccent : theme.textMuted }}>
+              {compactHeader ? 'Agent' : 'New agent'}
+            </ThemedText>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="New space"
+            accessibilityState={{ disabled: !canCreateSpace }}
+            disabled={!canCreateSpace}
+            onPress={() => setShowNewSpace(true)}
+            style={({ pressed }) => [
+              styles.newSpace,
+              {
+                backgroundColor: theme.glassStrong,
+                borderColor: theme.glassBorder,
+                opacity: canCreateSpace ? (pressed ? 0.72 : 1) : 0.42,
+              },
+            ]}>
+            <AppIcon
+              name={{ ios: 'plus', android: 'add', web: 'add' }}
+              size={17}
+              tintColor={canCreateSpace ? theme.textSecondary : theme.textMuted}
+              fallback="+"
+            />
+            <ThemedText type="smallBold" themeColor="textSecondary">
+              {compactHeader ? 'Space' : 'New space'}
+            </ThemedText>
+          </Pressable>
+        </View>
         <View
           style={[
             styles.connection,
@@ -346,6 +378,18 @@ export default function AgentsScreen() {
                 params: { id: result.agentId },
               });
             }
+          }}
+        />
+      ) : null}
+      {showNewSpace && selectedHost ? (
+        <NewSpaceSheet
+          deviceName={selectedHost.name}
+          onClose={() => setShowNewSpace(false)}
+          onCreate={async (input) => {
+            const result = await herdrRepository.createSpace(input);
+            setShowNewSpace(false);
+            setSelectedSpaceId(result.workspaceId);
+            setShowNewAgent(true);
           }}
         />
       ) : null}
@@ -568,18 +612,34 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: Spacing.two,
+    gap: Spacing.one,
     marginBottom: Spacing.two,
+  },
+  headerActions: {
+    flexShrink: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
   },
   newAgent: {
     minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.one,
-    paddingHorizontal: Spacing.two,
+    paddingHorizontal: Spacing.one + Spacing.half,
+    borderRadius: Radius.pill,
+  },
+  newSpace: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.half,
+    paddingHorizontal: Spacing.one,
+    borderWidth: 1,
     borderRadius: Radius.pill,
   },
   connection: {
+    flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.half,

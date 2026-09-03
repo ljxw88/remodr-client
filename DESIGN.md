@@ -153,6 +153,9 @@ Status must remain understandable without color alone.
 - Keep **New agent** as the only primary action. Its bottom sheet chooses one
   of the server-advertised providers, a required space, and an explicit
   auto-approval setting without exposing terminal controls.
+- Place a secondary **New space** action beside it. Space creation asks for an
+  optional label and required remote root folder, then selects the new space
+  and continues directly into the agent picker.
 
 ## Conversation
 

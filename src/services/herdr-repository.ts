@@ -4,6 +4,8 @@ import {
   conversationSchema,
   createAgentInputSchema,
   createAgentResultSchema,
+  createSpaceInputSchema,
+  createSpaceResultSchema,
   EMPTY_RUNTIME,
   runtimeStateSchema,
   type AgentConversation,
@@ -12,6 +14,8 @@ import {
   type BridgeHello,
   type CreateAgentInput,
   type CreateAgentResult,
+  type CreateSpaceInput,
+  type CreateSpaceResult,
   type HerdrConnectionState,
   type HerdrRuntimeState,
 } from '@/domain/herdr';
@@ -148,6 +152,15 @@ export class HerdrRepository {
     const request = createAgentInputSchema.parse(input);
     const result = createAgentResultSchema.parse(
       await this.transport.request('agent.create', request),
+    );
+    await this.installRuntime(result.runtime);
+    return result;
+  }
+
+  async createSpace(input: CreateSpaceInput): Promise<CreateSpaceResult> {
+    const request = createSpaceInputSchema.parse(input);
+    const result = createSpaceResultSchema.parse(
+      await this.transport.request('workspace.create', request),
     );
     await this.installRuntime(result.runtime);
     return result;

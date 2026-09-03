@@ -109,6 +109,18 @@ export const createAgentResultSchema = z.object({
 });
 export type CreateAgentResult = z.infer<typeof createAgentResultSchema>;
 
+export const createSpaceInputSchema = z.object({
+  cwd: z.string().trim().min(1, 'Root folder is required'),
+  label: z.string().trim().optional(),
+});
+export type CreateSpaceInput = z.infer<typeof createSpaceInputSchema>;
+
+export const createSpaceResultSchema = z.object({
+  workspaceId: z.string(),
+  runtime: runtimeStateSchema,
+});
+export type CreateSpaceResult = z.infer<typeof createSpaceResultSchema>;
+
 export const humanOptionSchema = z.object({
   id: z.string(),
   label: z.string(),

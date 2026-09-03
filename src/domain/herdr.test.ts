@@ -4,6 +4,7 @@ import {
   bridgeResponseSchema,
   conversationSchema,
   createAgentResultSchema,
+  createSpaceResultSchema,
   runtimeStateSchema,
 } from '@/domain/herdr';
 
@@ -128,5 +129,20 @@ describe('Herdr mobile protocol', () => {
     });
 
     expect(result.runtime.providers[0].provider).toBe('codex');
+  });
+
+  it('parses a created space with its refreshed runtime', () => {
+    const result = createSpaceResultSchema.parse({
+      workspaceId: 'w2',
+      runtime: {
+        connectionState: 'connected',
+        deviceId: 'device-1',
+        workspaces: [{ id: 'w2', name: 'project', status: 'idle' }],
+        agents: [],
+        providers: [],
+      },
+    });
+
+    expect(result.workspaceId).toBe('w2');
   });
 });

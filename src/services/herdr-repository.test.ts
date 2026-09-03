@@ -87,6 +87,36 @@ describe('Herdr runtime reducer', () => {
       expect(result.agentId).toBe('agent-2');
       expect(repository.getSnapshot().runtime.providers).toHaveLength(2);
     });
+
+    it('installs a newly created space from the bridge result', async () => {
+      const request = jest.fn(async () => ({
+        workspaceId: 'w2',
+        runtime: {
+          ...runtime,
+          workspaces: [
+            ...runtime.workspaces,
+            { id: 'w2', name: 'project', status: 'idle' as const },
+          ],
+        },
+      }));
+      const transport = {
+        subscribe: jest.fn(() => () => undefined),
+        request,
+      } as unknown as HerdrBridgeTransport;
+      const repository = new HerdrRepository(transport);
+
+      const result = await repository.createSpace({
+        cwd: '~/project',
+        label: 'Project',
+      });
+
+      expect(request).toHaveBeenCalledWith('workspace.create', {
+        cwd: '~/project',
+        label: 'Project',
+      });
+      expect(result.workspaceId).toBe('w2');
+      expect(repository.getSnapshot().runtime.workspaces).toHaveLength(2);
+    });
   });
 
   describe('optimistic conversation messages', () => {

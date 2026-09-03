@@ -200,6 +200,8 @@ class Bridge:
             return {"accepted": True}
         if action == "agent.create":
             return self._create_agent(payload)
+        if action == "workspace.create":
+            return self._create_workspace(payload)
         if action == "human_request.answer":
             return self._answer_human_request(payload)
         if action == "agent.interrupt":
@@ -432,6 +434,85 @@ class Bridge:
             }
             for provider in SUPPORTED_PROVIDERS
         ]
+
+    def _create_workspace(self, payload: dict[str, Any]) -> dict[str, Any]:
+        cwd = payload.get("cwd")
+        label = payload.get("label")
+        if not isinstance(cwd, str) or not cwd.strip():
+            raise BridgeError("INVALID_WORKSPACE", "A root folder is required.")
+        if label is not None and not isinstance(label, str):
+            raise BridgeError("INVALID_WORKSPACE", "Invalid space name.")
+
+        expanded = os.path.expanduser(cwd.strip())
+        if not os.path.isabs(expanded):
+            expanded = os.path.join(str(Path.home()), expanded)
+        normalized_cwd = os.path.normpath(expanded)
+        if not os.path.isdir(normalized_cwd):
+            raise BridgeError(
+                "WORKSPACE_DIRECTORY_NOT_FOUND",
+                "The root folder does not exist on this device.",
+            )
+
+        params: dict[str, Any] = {
+            "focus": False,
+            "cwd": normalized_cwd,
+        }
+        if isinstance(label, str) and label.strip():
+            params["label"] = label.strip()
+        result = self._herdr_request("workspace.create", params)
+        workspace = result.get("workspace")
+        workspace_id = (
+            workspace.get("workspace_id")
+            if isinstance(workspace, dict)
+            else result.get("workspace_id")
+        )
+        if not isinstance(workspace_id, str) or not workspace_id:
+            raise BridgeError(
+                "INVALID_HERDR_RESPONSE",
+                "Created space ID is missing.",
+            )
+        try:
+            self._refresh_runtime()
+        except Exception as error:
+            self._diagnostic("WORKSPACE_REFRESH", repr(error))
+            self._install_created_workspace(
+                workspace_id,
+                label.strip() if isinstance(label, str) and label.strip() else None,
+                normalized_cwd,
+            )
+        return {
+            "workspaceId": workspace_id,
+            "runtime": self.runtime,
+        }
+
+    def _install_created_workspace(
+        self,
+        workspace_id: str,
+        label: str | None,
+        cwd: str,
+    ) -> None:
+        with self.refresh_lock:
+            with self.state_lock:
+                workspaces = self.runtime.get("workspaces", [])
+                if any(
+                    workspace.get("id") == workspace_id
+                    for workspace in workspaces
+                    if isinstance(workspace, dict)
+                ):
+                    return
+                workspace = {
+                    "id": workspace_id,
+                    "deviceId": self.device_id,
+                    "name": label or Path(cwd).name or "Workspace",
+                    "cwd": cwd,
+                    "paneCount": 1,
+                    "status": "idle",
+                }
+                self.runtime = {
+                    **self.runtime,
+                    "workspaces": [*workspaces, workspace],
+                    "lastRuntimeEvent": time.time(),
+                }
 
     def _create_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
         provider = payload.get("provider")
