@@ -27,19 +27,21 @@ export type ChromaticMetalSettings = {
 
 export const CHROME: ChromaticMetalSettings = {
   rounding: 1,
-  depth: 0.7,
-  roughness: 0.08,
-  rgbSplit: 0.09,
-  scale: 1.5,
-  stretch: 1.15,
-  angle: -0.6,
-  repeats: 0.62,
+  depth: 0.5,
+  roughness: 0.04,
+  // Small: the three channels must stay close on the ramp, otherwise they land
+  // on different luminances and the orb reads as a rainbow rather than metal.
+  rgbSplit: 0.035,
+  scale: 1.2,
+  stretch: 1.2,
+  angle: -0.55,
+  repeats: 0.42,
   offset: 0,
-  phase: 0.3,
-  evolution: 0.75,
-  // Weighted dark so a foreground glyph stays legible, with bright chrome
-  // highlights rather than an evenly lit sphere.
-  gradient: ['#E8EEFF', '#525A70', '#07080C', '#AEBBDD', '#1B2030', '#04050A'],
+  phase: 0.22,
+  evolution: 0.5,
+  // Dominantly dark with a single bright sweep, so the orb reads as a polished
+  // sphere rather than a zebra pattern.
+  gradient: ['#E6EDFF', '#2A3244', '#04050A', '#616D8C', '#0A0D14', '#020306'],
 };
 
 /**
@@ -126,8 +128,8 @@ half4 main(float2 fragCoord) {
   // A soft rim light keeps the sphere from reading flat, and a centre
   // darkening keeps foreground glyphs legible.
   float rim = pow(edge, 3.0);
-  col += half3(half(rim * 0.30));
-  col *= half(mix(0.55, 1.0, edge));
+  col += half3(half(rim * 0.22));
+  col *= half(mix(0.42, 1.0, edge));
 
   return half4(col, 1.0);
 }

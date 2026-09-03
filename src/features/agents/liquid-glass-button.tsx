@@ -1,9 +1,9 @@
 import {
-  BlurMask,
   Canvas,
   Circle,
   Fill,
   Group,
+  LinearGradient,
   RadialGradient,
   RoundedRect,
   SweepGradient,
@@ -19,10 +19,10 @@ import { AppIcon } from '@/components/ui/app-icon';
 import { Colors, Radius, Spacing } from '@/constants/theme';
 import { useShaderClock } from '@/hooks/use-shader-clock';
 
-const HEIGHT = 48;
-const ORB = 34;
-const STROKE = 1.5;
-const INSET = (HEIGHT - ORB) / 2;
+const HEIGHT = 50;
+const INSET = 5;
+const ORB = HEIGHT - INSET * 2;
+const BEZEL = 2.5;
 
 type Props = {
   label: string;
@@ -49,12 +49,16 @@ export function LiquidGlassButton({ label, disabled = false, onPress }: Props) {
     );
   }, []);
 
-  const strokeTransform = useDerivedValue(
-    () => [{ rotate: (clock.value / 5200) % (Math.PI * 2) }],
+  const rimTransform = useDerivedValue(
+    () => [{ rotate: (clock.value / 6000) % (Math.PI * 2) }],
+    [clock],
+  );
+  const bezelTransform = useDerivedValue(
+    () => [{ rotate: (-clock.value / 9000) % (Math.PI * 2) }],
     [clock],
   );
 
-  const orbCenter = INSET + ORB / 2;
+  const orbCentre = INSET + ORB / 2;
 
   return (
     <Pressable
@@ -66,7 +70,7 @@ export function LiquidGlassButton({ label, disabled = false, onPress }: Props) {
       onLayout={onLayout}
       style={({ pressed }) => [
         styles.button,
-        { opacity: disabled ? 0.45 : pressed ? 0.88 : 1 },
+        { opacity: disabled ? 0.45 : pressed ? 0.9 : 1 },
       ]}>
       {size ? (
         <Canvas style={StyleSheet.absoluteFill} opaque colorSpace="srgb">
@@ -74,21 +78,21 @@ export function LiquidGlassButton({ label, disabled = false, onPress }: Props) {
 
           {/* Backdrop the glass refracts. */}
           <Group>
-            <Circle cx={orbCenter} cy={size.height / 2} r={size.height * 0.95}>
+            <Circle cx={orbCentre} cy={size.height / 2} r={size.height}>
               <RadialGradient
-                c={{ x: orbCenter, y: size.height / 2 }}
-                r={size.height * 0.95}
-                colors={['rgba(108,124,255,0.70)', 'rgba(108,124,255,0.16)', 'rgba(8,9,11,0)']}
+                c={{ x: orbCentre, y: size.height / 2 }}
+                r={size.height}
+                colors={['rgba(108,124,255,0.55)', 'rgba(108,124,255,0.12)', 'rgba(8,9,11,0)']}
               />
             </Circle>
             <Circle
-              cx={size.width - size.height * 0.4}
-              cy={size.height / 2}
-              r={size.height * 0.7}>
+              cx={size.width - size.height * 0.35}
+              cy={size.height * 0.3}
+              r={size.height * 0.8}>
               <RadialGradient
-                c={{ x: size.width - size.height * 0.4, y: size.height / 2 }}
-                r={size.height * 0.7}
-                colors={['rgba(255,255,255,0.20)', 'rgba(255,255,255,0)']}
+                c={{ x: size.width - size.height * 0.35, y: size.height * 0.3 }}
+                r={size.height * 0.8}
+                colors={['rgba(255,255,255,0.16)', 'rgba(255,255,255,0)']}
               />
             </Circle>
           </Group>
@@ -101,40 +105,60 @@ export function LiquidGlassButton({ label, disabled = false, onPress }: Props) {
             radius={size.height / 2}
           />
 
-          {/* Crisp orb, above the glass so the chrome stays sharp. */}
-          <ChromaticMetal x={INSET} y={INSET} size={ORB} clock={clock} />
-          <Circle cx={orbCenter} cy={orbCenter} r={ORB / 2} style="stroke" strokeWidth={1.5}>
-            <SweepGradient
-              c={{ x: orbCenter, y: orbCenter }}
-              colors={['#FFFFFF', '#B9C2FF', '#FFFFFF', '#8E97B5', '#FFFFFF']}
-            />
-          </Circle>
-
-          {/* Rim light. The pill is static; only the gradient rotates, so the
-              colour travels along the border instead of spinning the shape. */}
+          {/* Frosted body, so the pill reads as glass rather than a dark hole. */}
           <RoundedRect
-            x={STROKE / 2}
-            y={STROKE / 2}
-            width={size.width - STROKE}
-            height={size.height - STROKE}
-            r={(size.height - STROKE) / 2}
+            x={0}
+            y={0}
+            width={size.width}
+            height={size.height}
+            r={size.height / 2}>
+            <LinearGradient
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: size.height }}
+              colors={['rgba(255,255,255,0.20)', 'rgba(255,255,255,0.06)', 'rgba(255,255,255,0.12)']}
+            />
+          </RoundedRect>
+
+          {/* Iridescent rim. Kept low in alpha so it reads as a fringe on the
+              glass edge rather than a coloured outline. */}
+          <RoundedRect
+            x={0.75}
+            y={0.75}
+            width={size.width - 1.5}
+            height={size.height - 1.5}
+            r={(size.height - 1.5) / 2}
             style="stroke"
-            strokeWidth={STROKE}>
+            strokeWidth={1.5}>
             <SweepGradient
               c={{ x: size.width / 2, y: size.height / 2 }}
               origin={{ x: size.width / 2, y: size.height / 2 }}
-              transform={strokeTransform}
+              transform={rimTransform}
               colors={[
-                'rgba(255,255,255,0.55)',
-                'rgba(108,124,255,1)',
-                'rgba(120,230,255,0.9)',
-                'rgba(255,255,255,0.75)',
-                'rgba(255,198,92,0.85)',
-                'rgba(255,255,255,0.55)',
+                'rgba(255,255,255,0.42)',
+                'rgba(150,170,255,0.55)',
+                'rgba(150,255,240,0.45)',
+                'rgba(255,255,255,0.60)',
+                'rgba(255,220,170,0.45)',
+                'rgba(255,255,255,0.42)',
               ]}
             />
-            <BlurMask blur={0.6} style="solid" />
           </RoundedRect>
+
+          {/* Polished bezel, then the orb inside it. */}
+          <Circle cx={orbCentre} cy={orbCentre} r={ORB / 2}>
+            <SweepGradient
+              c={{ x: orbCentre, y: orbCentre }}
+              origin={{ x: orbCentre, y: orbCentre }}
+              transform={bezelTransform}
+              colors={['#FFFFFF', '#9AA4BE', '#FFFFFF', '#6E778F', '#EDF1FF', '#FFFFFF']}
+            />
+          </Circle>
+          <ChromaticMetal
+            x={INSET + BEZEL}
+            y={INSET + BEZEL}
+            size={ORB - BEZEL * 2}
+            clock={clock}
+          />
         </Canvas>
       ) : null}
 
@@ -142,7 +166,7 @@ export function LiquidGlassButton({ label, disabled = false, onPress }: Props) {
         <View style={styles.orb}>
           <AppIcon
             name={{ ios: 'plus', android: 'add', web: 'add' }}
-            size={17}
+            size={18}
             tintColor={Colors.text}
             fallback="+"
           />
@@ -163,9 +187,9 @@ const styles = StyleSheet.create({
   content: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.one,
+    gap: Spacing.one + Spacing.half,
     paddingLeft: INSET,
-    paddingRight: Spacing.two + Spacing.half,
+    paddingRight: Spacing.three,
   },
   orb: {
     width: ORB,
