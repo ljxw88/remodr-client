@@ -221,6 +221,23 @@ export function UpgradeSheet({ visible, onClose }: Props) {
             </View>
           ) : null}
         </ScrollView>
+
+        {/* After the ScrollView so it stays above the content, and absolute so
+            the centred header keeps its symmetry. */}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+          disabled={loading}
+          hitSlop={8}
+          onPress={onClose}
+          style={({ pressed }) => [styles.close, pressed && styles.pressed]}>
+          <AppIcon
+            name={{ ios: 'xmark', android: 'close', web: 'close' }}
+            size={20}
+            tintColor={theme.textSecondary}
+            fallback="×"
+          />
+        </Pressable>
       </SheetPanel>
     </SheetModal>
   );
@@ -262,6 +279,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.half,
     paddingTop: Spacing.one,
+  },
+  close: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radius.pill,
+  },
+  pressed: {
+    opacity: 0.6,
   },
   crownFrame: {
     width: 52,
