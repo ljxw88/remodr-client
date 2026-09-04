@@ -1,6 +1,6 @@
 import { ChipPicker } from '@/components/ui/chip-picker';
 import {
-  CONTEXT_LABELS,
+  contextLabel,
   contextsFor,
   EFFORT_LABELS,
   effortsFor,
@@ -76,9 +76,9 @@ export function AgentTuningPicker({ provider, value, onChange }: Props) {
           label="CONTEXT WINDOW"
           options={[
             { id: AUTO, label: 'Default' },
-            ...contexts.map((tier) => ({
-              id: tier,
-              label: CONTEXT_LABELS[tier],
+            ...contexts.map((option) => ({
+              id: option.tier,
+              label: contextLabel(option),
             })),
           ]}
           selectedId={value.context ?? AUTO}

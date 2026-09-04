@@ -25,124 +25,165 @@ export const REASONING_EFFORTS = [
 ] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 
-/** CLIs name context sizes rather than taking a number of tokens. */
+/**
+ * CLIs take a named tier rather than a number of tokens, but show the size the
+ * tier buys. Both are kept: the tier is what gets sent, the size is what makes
+ * the choice mean anything.
+ */
 export const CONTEXT_TIERS = ['default', 'long_context'] as const;
 export type ContextTier = (typeof CONTEXT_TIERS)[number];
+
+export type ContextOption = {
+  tier: ContextTier;
+  /** As the CLI writes it: `264K`, `1M`, `1.1M`. */
+  size: string;
+};
 
 export type ModelSpec = {
   id: string;
   label: string;
   /** Empty where the model has no reasoning setting at all. */
   efforts: ReasoningEffort[];
-  /** Always includes `default`; only some models offer the longer window. */
-  contexts: ContextTier[];
+  /** Empty where the model has a single window and so nothing to choose. */
+  contexts: ContextOption[];
 };
 
-const BOTH: ContextTier[] = ['default', 'long_context'];
-const STANDARD_ONLY: ContextTier[] = ['default'];
+/** Every size below was read from the CLI's own model picker. */
+function windows(standard: string, long: string): ContextOption[] {
+  return [
+    { tier: 'default', size: standard },
+    { tier: 'long_context', size: long },
+  ];
+}
+
+const ONE_WINDOW: ContextOption[] = [];
 
 const COPILOT_MODELS: ModelSpec[] = [
   {
     id: 'claude-opus-5',
     label: 'Claude Opus 5',
     efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
-    contexts: BOTH,
+    contexts: windows('264K', '1M'),
   },
   {
     id: 'claude-opus-4.8',
     label: 'Claude Opus 4.8',
     efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
-    contexts: BOTH,
+    contexts: windows('264K', '1M'),
+  },
+  {
+    id: 'claude-opus-4.7',
+    label: 'Claude Opus 4.7',
+    efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    contexts: windows('264K', '1M'),
   },
   {
     id: 'claude-sonnet-5',
     label: 'Claude Sonnet 5',
     efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
-    contexts: BOTH,
+    contexts: windows('264K', '1M'),
   },
   {
     id: 'claude-haiku-4.5',
     label: 'Claude Haiku 4.5',
     efforts: [],
-    contexts: STANDARD_ONLY,
+    contexts: ONE_WINDOW,
   },
   {
     id: 'gpt-5.6-sol',
     label: 'GPT-5.6 Sol',
-    efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
-    contexts: BOTH,
+    efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+    contexts: windows('400K', '1.1M'),
   },
   {
     id: 'gpt-5.6-terra',
     label: 'GPT-5.6 Terra',
-    efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
-    contexts: BOTH,
+    efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+    contexts: windows('400K', '1.1M'),
   },
   {
     id: 'gpt-5.6-luna',
     label: 'GPT-5.6 Luna',
-    efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
-    contexts: BOTH,
+    efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+    contexts: windows('328K', '1.1M'),
   },
   {
     id: 'gpt-5.5',
     label: 'GPT-5.5',
-    efforts: ['low', 'medium', 'high', 'xhigh'],
-    contexts: BOTH,
+    efforts: ['none', 'low', 'medium', 'high', 'xhigh'],
+    contexts: windows('400K', '1.1M'),
   },
   {
     id: 'gpt-5.4',
     label: 'GPT-5.4',
-    efforts: ['low', 'medium', 'high', 'xhigh'],
-    contexts: BOTH,
+    efforts: ['none', 'low', 'medium', 'high', 'xhigh'],
+    contexts: windows('400K', '1.1M'),
   },
   {
     id: 'gpt-5.4-mini',
     label: 'GPT-5.4 mini',
-    efforts: ['low', 'medium', 'high', 'xhigh'],
-    contexts: STANDARD_ONLY,
+    efforts: ['none', 'low', 'medium', 'high', 'xhigh'],
+    contexts: ONE_WINDOW,
   },
   {
     id: 'gpt-5.3-codex',
     label: 'GPT-5.3-Codex',
     efforts: ['low', 'medium', 'high', 'xhigh'],
-    contexts: STANDARD_ONLY,
+    contexts: ONE_WINDOW,
+  },
+  {
+    id: 'gpt-5-mini',
+    label: 'GPT-5 mini',
+    efforts: ['low', 'medium', 'high'],
+    contexts: ONE_WINDOW,
   },
   {
     id: 'gemini-3.8-flash',
     label: 'Gemini 3.8 Flash',
     efforts: ['low', 'medium', 'high'],
-    contexts: BOTH,
+    contexts: windows('266K', '1.0M'),
   },
   {
     id: 'gemini-3.7-flash',
     label: 'Gemini 3.7 Flash',
     efforts: ['low', 'medium', 'high'],
-    contexts: BOTH,
+    contexts: windows('264K', '1M'),
   },
   {
     id: 'gemini-3.6-flash',
     label: 'Gemini 3.6 Flash',
     efforts: ['minimal', 'low', 'medium', 'high'],
-    contexts: BOTH,
+    contexts: windows('264K', '1M'),
+  },
+  {
+    id: 'gemini-3.5-flash',
+    label: 'Gemini 3.5 Flash',
+    efforts: ['minimal', 'low', 'medium', 'high'],
+    contexts: windows('264K', '1M'),
   },
   {
     id: 'grok-4.6',
     label: 'Grok 4.6',
     efforts: ['low', 'medium', 'high', 'xhigh'],
-    contexts: BOTH,
+    contexts: windows('328K', '628K'),
   },
   {
     id: 'grok-4.5',
     label: 'Grok 4.5',
     efforts: ['low', 'medium', 'high'],
-    contexts: BOTH,
+    contexts: windows('328K', '628K'),
   },
   {
     id: 'mai-code-1.1-flash',
     label: 'MAI-Code-1.1-Flash',
     efforts: ['low', 'medium', 'high'],
-    contexts: STANDARD_ONLY,
+    contexts: ONE_WINDOW,
+  },
+  {
+    id: 'mai-code-1-flash',
+    label: 'MAI-Code-1-Flash',
+    efforts: ['low', 'medium', 'high'],
+    contexts: ONE_WINDOW,
   },
 ];
 
@@ -200,13 +241,17 @@ export function effortsFor(
   return findModel(provider, modelId)?.efforts ?? [];
 }
 
+/**
+ * The context windows worth offering for a model.
+ *
+ * Already empty in the table for a model with a single window, because one
+ * choice is not a choice.
+ */
 export function contextsFor(
   provider: AgentProvider,
   modelId: string | null | undefined,
-): ContextTier[] {
-  const contexts = findModel(provider, modelId)?.contexts ?? [];
-  // A single choice is not a choice, so there is nothing to offer.
-  return contexts.length > 1 ? contexts : [];
+): ContextOption[] {
+  return findModel(provider, modelId)?.contexts ?? [];
 }
 
 export type Tuning = {
@@ -227,15 +272,13 @@ export function tuningForModel(
   previous: Tuning,
 ): Tuning {
   const efforts: readonly ReasoningEffort[] = effortsFor(provider, model);
-  const contexts: readonly ContextTier[] = contextsFor(provider, model);
+  const tiers = contextsFor(provider, model).map((option) => option.tier);
   return {
     model,
     effort:
       previous.effort && efforts.includes(previous.effort) ? previous.effort : null,
     context:
-      previous.context && contexts.includes(previous.context)
-        ? previous.context
-        : null,
+      previous.context && tiers.includes(previous.context) ? previous.context : null,
   };
 }
 
@@ -249,7 +292,10 @@ export const EFFORT_LABELS: Record<ReasoningEffort, string> = {
   max: 'Max',
 };
 
-export const CONTEXT_LABELS: Record<ContextTier, string> = {
-  default: 'Standard',
-  long_context: 'Long',
-};
+/**
+ * A window reads as its size, since that is the thing being chosen. The tier
+ * name is what gets sent and means nothing to anyone looking at it.
+ */
+export function contextLabel(option: ContextOption): string {
+  return option.size;
+}

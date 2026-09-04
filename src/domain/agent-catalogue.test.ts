@@ -1,4 +1,5 @@
 import {
+  contextLabel,
   contextsFor,
   effortsFor,
   modelLabel,
@@ -12,14 +13,23 @@ import { launchableAgentProviderSchema } from '@/domain/herdr';
 
 describe('what a model can be asked for', () => {
   it('offers the efforts that model has and no others', () => {
-    // The ranges are not the same shape, so a single shared list would offer
-    // settings the CLI refuses at startup.
+    // Read off the CLI's own picker by stepping each model's range to both
+    // ends. They are not the same shape: the GPTs start below low, the Geminis
+    // stop at high, and only some reach max.
     expect(effortsFor('copilot', 'gpt-5.6-sol')).toEqual([
+      'none',
       'low',
       'medium',
       'high',
       'xhigh',
       'max',
+    ]);
+    expect(effortsFor('copilot', 'gpt-5.5')).toEqual([
+      'none',
+      'low',
+      'medium',
+      'high',
+      'xhigh',
     ]);
     expect(effortsFor('copilot', 'gemini-3.8-flash')).toEqual(['low', 'medium', 'high']);
     expect(effortsFor('copilot', 'gemini-3.6-flash')).toEqual([
@@ -27,6 +37,13 @@ describe('what a model can be asked for', () => {
       'low',
       'medium',
       'high',
+    ]);
+    expect(effortsFor('copilot', 'claude-opus-5')).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
     ]);
   });
 
@@ -41,10 +58,35 @@ describe('what a model can be asked for', () => {
   });
 
   it('offers a context choice only where there is more than one', () => {
-    expect(contextsFor('copilot', 'gpt-5.6-sol')).toEqual(['default', 'long_context']);
-    // A single tier is not a choice.
+    expect(contextsFor('copilot', 'gpt-5.6-sol').map((o) => o.tier)).toEqual([
+      'default',
+      'long_context',
+    ]);
+    // A single window is not a choice.
     expect(contextsFor('copilot', 'claude-haiku-4.5')).toEqual([]);
     expect(contextsFor('copilot', 'gpt-5.4-mini')).toEqual([]);
+  });
+
+  it('carries the size each window actually buys', () => {
+    // The tier name is what gets sent and means nothing to read; the size is
+    // the thing being chosen. Both come from the CLI's own picker.
+    expect(contextsFor('copilot', 'gpt-5.6-sol').map(contextLabel)).toEqual([
+      '400K',
+      '1.1M',
+    ]);
+    expect(contextsFor('copilot', 'gemini-3.8-flash').map(contextLabel)).toEqual([
+      '266K',
+      '1.0M',
+    ]);
+    // Two models on the same family can still differ.
+    expect(contextsFor('copilot', 'gpt-5.6-luna').map(contextLabel)).toEqual([
+      '328K',
+      '1.1M',
+    ]);
+    expect(contextsFor('copilot', 'grok-4.6').map(contextLabel)).toEqual([
+      '328K',
+      '628K',
+    ]);
   });
 
   it('does not read one CLI\u2019s models against another', () => {
@@ -78,10 +120,11 @@ describe('the catalogue itself', () => {
           expect(REASONING_EFFORTS).toContain(effort);
         }
         for (const context of model.contexts) {
-          expect(CONTEXT_TIERS).toContain(context);
+          expect(CONTEXT_TIERS).toContain(context.tier);
+          expect(context.size).toMatch(/^\d+(\.\d+)?[KM]$/);
         }
-        // Every model can run at the standard window.
-        expect(model.contexts).toContain('default');
+        // A model either offers both windows or has nothing to choose from.
+        expect([0, 2]).toContain(model.contexts.length);
       }
     }
   });
