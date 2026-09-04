@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 
 import { MarkdownMessage } from '@/components/markdown/markdown-message';
+import { MessageText } from '@/components/markdown/markdown-theme';
 import { AppIcon } from '@/components/ui/app-icon';
 import {
   BlurBackdropProvider,
@@ -497,7 +498,11 @@ function ConversationRow({
             styles.userMessage,
             { backgroundColor: theme.glassStrong, borderColor: theme.glassBorder },
           ]}>
-          <ThemedText selectable>{item.text}</ThemedText>
+          {/* The same size the agent's replies read at, so one side of the
+              conversation does not look louder than the other. */}
+          <ThemedText selectable style={MessageText}>
+            {item.text}
+          </ThemedText>
         </View>
       </Pressable>
     );
@@ -757,7 +762,9 @@ function AskedQuestionRow({ request }: { request: HumanRequest }) {
       <ThemedText type="label" themeColor="textMuted">
         ASKED YOU
       </ThemedText>
-      <ThemedText type="section">{request.question}</ThemedText>
+      {/* The size a message reads at. The card and its label already mark
+          this out, and the live version of the same question is no larger. */}
+      <ThemedText type="smallBold">{request.question}</ThemedText>
     </View>
   );
 }

@@ -92,6 +92,13 @@ text. Map spellings in `ALIASES`, add a display name to `LABELS`. `bash`,
 `java`, and `diff` are *not* bundled — `shell` is registered manually in
 `registerShell()`, and `diff` is handled by `diff.ts`.
 
+**Change how large a message reads.** `MessageText` in `markdown-theme.ts` is
+the one place. Everything else in a message is sized against it, headings
+included, and the user's own bubble uses it directly so both sides of a
+conversation match. It sits a step below the app's body size: a transcript is
+long-form, so fitting more of a sentence on a line is worth more here than
+matching the chrome around it.
+
 **Change syntax colours.** `SyntaxColors` in `markdown-theme.ts` maps ten
 roles. Prism token types map to roles through `ROLES`; unmapped types fall back
 to `plain`.

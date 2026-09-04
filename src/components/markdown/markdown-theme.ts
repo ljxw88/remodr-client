@@ -33,10 +33,22 @@ export const DiffColors: Record<DiffLineKind, { text: string; background: string
   context: { text: Colors.textSecondary, background: 'transparent' },
 };
 
+/**
+ * How large a message reads, and the one place to change it.
+ *
+ * A step below the app's body size. A transcript is long-form and mostly read
+ * rather than glanced at, so fitting more of a sentence on a line is worth
+ * more here than matching the chrome around it. Everything else in a message
+ * is sized against this, and the user's own bubble uses it too.
+ */
+export const MessageText = {
+  fontSize: 14,
+  lineHeight: 20,
+} as const;
+
 const body = {
   fontFamily: Fonts.regular,
-  fontSize: 16,
-  lineHeight: 24,
+  ...MessageText,
   color: Colors.text,
 } as const;
 
@@ -61,12 +73,12 @@ export const markdownStyles: MarkedStyles = {
   strong: { ...body, fontFamily: Fonts.semibold, fontWeight: '600' },
   strikethrough: { ...body, color: Colors.textMuted, textDecorationLine: 'line-through' },
   link: { ...body, fontStyle: 'normal', color: Colors.accent, textDecorationLine: 'underline' },
-  h1: { ...heading, fontSize: 24, lineHeight: 32 },
-  h2: { ...heading, fontSize: 20, lineHeight: 28 },
-  h3: { ...heading, fontSize: 17, lineHeight: 24 },
-  h4: { ...heading, fontSize: 16, lineHeight: 22 },
-  h5: { ...heading, fontSize: 15, lineHeight: 22 },
-  h6: { ...heading, fontSize: 14, lineHeight: 20, color: Colors.textSecondary },
+  h1: { ...heading, fontSize: 20, lineHeight: 28 },
+  h2: { ...heading, fontSize: 18, lineHeight: 26 },
+  h3: { ...heading, fontSize: 16, lineHeight: 22 },
+  h4: { ...heading, fontSize: 15, lineHeight: 20 },
+  h5: { ...heading, fontSize: 14, lineHeight: 20 },
+  h6: { ...heading, fontSize: 13, lineHeight: 18, color: Colors.textSecondary },
   blockquote: {
     borderLeftColor: Colors.accent,
     borderLeftWidth: 3,
@@ -78,7 +90,7 @@ export const markdownStyles: MarkedStyles = {
     fontFamily: Fonts.mono,
     fontStyle: 'normal',
     fontWeight: '400',
-    fontSize: 14,
+    fontSize: 13,
     color: Colors.text,
     backgroundColor: Colors.backgroundSelected,
   },
