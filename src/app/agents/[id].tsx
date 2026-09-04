@@ -762,9 +762,9 @@ function AskedQuestionRow({ request }: { request: HumanRequest }) {
       <ThemedText type="label" themeColor="textMuted">
         ASKED YOU
       </ThemedText>
-      {/* The size a message reads at. The card and its label already mark
-          this out, and the live version of the same question is no larger. */}
-      <ThemedText type="smallBold">{request.question}</ThemedText>
+      {/* The weight and size a message reads at. The card and its label
+          already mark this out, so the question needs no emphasis of its own. */}
+      <ThemedText type="small">{request.question}</ThemedText>
     </View>
   );
 }
@@ -1063,10 +1063,14 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   request: {
-    gap: Spacing.two,
-    padding: Spacing.two,
+    // The label is a caption for the question, so it sits against it rather
+    // than a whole step away.
+    gap: Spacing.half,
+    padding: Spacing.one + Spacing.half,
     borderWidth: 1,
-    borderRadius: Radius.glass,
+    // The radius the other transcript cards use. This one was the odd one out,
+    // and a wide corner on a card this size crowds its own text.
+    borderRadius: Radius.control,
   },
   plan: {
     flexDirection: 'row',
