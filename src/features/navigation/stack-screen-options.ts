@@ -30,6 +30,11 @@ export function useStackScreenOptions(): ScreenOptions {
      * one screen refusing to leave: the outgoing header and buttons stayed
      * legible over the arriving screen for the length of the animation. A
      * slide never puts both in the same place at once.
+     *
+     * This is not what makes content disappear on the way out. Every
+     * animation, the default included, stops a blur target drawing while its
+     * screen is dismissed — see `components/ui/blur-backdrop.tsx`. Changing
+     * the animation only changes how well the gap is hidden.
      */
     animation: 'slide_from_right',
   };

@@ -15,10 +15,6 @@ import {
 import { MarkdownMessage } from '@/components/markdown/markdown-message';
 import { MessageText } from '@/components/markdown/markdown-theme';
 import { AppIcon } from '@/components/ui/app-icon';
-import {
-  BlurBackdropProvider,
-  BlurBackdropTarget,
-} from '@/components/ui/blur-backdrop';
 import { BorderBeam } from '@/components/ui/border-beam';
 import { GlassSurface } from '@/components/ui/glass-surface';
 import { Screen } from '@/components/ui/screen';
@@ -267,14 +263,26 @@ export default function AgentConversationScreen() {
           ),
         }}
       />
-      <BlurBackdropProvider>
-        <KeyboardAvoidingView
-          style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}>
-        {/* The composer is a sibling of the target, never a child: a BlurView
-            nested inside the target it samples crashes the render thread. */}
-        <BlurBackdropTarget>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}>
+        {/*
+          No blur backdrop on this screen, deliberately.
+
+          A `BlurTargetView` draws nothing at all while the screen it is on is
+          being dismissed, so everything inside one vanished the instant you
+          pressed back: the transcript and the agent header blinked out and an
+          empty chat animated away. The chrome outside the target — the native
+          header, the composer — kept drawing, which is what made it read as
+          the conversation being thrown away rather than as a transition.
+
+          Nothing is lost by dropping it. The edge fade below already dissolves
+          rows into the canvas across the composer's full height, so the blur
+          was sampling flat background; `GlassSurface` falls back to the same
+          translucent fill and rim every chip and card in the app already uses.
+        */}
+        <View style={styles.flex}>
           <AgentHeader agent={agent} />
           {runtime.connection !== 'connected' ? (
             <GlassSurface style={styles.banner}>
@@ -355,7 +363,7 @@ export default function AgentConversationScreen() {
               />
             )}
           </ScrollEdgeFrame>
-        </BlurBackdropTarget>
+        </View>
         <Composer
           value={draft}
           onChangeText={setDraft}
@@ -369,8 +377,7 @@ export default function AgentConversationScreen() {
           tunable={supportsTuning(agent.provider)}
           onOpenTuning={() => setShowTuning(true)}
         />
-        </KeyboardAvoidingView>
-      </BlurBackdropProvider>
+      </KeyboardAvoidingView>
       {showTuning ? (
         <AgentTuningSheet agent={agent} onClose={() => setShowTuning(false)} />
       ) : null}

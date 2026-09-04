@@ -26,6 +26,16 @@ const BlurBackdropContext = createContext<BlurTarget | null>(null);
  * contain itself. Android then recurses through `RenderNode::prepareTreeImpl`
  * until the native stack overflows and the process dies with SIGSEGV — no JS
  * error, no red box, just a vanished app.
+ *
+ * **Only put this on a screen that is never dismissed.** A `BlurTargetView`
+ * draws nothing at all from the moment its screen starts animating away, so
+ * everything inside one blinks out while the screen is still on top and still
+ * sliding. Chrome outside the target keeps drawing, which makes it look like
+ * the screen threw its content away rather than left. This is not a property
+ * of any one animation — the platform default does it too, it is just harder
+ * to see through a cross-fade — and it survives `renderToHardwareTextureAndroid`.
+ * The tab bar qualifies because its screen is the root; a pushed route does
+ * not, and should let `GlassSurface` fall back to its translucent fill.
  */
 export function BlurBackdropProvider({ children }: { children: ReactNode }) {
   const target = useRef<View | null>(null);

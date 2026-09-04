@@ -326,6 +326,11 @@ chromatic orb.
   one screen to be hiding the other to read as a change of place; ours share a
   canvas and sit at the same brightness, so a dissolve looks like the screen
   being left refusing to go.
+- Frosted chrome may only sample a blur target on a screen that is never
+  dismissed. A `BlurTargetView` draws nothing from the moment its screen starts
+  animating away, so its contents blink out while the screen is still visible;
+  chrome outside the target keeps drawing, and the screen reads as having
+  thrown its content away. The tab bar qualifies, a pushed route does not.
 - Press-scale belongs to controls that stand alone on the canvas. A row that
   fills its card edge to edge must not scale: shrinking it pulls the pressed
   highlight inwards and leaves the card showing down both sides.
