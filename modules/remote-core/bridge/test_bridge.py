@@ -4,7 +4,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from herdr_mobile_bridge import BYPASS_ARGUMENTS, Bridge, BridgeError, SUBSCRIPTIONS
+from herdr_mobile_bridge import (
+    BYPASS_ARGUMENTS,
+    Bridge,
+    BridgeError,
+    SUBSCRIPTIONS,
+    SUPPORTED_PROVIDERS,
+    TUNING_ARGUMENTS,
+)
 
 
 class BridgeProtocolTest(unittest.TestCase):
@@ -1155,6 +1162,14 @@ class AgentTuningTest(unittest.TestCase):
         bridge.started_sessions = {"p1": session} if session else {}
         bridge._refresh_runtime = lambda: None
         return bridge
+
+    def test_every_tunable_cli_is_one_the_bridge_can_launch(self):
+        # The app decides which models to offer; this decides how to send them.
+        # A CLI listed here with no counterpart there is never asked for, and
+        # one listed there with no flags here cannot be sent.
+        for provider in TUNING_ARGUMENTS:
+            self.assertIn(provider, SUPPORTED_PROVIDERS)
+            self.assertIn(provider, BYPASS_ARGUMENTS)
 
     def test_a_change_shows_at_once_rather_than_a_turn_later(self):
         # The session log names the model the agent last ran, which still says

@@ -5,19 +5,15 @@ import {
   EFFORT_LABELS,
   effortsFor,
   modelsFor,
+  tuningForModel,
   type ContextTier,
   type ReasoningEffort,
-} from '@/domain/agent-tuning';
+  type Tuning,
+} from '@/domain/agent-catalogue';
 import type { AgentProvider } from '@/domain/herdr';
 
 /** Stands for "send no flag", which is not the same as any real value. */
-export const AUTO = 'auto';
-
-export type Tuning = {
-  model: string | null;
-  effort: ReasoningEffort | null;
-  context: ContextTier | null;
-};
+const AUTO = 'auto';
 
 type Props = {
   provider: AgentProvider;
@@ -35,8 +31,8 @@ type Props = {
  * chooses, and there is no telling which range would apply.
  */
 export function AgentTuningPicker({ provider, value, onChange }: Props) {
-  const efforts = effortsFor(value.model);
-  const contexts = contextsFor(value.model);
+  const efforts = effortsFor(provider, value.model);
+  const contexts = contextsFor(provider, value.model);
 
   return (
     <>
@@ -50,20 +46,9 @@ export function AgentTuningPicker({ provider, value, onChange }: Props) {
           })),
         ]}
         selectedId={value.model ?? AUTO}
-        onSelect={(id) => {
-          const model = id === AUTO ? null : id;
-          // Settings the new model cannot reach are dropped rather than
-          // carried over into a startup failure.
-          onChange({
-            model,
-            effort: effortsFor(model).includes(value.effort as ReasoningEffort)
-              ? value.effort
-              : null,
-            context: contextsFor(model).includes(value.context as ContextTier)
-              ? value.context
-              : null,
-          });
-        }}
+        onSelect={(id) =>
+          onChange(tuningForModel(provider, id === AUTO ? null : id, value))
+        }
       />
 
       {efforts.length > 0 ? (

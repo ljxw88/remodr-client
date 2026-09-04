@@ -15,9 +15,9 @@ import {
   type CreateAgentInput,
   type LaunchableAgentProvider,
 } from '@/domain/herdr';
-import { supportsTuning } from '@/domain/agent-tuning';
+import { supportsTuning, type Tuning } from '@/domain/agent-catalogue';
 import { AgentProviderIcon } from '@/features/agents/agent-provider-icon';
-import { AgentTuningPicker, type Tuning } from '@/features/agents/agent-tuning-picker';
+import { AgentTuningPicker } from '@/features/agents/agent-tuning-picker';
 import { useDockContentInset } from '@/features/navigation/floating-dock';
 import { useTheme } from '@/hooks/use-theme';
 import { toUserMessage } from '@/utils/user-error';

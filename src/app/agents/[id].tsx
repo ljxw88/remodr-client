@@ -28,11 +28,12 @@ import {
   providerLabel,
   statusLabel,
   type ConversationItem,
+  type AgentProvider,
   type AgentTuning,
   type HumanRequest,
   type RemoteAgent,
 } from '@/domain/herdr';
-import { EFFORT_LABELS, modelLabel, supportsTuning } from '@/domain/agent-tuning';
+import { EFFORT_LABELS, modelLabel, supportsTuning } from '@/domain/agent-catalogue';
 import { AgentActionsSheet } from '@/features/agents/agent-actions-sheet';
 import { AgentTuningSheet } from '@/features/agents/agent-tuning-sheet';
 import { HumanRequestBar } from '@/features/agents/human-request-bar';
@@ -363,6 +364,7 @@ export default function AgentConversationScreen() {
           agentId={agent.id}
           request={conversation?.activeHumanRequest ?? null}
           onHeightChange={setComposerHeight}
+          provider={agent.provider}
           tuning={agent.tuning}
           tunable={supportsTuning(agent.provider)}
           onOpenTuning={() => setShowTuning(true)}
@@ -818,6 +820,7 @@ function Composer({
   agentId,
   request,
   onHeightChange,
+  provider,
   tuning,
   tunable,
   onOpenTuning,
@@ -829,6 +832,7 @@ function Composer({
   agentId: string;
   request: HumanRequest | null;
   onHeightChange: (height: number) => void;
+  provider: AgentProvider;
   tuning?: AgentTuning;
   tunable: boolean;
   onOpenTuning: () => void;
@@ -893,7 +897,7 @@ function Composer({
                   shown even for an agent this app did not start.
                 */}
                 <TuningPill
-                  label={modelLabel(tuning?.model)}
+                  label={modelLabel(provider, tuning?.model)}
                   onPress={onOpenTuning}
                   disabled={!tunable}
                 />

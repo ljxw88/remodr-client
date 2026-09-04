@@ -36,6 +36,11 @@ SHELL_READY_TIMEOUT = 20
 MAX_AGENT_NAME = 60
 """Longest name a tab label will carry, so one cannot fill the list row."""
 
+# The bridge's half of the model catalogue: which flags each CLI takes. The
+# app holds the other half — which models and settings to offer — in
+# `src/domain/agent-catalogue.ts`. A CLI must appear in both or neither: models
+# offered with no flags here cannot be sent, and flags here with no models
+# there are never asked for.
 TUNING_ARGUMENTS = {
     # Only Copilot for now. The others take a model differently, or not at all
     # from the command line, and guessing a flag would fail at startup with
