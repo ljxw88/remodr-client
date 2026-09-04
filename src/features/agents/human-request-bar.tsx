@@ -212,6 +212,15 @@ export function HumanRequestBar({ agentId, request }: Props) {
  */
 const OPTION_HEIGHT = 40;
 
+/**
+ * How far the panel runs on underneath the input card.
+ *
+ * It has to clear the card's corner radius. The card only starts covering
+ * things at its own corners once you are that far down, so a shallower
+ * overlap leaves our square foot poking out into the notch beside each curve.
+ */
+const TUCK = Radius.glass + Spacing.half;
+
 const SQUARE_FOOT = {
   borderTopLeftRadius: Radius.glass,
   borderTopRightRadius: Radius.glass,
@@ -226,7 +235,8 @@ const styles = StyleSheet.create({
     // Runs on behind the input card rather than stopping short of it. The
     // composer's gap would otherwise be a band of clear space with the
     // transcript scrolling through it, between two panels that read as one.
-    marginBottom: -Spacing.two,
+    // The gap is cancelled first, then the tuck taken off that.
+    marginBottom: -(Spacing.one + TUCK),
   },
   surface: {
     ...SQUARE_FOOT,
@@ -236,9 +246,9 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: Spacing.two,
     paddingTop: Spacing.one + Spacing.half,
-    // Deeper than the top to leave room under the answers once the card
-    // below has covered the overlap.
-    paddingBottom: Spacing.two + Spacing.one,
+    // The tuck is hidden behind the card, so it is added on top of the room
+    // the answers actually need.
+    paddingBottom: Spacing.two + TUCK,
     // The label is a caption for the question, so it sits closer to it than
     // the answers do. An even gap throughout read as three unrelated rows.
     gap: Spacing.one,

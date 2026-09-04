@@ -745,11 +745,6 @@ function Composer({
     <View
       style={styles.composer}
       onLayout={(event) => onHeightChange(event.nativeEvent.layout.height)}>
-      {request ? (
-        // Keyed so a new question starts with a clean slate rather than
-        // inheriting the last one's half-made selection.
-        <HumanRequestBar key={request.id} agentId={agentId} request={request} />
-      ) : null}
       {working ? (
         <View
           style={[
@@ -761,6 +756,14 @@ function Composer({
             {workingLabel}
           </ThemedText>
         </View>
+      ) : null}
+      {request ? (
+        // Last before the card, because it tucks itself underneath it — any
+        // sibling in between would be dragged under there too.
+        //
+        // Keyed so a new question starts with a clean slate rather than
+        // inheriting the last one's half-made selection.
+        <HumanRequestBar key={request.id} agentId={agentId} request={request} />
       ) : null}
       <View style={styles.cardWrapper}>
         <GlassSurface
