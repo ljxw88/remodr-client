@@ -129,10 +129,6 @@ export function DockMotionProvider({ children }: PropsWithChildren) {
 const TabRoutes = ['/', '/servers', '/settings'];
 
 export function AnimatedTabContent({ children }: PropsWithChildren) {
-  const motion = useContext(DockMotionContext);
-  if (!motion) {
-    throw new Error('AnimatedTabContent must be used inside DockMotionProvider');
-  }
   const pathname = usePathname();
   const covered = !TabRoutes.includes(pathname);
   const tabIndex = covered ? -1 : TabRoutes.indexOf(pathname);

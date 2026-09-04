@@ -75,34 +75,17 @@ export const GlassMaterial = {
     tintStrong: 'systemThinMaterialDark',
     fillStrong: 'rgba(255,255,255,0.04)',
     /**
-     * Standing in for the blur when there is no target to sample.
+     * The fill when there is no target and the surface carries its own opaque
+     * copy of the canvas instead.
      *
-     * A blur does two things at once: it hides what is behind and it breaks up
-     * the surface, and it is the second one that makes the thing read as glass.
-     * Backing the surface with the canvas covers the first. Left flat, though,
-     * it reads as a hole cut in the screen — the same colour as its
-     * surroundings, only interrupted.
-     *
-     * Transparency cannot stand in for it. Measured on device: the pass-through
-     * needed before a surface looks like glass leaves sharp text behind it at
-     * around 11 levels of contrast, which is comfortably readable, and the
-     * blur is exactly what used to stop that. Nothing between reads as glass
-     * and hides anything.
-     *
-     * So the plate is lit instead. A sheen from the top edge is what a real one
-     * catches, and it gives the surface a shape of its own rather than the
-     * shape of whatever it covers.
+     * Lighter than the panel tints, not heavier, even though it is doing more
+     * work. The blur path lands somewhere near these values only after the
+     * backdrop has been darkened by a dark material tint; here the copy comes
+     * through at full strength, so the same alpha over it reads as a grey card
+     * laid on the canvas rather than a surface the canvas shows through.
      */
-    sheen: [
-      'linear-gradient(180deg, rgba(255,255,255,0.125) 0%',
-      'rgba(255,255,255,0.072) 46%',
-      'rgba(255,255,255,0.05) 100%)',
-    ].join(', '),
-    sheenStrong: [
-      'linear-gradient(180deg, rgba(255,255,255,0.165) 0%',
-      'rgba(255,255,255,0.098) 46%',
-      'rgba(255,255,255,0.066) 100%)',
-    ].join(', '),
+    canvasFill: 'rgba(255,255,255,0.055)',
+    canvasFillStrong: 'rgba(255,255,255,0.075)',
   },
 } as const;
 

@@ -123,22 +123,23 @@ export function GlassSurface({
      * never dismissed, which rules out every pushed route. See
      * `blur-backdrop.tsx`.
      *
-     * So the surface stands in for it with its own copy of the canvas, lit from
-     * the top edge. The canvas covers what the blur used to hide; the sheen
-     * does what the blur used to do to the surface itself, which is give it a
-     * shape that is its own rather than the shape of whatever it covers.
+     * So the surface brings the canvas with it: an opaque copy, aligned to the
+     * window, under a translucent fill and the same rim the rest of the app
+     * wears. It looks like the canvas because it *is* the canvas, and nothing
+     * underneath survives it.
      *
-     * Opaque, and not for want of trying. Transparency is the obvious way to
-     * suggest glass and it cannot be made to work here: with nothing to smear
-     * what comes through, the pass-through needed before the surface looks like
-     * glass is also enough to leave the text behind it readable. See
-     * `GlassMaterial.chrome.sheen`.
+     * Deliberately just a fill. This surface wraps the composer, which grows
+     * and shrinks as the draft does, and anything that has to measure itself to
+     * draw — a rim traced by a canvas, a gradient sized to the box — lands a
+     * frame behind the resize and shears against the edge while you type. A
+     * flat colour and a real border have nothing to catch up with.
      *
-     * Every layer here is absolute, and Yoga lays absolute children out against
-     * the padding box, so a chrome surface has to keep `padding: 0` and pad an
+     * The copy is absolute, and Yoga lays absolute children out against the
+     * padding box, so a chrome surface has to keep `padding: 0` and pad an
      * inner view instead. Both of ours already do, for the same reason the rim
      * is a real border rather than an overlay.
      */
+    const { chrome } = GlassMaterial;
     return (
       <View {...props} style={[styles.surface, rim, style]}>
         <CanvasFill />
@@ -146,11 +147,7 @@ export function GlassSurface({
           pointerEvents="none"
           style={[
             StyleSheet.absoluteFill,
-            {
-              experimental_backgroundImage: strong
-                ? GlassMaterial.chrome.sheenStrong
-                : GlassMaterial.chrome.sheen,
-            },
+            { backgroundColor: strong ? chrome.canvasFillStrong : chrome.canvasFill },
           ]}
         />
         {children}

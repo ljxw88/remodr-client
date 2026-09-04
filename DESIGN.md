@@ -186,18 +186,23 @@ plus a border; see [`COLOR.md`](COLOR.md) for the tokens.
   - **Panel** — sits on the canvas. Fill and rim only, no blur, because there
     is nothing behind it but the gradient.
   - **Chrome** — floats over scrolling content. Real backdrop blur.
-- Chrome with no blur target in scope backs itself with the canvas and lights
-  the plate, instead of falling through to the panel material. The blur is not
-  decoration: it is the only thing hiding what scrolls beneath, and the panel
-  fill is 7% white, so the fallback left the transcript perfectly readable
-  through the composer. A window-aligned copy of the gradient hides everything;
-  a sheen from the top edge is what stops an opaque plate reading as a hole.
+- Chrome with no blur target in scope backs itself with an opaque, window-
+  aligned copy of the canvas, under the ordinary fill and rim, instead of
+  falling through to the panel material alone. The blur is not decoration: it
+  is the only thing hiding what scrolls beneath, and the panel fill is 7%
+  white, so the fallback on its own left the transcript perfectly readable
+  through the composer.
 - The fallback is opaque, and transparency is not an option worth retrying.
   Measured on device: the pass-through needed before a surface looks like glass
   leaves sharp text behind it at ~11 levels of contrast, which is readable.
   Smearing it is exactly what the blur did, and there is no blur here —
   `expo-blur` degrades to a plain translucent view without a `BlurTargetView`,
   and a target may only live on a screen that is never dismissed.
+- A surface that resizes gets a flat fill and a real border, nothing that has
+  to measure itself. The composer grows with the draft, and a rim traced by a
+  canvas or a gradient sized to the box lands a frame behind the resize and
+  shears against the edge while you type. Drawn materials — refraction, sweep
+  rims, `LiquidGlassButton` — belong on controls with a fixed size.
 - iOS may use native Liquid Glass where supported.
 - Avoid nesting multiple elevated surfaces unless hierarchy requires it.
 
