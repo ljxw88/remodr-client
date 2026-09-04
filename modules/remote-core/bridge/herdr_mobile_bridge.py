@@ -120,6 +120,8 @@ class Bridge:
         self.started_sessions: dict[str, str] = {}
         # Pane id -> the model, effort and context it was last started with.
         self.agent_tuning: dict[str, dict[str, Any]] = {}
+        # Pane id -> whether it was started with its permissions bypassed.
+        self.agent_bypass: dict[str, bool] = {}
         # Session id -> (bytes of the log already read, settings found in them).
         self.session_tuning_cache: dict[str, tuple[int, dict[str, Any]]] = {}
         self.output_lock = threading.Lock()
@@ -491,6 +493,24 @@ class Bridge:
             for pane, tuning in self.agent_tuning.items()
             if pane in live_pane_ids
         }
+        self.agent_bypass = {
+            pane: bypass
+            for pane, bypass in self.agent_bypass.items()
+            if pane in live_pane_ids
+        }
+        # Sessions are keyed by id rather than pane, so they need pruning
+        # against the panes still holding them or the cache grows for as long
+        # as the bridge runs.
+        live_sessions = {
+            str(agent.get("providerSessionId"))
+            for agent in normalized_agents
+            if agent.get("providerSessionId")
+        }
+        self.session_tuning_cache = {
+            session: entry
+            for session, entry in self.session_tuning_cache.items()
+            if session in live_sessions
+        }
         for pane_id, pending in list(self.pending_agents.items()):
             if pane_id in detected_pane_ids or pane_id not in live_pane_ids:
                 self.pending_agents.pop(pane_id, None)
@@ -802,6 +822,7 @@ class Bridge:
                     self.started_sessions[pane_id] = session_id
             with self.state_lock:
                 self.agent_tuning[pane_id] = self._tuning_of(payload)
+                self.agent_bypass[pane_id] = bypass_permissions
             for _ in range(20):
                 self._refresh_runtime()
                 agent = next(
@@ -919,10 +940,14 @@ class Bridge:
         # agent stopped.
         self._tuning_arguments(provider, wanted)
         with self.state_lock:
-            current = dict(self.agent_tuning.get(pane_id) or {})
             session_id = self.started_sessions.get(pane_id)
         if not session_id:
             session_id = agent.get("providerSessionId")
+        # Against everything known about the agent, not only what was set from
+        # here. Comparing against the latter alone made a plain model swap look
+        # like a reasoning change on any agent this bridge did not start, and
+        # restarting one to change nothing interrupts whatever it is doing.
+        current = self._reported_tuning(pane_id, session_id)
 
         restart_needed = any(
             wanted.get(key) != current.get(key) for key in ("effort", "context")
@@ -958,6 +983,13 @@ class Bridge:
         tuning: dict[str, Any],
     ) -> None:
         provider = str(agent.get("provider"))
+        with self.state_lock:
+            # Whatever it was started with. Handing back all its tools because
+            # it was restarted is not a change anyone asked for, and the
+            # opposite would leave it stopping for permission it used to have.
+            bypass = self.agent_bypass.get(pane_id, True)
+            previous = dict(self.agent_tuning.get(pane_id) or {})
+
         self._herdr_request("agent.prompt", {"target": pane_id, "text": "/exit"})
         deadline = time.monotonic() + SHELL_READY_TIMEOUT
         while time.monotonic() < deadline:
@@ -966,21 +998,48 @@ class Bridge:
                 self._herdr_request("agent.get", {"target": pane_id})
             except BridgeError:
                 break  # No agent in the pane any more, so the shell is back.
-        args = list(BYPASS_ARGUMENTS[provider])
+
+        name = str(agent.get("name") or provider)
+        try:
+            self._launch_tuned(name, provider, pane_id, session_id, bypass, tuning)
+        except BridgeError:
+            # The agent has already been stopped, so failing here would leave
+            # the pane at a shell with the conversation stranded. Putting it
+            # back as it was is the only thing left that helps.
+            self._diagnostic("AGENT_RETUNE", f"pane {pane_id} rejected new settings")
+            self._launch_tuned(
+                name, provider, pane_id, session_id, bypass, previous
+            )
+            raise BridgeError(
+                "RETUNE_REFUSED",
+                "The agent would not start with those settings, so it has been "
+                "put back as it was.",
+            )
+        with self.state_lock:
+            self.started_sessions[pane_id] = session_id
+
+    def _launch_tuned(
+        self,
+        name: str,
+        provider: str,
+        pane_id: str,
+        session_id: str,
+        bypass: bool,
+        tuning: dict[str, Any],
+    ) -> None:
+        args = list(BYPASS_ARGUMENTS[provider]) if bypass else []
         args.extend(self._tuning_arguments(provider, tuning))
         args.extend(["--session-id", session_id])
-        # Herdr's own agent name, which it releases when the CLI exits.
-        name = str(agent.get("name") or provider)
         try:
             self._start_agent(name, provider, pane_id, args)
         except BridgeError as error:
             if error.code.lower() != "agent_name_taken":
                 raise
+            # Herdr releases a name when the CLI exits, but not always before
+            # the next one asks for it.
             self._start_agent(
                 f"{provider}-{uuid.uuid4().hex[:4]}", provider, pane_id, args
             )
-        with self.state_lock:
-            self.started_sessions[pane_id] = session_id
 
     def _reported_tuning(
         self, pane_id: str, provider_session_id: Any
@@ -1117,6 +1176,7 @@ class Bridge:
             self.pending_agents.pop(pane_id, None)
             self.started_sessions.pop(pane_id, None)
             self.agent_tuning.pop(pane_id, None)
+            self.agent_bypass.pop(pane_id, None)
         try:
             self._refresh_runtime()
         except Exception as error:

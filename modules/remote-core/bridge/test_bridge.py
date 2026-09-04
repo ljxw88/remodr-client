@@ -1313,6 +1313,28 @@ class AgentTuningTest(unittest.TestCase):
                     {"model": None, "effort": None, "context": None},
                 )
 
+    def test_a_log_cache_does_not_outlive_the_agents_using_it(self):
+        # Keyed by session rather than pane, so nothing else prunes it and it
+        # would grow for as long as the bridge runs.
+        bridge = Bridge()
+        bridge.session_tuning_cache = {"gone": (10, {}), "live": (10, {})}
+        snapshot = {
+            "agents": [
+                {
+                    "pane_id": "w1:p1",
+                    "agent": "copilot",
+                    "workspace_id": "w1",
+                    "agent_session": {"value": "live"},
+                }
+            ],
+            "workspaces": [],
+            "tabs": [],
+            "panes": [{"pane_id": "w1:p1"}],
+        }
+        with patch.object(bridge, "_herdr_request", return_value={"snapshot": snapshot}):
+            bridge._refresh_runtime()
+        self.assertEqual(list(bridge.session_tuning_cache), ["live"])
+
     def test_a_missing_log_reports_nothing(self):
         with tempfile.TemporaryDirectory() as root:
             with patch("herdr_mobile_bridge.Path.home", return_value=Path(root)):
@@ -1422,6 +1444,74 @@ class AgentTuningTest(unittest.TestCase):
                 "sess-1",
             ],
         )
+
+    def test_swapping_only_the_model_does_not_restart_a_log_read_agent(self):
+        # Its reasoning came from the log rather than from here. Comparing
+        # against what this app set alone made that look like a change, and
+        # restarting an agent to change nothing interrupts its work.
+        bridge = self._bridge({})
+        bridge.agent_tuning = {}
+        bridge._session_tuning = lambda _session: {
+            "model": "gpt-5.4",
+            "effort": "max",
+            "context": "long_context",
+        }
+        sent = []
+        bridge._herdr_request = lambda method, params: sent.append((method, params)) or {}
+        bridge._retune_agent(
+            {
+                "agentId": "a1",
+                "model": "claude-opus-5",
+                "effort": "max",
+                "context": "long_context",
+            }
+        )
+        self.assertEqual([method for method, _ in sent], ["agent.prompt"])
+        self.assertEqual(sent[0][1]["text"], "/model claude-opus-5")
+
+    def test_a_restart_keeps_the_permissions_it_was_started_with(self):
+        # Handing an agent all its tools back because its reasoning changed is
+        # not a change anyone asked for.
+        bridge = self._bridge({"model": "gpt-5.4", "effort": "low", "context": None})
+        bridge.agent_bypass = {"p1": False}
+        sent = []
+
+        def request(method, params):
+            sent.append((method, params))
+            if method == "agent.get":
+                raise BridgeError("agent_not_found", "gone")
+            return {}
+
+        bridge._herdr_request = request
+        with patch("herdr_mobile_bridge.time.sleep"):
+            bridge._retune_agent({"agentId": "a1", "model": "gpt-5.4", "effort": "high"})
+        start = next(params for method, params in sent if method == "agent.start")
+        self.assertNotIn("--allow-all-tools", start["args"])
+
+    def test_a_restart_the_agent_refuses_puts_it_back(self):
+        # It has already been stopped by this point, so giving up would strand
+        # the conversation at a shell prompt.
+        bridge = self._bridge({"model": "gpt-5.4", "effort": "low", "context": None})
+        starts = []
+
+        def request(method, params):
+            if method == "agent.get":
+                raise BridgeError("agent_not_found", "gone")
+            if method == "agent.start":
+                starts.append(params["args"])
+                if len(starts) == 1:
+                    raise BridgeError("agent_start_failed", "no")
+            return {}
+
+        bridge._herdr_request = request
+        with patch("herdr_mobile_bridge.time.sleep"):
+            with self.assertRaises(BridgeError) as caught:
+                bridge._retune_agent({"agentId": "a1", "model": "gpt-5.4", "effort": "max"})
+        self.assertEqual(caught.exception.code, "RETUNE_REFUSED")
+        self.assertIn("--effort", starts[0])
+        self.assertEqual(starts[0][starts[0].index("--effort") + 1], "max")
+        # Back to what it was running before.
+        self.assertEqual(starts[1][starts[1].index("--effort") + 1], "low")
 
     def test_a_bad_value_is_refused_before_the_agent_is_touched(self):
         # Validating afterwards would leave the agent stopped with nothing to

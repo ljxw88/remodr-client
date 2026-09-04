@@ -44,11 +44,19 @@ export const reasoningEffortSchema = z.enum([
 
 export const contextTierSchema = z.enum(['default', 'long_context']);
 
-/** What an agent is running, as far as the bridge can tell. */
+/**
+ * What an agent is running, as far as the bridge can tell.
+ *
+ * The reasoning and context vocabularies are the CLI's, not ours, and it can
+ * add to them whenever it updates. An unrecognised one reads as nothing rather
+ * than failing: this sits inside the agent list, and a strict parse would take
+ * every agent off the screen because one of them was running a setting this
+ * build had not heard of.
+ */
 export const agentTuningSchema = z.object({
   model: z.string().nullable().default(null),
-  effort: reasoningEffortSchema.nullable().default(null),
-  context: contextTierSchema.nullable().default(null),
+  effort: reasoningEffortSchema.nullable().catch(null).default(null),
+  context: contextTierSchema.nullable().catch(null).default(null),
 });
 export type AgentTuning = z.infer<typeof agentTuningSchema>;
 

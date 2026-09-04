@@ -26,11 +26,18 @@ type Props = {
  * agent stops whatever it was doing. That is worth saying before it happens.
  */
 export function AgentTuningSheet({ agent, onClose }: Props) {
-  const current: Tuning = {
+  /**
+   * What the agent was running when this opened, held still while it is.
+   *
+   * The runtime keeps polling underneath, so read fresh this would shift
+   * mid-edit — and a shift that happened to match the pending choice would
+   * quietly turn Apply off and make the whole edit a no-op.
+   */
+  const [current] = useState<Tuning>(() => ({
     model: agent.tuning?.model ?? null,
     effort: agent.tuning?.effort ?? null,
     context: agent.tuning?.context ?? null,
-  };
+  }));
   const [tuning, setTuning] = useState<Tuning>(current);
   const [busy, setBusy] = useState(false);
   const dockContentInset = useDockContentInset();

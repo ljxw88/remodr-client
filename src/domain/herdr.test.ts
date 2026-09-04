@@ -148,6 +148,48 @@ describe('Herdr mobile protocol', () => {
     expect(result.workspaceId).toBe('w2');
   });
 
+  it('keeps an agent running a setting this build has not heard of', () => {
+    // The reasoning and context vocabularies belong to the CLI and grow when
+    // it updates. Parsed strictly, one agent on a newer setting took every
+    // agent off the screen, because the list is parsed as a whole.
+    const runtime = runtimeStateSchema.parse({
+      connectionState: 'connected',
+      deviceId: 'device-1',
+      workspaces: [],
+      providers: [],
+      agents: [
+        {
+          id: 'a1',
+          provider: 'copilot',
+          herdrSessionId: 's',
+          workspaceId: 'w1',
+          workspaceName: 'W',
+          paneId: 'p1',
+          status: 'idle',
+          title: 'Agent',
+          focused: false,
+          capabilities: {
+            streamingConversation: true,
+            structuredQuestions: true,
+            toolActivity: true,
+            todos: true,
+            fallback: true,
+          },
+          tuning: { model: 'a-model-we-do-not-ship', effort: 'ultra', context: 'huge' },
+        },
+      ],
+    });
+
+    expect(runtime.agents).toHaveLength(1);
+    // The model is whatever the agent says; the other two read as unset rather
+    // than as something the app would then offer as a choice.
+    expect(runtime.agents[0].tuning).toEqual({
+      model: 'a-model-we-do-not-ship',
+      effort: null,
+      context: null,
+    });
+  });
+
   it('parses a closed space with its refreshed runtime', () => {
     const result = closeSpaceResultSchema.parse({
       workspaceId: 'w2',
