@@ -19,6 +19,7 @@ import { Radius, Spacing } from '@/constants/theme';
 import { type AgentWorkspace } from '@/domain/herdr';
 import { connectAgentRuntime } from '@/features/agents/connect-runtime';
 import { LiquidGlassButton } from '@/features/agents/liquid-glass-button';
+import { ProfileAvatar } from '@/features/agents/profile-avatar';
 import { glassRim, GlassSurface } from '@/components/ui/glass-surface';
 import { LiquidGlassRim } from '@/components/ui/liquid-glass-rim';
 import {
@@ -107,12 +108,6 @@ export default function AgentsScreen() {
     }, [state.connection]),
   );
 
-  const connectionColor = connected ? theme.success : busy ? theme.accent : theme.warning;
-  const connectionBackground = connected
-    ? theme.successSoft
-    : busy
-      ? theme.accentSoft
-      : theme.warningSoft;
   const canCreateAgent = connected && spaces.length > 0;
   const canCreateSpace = connected && selectedHost != null;
   const compactHeader = width < 375;
@@ -205,24 +200,10 @@ export default function AgentsScreen() {
             onPressSpace={() => setShowNewSpace(true)}
           />
         </View>
-        <View
-          style={[
-            styles.connection,
-            { backgroundColor: connectionBackground, borderColor: connectionColor },
-          ]}>
-          <View
-            style={[
-              styles.connectionDot,
-              {
-                backgroundColor: connected ? connectionColor : 'transparent',
-                borderColor: connectionColor,
-              },
-            ]}
-          />
-          <ThemedText type="caption" style={{ color: connectionColor }}>
-            {connected ? 'Live' : busy ? 'Connecting' : 'Offline'}
-          </ThemedText>
-        </View>
+        <ProfileAvatar
+          status={state.connection}
+          onPress={() => router.push('/settings')}
+        />
       </View>
 
       {hosts.length > 0 ? (
@@ -492,22 +473,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.one,
-  },
-  connection: {
-    flexShrink: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.half,
-    paddingHorizontal: Spacing.one,
-    paddingVertical: 4,
-    borderWidth: 1,
-    borderRadius: Radius.pill,
-  },
-  connectionDot: {
-    width: 6,
-    height: 6,
-    borderWidth: 1,
-    borderRadius: 3,
   },
   filters: {
     gap: Spacing.one,
