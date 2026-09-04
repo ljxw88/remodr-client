@@ -32,6 +32,26 @@ export const agentCapabilitiesSchema = z.object({
   fallback: z.boolean().default(true),
 });
 
+export const reasoningEffortSchema = z.enum([
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+]);
+
+export const contextTierSchema = z.enum(['default', 'long_context']);
+
+/** What an agent is running, as far as the bridge can tell. */
+export const agentTuningSchema = z.object({
+  model: z.string().nullable().default(null),
+  effort: reasoningEffortSchema.nullable().default(null),
+  context: contextTierSchema.nullable().default(null),
+});
+export type AgentTuning = z.infer<typeof agentTuningSchema>;
+
 export const remoteAgentSchema = z.object({
   id: z.string(),
   deviceId: z.string().optional(),
@@ -47,6 +67,7 @@ export const remoteAgentSchema = z.object({
   title: z.string(),
   focused: z.boolean(),
   capabilities: agentCapabilitiesSchema,
+  tuning: agentTuningSchema.optional(),
 });
 export type RemoteAgent = z.infer<typeof remoteAgentSchema>;
 
@@ -104,15 +125,13 @@ export function totalDeviceAgentCount(counts: DeviceAgentCounts): number {
   return Object.values(counts).reduce((total, count) => total + count, 0);
 }
 
-export const reasoningEffortSchema = z.enum([
-  'none',
-  'minimal',
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-  'max',
-]);
+export const retuneAgentInputSchema = z.object({
+  agentId: z.string().min(1),
+  model: z.string().trim().nullable().optional(),
+  effort: reasoningEffortSchema.nullable().optional(),
+  context: contextTierSchema.nullable().optional(),
+});
+export type RetuneAgentInput = z.infer<typeof retuneAgentInputSchema>;
 
 export const createAgentInputSchema = z.object({
   provider: launchableAgentProviderSchema,
@@ -123,6 +142,7 @@ export const createAgentInputSchema = z.object({
   /** Left off to let the CLI choose, which is the only always-available one. */
   model: z.string().trim().optional(),
   effort: reasoningEffortSchema.optional(),
+  context: contextTierSchema.optional(),
 });
 export type CreateAgentInput = z.infer<typeof createAgentInputSchema>;
 

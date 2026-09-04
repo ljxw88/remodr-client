@@ -28,10 +28,13 @@ import {
   providerLabel,
   statusLabel,
   type ConversationItem,
+  type AgentTuning,
   type HumanRequest,
   type RemoteAgent,
 } from '@/domain/herdr';
+import { EFFORT_LABELS, modelLabel, supportsTuning } from '@/domain/agent-tuning';
 import { AgentActionsSheet } from '@/features/agents/agent-actions-sheet';
+import { AgentTuningSheet } from '@/features/agents/agent-tuning-sheet';
 import { HumanRequestBar } from '@/features/agents/human-request-bar';
 import { useAgentConversation, useHerdr } from '@/features/agents/use-herdr';
 import { useRevealedText } from '@/features/agents/use-revealed-text';
@@ -66,6 +69,7 @@ export default function AgentConversationScreen() {
   const [sending, setSending] = useState(false);
   const [composerHeight, setComposerHeight] = useState(0);
   const [showActions, setShowActions] = useState(false);
+  const [showTuning, setShowTuning] = useState(false);
   const listRef = useRef<FlatList<ConversationDisplayItem>>(null);
   /**
    * Newest first, because the transcript renders inverted. Offset zero is then
@@ -358,12 +362,16 @@ export default function AgentConversationScreen() {
           sending={sending}
           agentId={agent.id}
           request={conversation?.activeHumanRequest ?? null}
-          provider={providerLabel(agent.provider)}
-          agentTitle={agent.title}
           onHeightChange={setComposerHeight}
+          tuning={agent.tuning}
+          tunable={supportsTuning(agent.provider)}
+          onOpenTuning={() => setShowTuning(true)}
         />
         </KeyboardAvoidingView>
       </BlurBackdropProvider>
+      {showTuning ? (
+        <AgentTuningSheet agent={agent} onClose={() => setShowTuning(false)} />
+      ) : null}
       {showActions ? (
         <AgentActionsSheet
           agent={agent}
@@ -753,6 +761,52 @@ function AskedQuestionRow({ request }: { request: HumanRequest }) {
   );
 }
 
+/** One of the small chips under the input, showing a setting and opening it. */
+function TuningPill({
+  label,
+  onPress,
+  disabled = false,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Model options: ${label}`}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.pill,
+        {
+          backgroundColor: pressed
+            ? 'rgba(255, 255, 255, 0.12)'
+            : 'rgba(255, 255, 255, 0.06)',
+          borderColor: theme.glassBorder,
+          opacity: disabled ? 0.5 : 1,
+        },
+      ]}>
+      <ThemedText
+        type="smallBold"
+        numberOfLines={1}
+        style={{ color: theme.text, fontSize: 13 }}>
+        {label}
+      </ThemedText>
+      {disabled ? null : (
+        <AppIcon
+          name={{ ios: 'chevron.down', android: 'expand_more', web: 'expand_more' }}
+          size={14}
+          tintColor={theme.textSecondary}
+          fallback="⌄"
+        />
+      )}
+    </Pressable>
+  );
+}
+
 const MIN_INPUT_HEIGHT = 38;
 const MAX_INPUT_HEIGHT = 120;
 
@@ -763,9 +817,10 @@ function Composer({
   sending,
   agentId,
   request,
-  provider,
-  agentTitle,
   onHeightChange,
+  tuning,
+  tunable,
+  onOpenTuning,
 }: {
   value: string;
   onChangeText: (text: string) => void;
@@ -773,12 +828,12 @@ function Composer({
   sending: boolean;
   agentId: string;
   request: HumanRequest | null;
-  provider: string;
-  agentTitle?: string;
   onHeightChange: (height: number) => void;
+  tuning?: AgentTuning;
+  tunable: boolean;
+  onOpenTuning: () => void;
 }) {
   const theme = useTheme();
-  const [toolMode, setToolMode] = useState<'Auto' | 'Ask'>('Auto');
 
   return (
     <View
@@ -832,57 +887,22 @@ function Composer({
 
             <View style={styles.cardBottom}>
               <View style={styles.pillsRow}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Agent: ${provider}`}
-                  onPress={() => {
-                    Alert.alert('Agent Provider', `${provider}${agentTitle ? ` • ${agentTitle}` : ''}`);
-                  }}
-                  style={({ pressed }) => [
-                    styles.pill,
-                    {
-                      backgroundColor: pressed ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.06)',
-                      borderColor: theme.glassBorder,
-                    },
-                  ]}>
-                  <ThemedText type="smallBold" style={{ color: theme.text, fontSize: 13 }}>
-                    Agent
-                  </ThemedText>
-                  <AppIcon
-                    name={{ ios: 'chevron.down', android: 'expand_more', web: 'expand_more' }}
-                    size={14}
-                    tintColor={theme.textSecondary}
-                    fallback="⌄"
+                {/*
+                  What the agent is running, and the way to change it. The
+                  model is the one setting the agent reports itself, so it is
+                  shown even for an agent this app did not start.
+                */}
+                <TuningPill
+                  label={modelLabel(tuning?.model)}
+                  onPress={onOpenTuning}
+                  disabled={!tunable}
+                />
+                {tunable && tuning?.effort ? (
+                  <TuningPill
+                    label={EFFORT_LABELS[tuning.effort]}
+                    onPress={onOpenTuning}
                   />
-                </Pressable>
-
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Execution mode: ${toolMode}`}
-                  onPress={() => {
-                    Alert.alert('Execution mode', 'Choose how tool calls are approved:', [
-                      { text: 'Auto (Approve automatically)', onPress: () => setToolMode('Auto') },
-                      { text: 'Ask (Ask for approval)', onPress: () => setToolMode('Ask') },
-                      { text: 'Cancel', style: 'cancel' },
-                    ]);
-                  }}
-                  style={({ pressed }) => [
-                    styles.pill,
-                    {
-                      backgroundColor: pressed ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.06)',
-                      borderColor: theme.glassBorder,
-                    },
-                  ]}>
-                  <ThemedText type="smallBold" style={{ color: theme.text, fontSize: 13 }}>
-                    {toolMode}
-                  </ThemedText>
-                  <AppIcon
-                    name={{ ios: 'chevron.down', android: 'expand_more', web: 'expand_more' }}
-                    size={14}
-                    tintColor={theme.textSecondary}
-                    fallback="⌄"
-                  />
-                </Pressable>
+                ) : null}
               </View>
 
               <Pressable

@@ -8,6 +8,7 @@ import {
   createAgentInputSchema,
   createAgentResultSchema,
   renameAgentInputSchema,
+  retuneAgentInputSchema,
   createSpaceInputSchema,
   createSpaceResultSchema,
   EMPTY_RUNTIME,
@@ -21,6 +22,7 @@ import {
   type AgentMutationResult,
   type CreateAgentInput,
   type CreateAgentResult,
+  type RetuneAgentInput,
   type CreateSpaceInput,
   type CreateSpaceResult,
   type DeviceAgentCounts,
@@ -272,6 +274,11 @@ export class HerdrRepository {
   async renameAgent(agentId: string, name: string): Promise<AgentMutationResult> {
     const request = renameAgentInputSchema.parse({ agentId, name });
     return this.mutateAgent(agentId, 'agent.rename', request);
+  }
+
+  async retuneAgent(input: RetuneAgentInput): Promise<AgentMutationResult> {
+    const request = retuneAgentInputSchema.parse(input);
+    return this.mutateAgent(input.agentId, 'agent.retune', request);
   }
 
   async closeAgent(agentId: string): Promise<AgentMutationResult> {
