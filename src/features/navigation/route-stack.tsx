@@ -1,9 +1,10 @@
 import { Stack } from 'expo-router';
-import type { ReactNode } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { useLayoutEffect, type ReactNode } from 'react';
+import { Animated, StyleSheet, View } from 'react-native';
 
 import { AppBackground } from '@/components/ui/app-background';
 import { Colors } from '@/constants/theme';
+import { useScreenEntrance } from '@/features/navigation/screen-entrance';
 import { useStackScreenOptions } from '@/features/navigation/stack-screen-options';
 
 type Props = {
@@ -36,11 +37,27 @@ type Props = {
  */
 export function RouteStack({ children }: Props) {
   const screenOptions = useStackScreenOptions();
+  const entrance = useScreenEntrance();
+
+  // On arrival, once. The stack is mounted by being opened, and closing it
+  // unmounts it, so there is nothing to leave behind and nothing to reset.
+  useLayoutEffect(() => {
+    entrance.play(1);
+  }, [entrance]);
 
   return (
     <View style={styles.root}>
       <AppBackground />
-      <Stack screenOptions={screenOptions}>{children}</Stack>
+      {/*
+        The canvas stays outside this, so what the screen settles over is its
+        own background rather than the route it replaced. That is the whole
+        trick: the screen is already opaque and already in place when the
+        motion starts, so there is never a moment where two screens are legible
+        at once.
+      */}
+      <Animated.View style={[styles.stack, entrance.style]}>
+        <Stack screenOptions={screenOptions}>{children}</Stack>
+      </Animated.View>
     </View>
   );
 }
@@ -51,5 +68,8 @@ const styles = StyleSheet.create({
     // The foot of the gradient, so an unpainted frame is the colour it is
     // about to be rather than a hole.
     backgroundColor: Colors.background,
+  },
+  stack: {
+    flex: 1,
   },
 });

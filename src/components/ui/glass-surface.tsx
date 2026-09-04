@@ -6,6 +6,7 @@ import {
 } from 'expo-glass-effect';
 import { Platform, StyleSheet, View, type ViewProps, type ViewStyle } from 'react-native';
 
+import { CanvasFill } from '@/components/ui/app-background';
 import { useBlurBackdrop } from '@/components/ui/blur-backdrop';
 import { Colors, GlassMaterial, Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -103,6 +104,43 @@ export function GlassSurface({
         ]}>
         {children}
       </BlurView>
+    );
+  }
+
+  if (tone === 'chrome') {
+    /**
+     * Chrome with no backdrop in scope.
+     *
+     * `chrome` floats over scrolling content, and the blur is what hides that
+     * content — a 23px radius turns rows into a smear, and the dark tint sinks
+     * what is left. Falling back to the panel material loses all of it: the
+     * fill is 7% white, so the transcript scrolls under the composer and stays
+     * perfectly readable through it.
+     *
+     * So the surface brings the canvas with it. The gradient is opaque and
+     * `CanvasFill` lines it up with the window, so the surface reads exactly as
+     * it does at rest — it is the same picture already behind it — but nothing
+     * can come through from underneath any more. Where the blur showed a moving
+     * smear this shows still canvas, which at the foot of the gradient is very
+     * nearly the same thing.
+     *
+     * Both layers are absolute, and Yoga lays absolute children out against the
+     * padding box, so a chrome surface has to keep `padding: 0` and pad an
+     * inner view instead. Both of ours already do, for the same reason the rim
+     * is a real border rather than an overlay.
+     */
+    return (
+      <View {...props} style={[styles.surface, rim, style]}>
+        <CanvasFill />
+        <View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFill,
+            { backgroundColor: strong ? theme.glassStrong : theme.glass },
+          ]}
+        />
+        {children}
+      </View>
     );
   }
 

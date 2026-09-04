@@ -24,6 +24,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppIcon, type AppIconName } from '@/components/ui/app-icon';
 import { GlassSurface } from '@/components/ui/glass-surface';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
+import { useScreenEntrance } from '@/features/navigation/screen-entrance';
 import { useReduceMotion } from '@/hooks/use-reduce-motion';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -126,50 +127,23 @@ export function AnimatedTabContent({ children }: PropsWithChildren) {
   const tabIndex = pathname === '/servers' ? 1 : pathname === '/settings' ? 2 : 0;
   const previousIndex = useRef(tabIndex);
   const mounted = useRef(false);
-  const [opacity] = useState(() => new Animated.Value(1));
-  const [translateX] = useState(() => new Animated.Value(0));
+  const entrance = useScreenEntrance();
 
   useLayoutEffect(() => {
+    // The content stays mounted across a tab change, so the first pass is the
+    // app opening rather than a change of place and has nothing to settle.
     if (!mounted.current) {
       mounted.current = true;
       previousIndex.current = tabIndex;
       return;
     }
-    if (motion.shouldReduceMotion()) {
-      opacity.setValue(1);
-      translateX.setValue(0);
-      previousIndex.current = tabIndex;
-      return;
-    }
     const direction = tabIndex >= previousIndex.current ? 1 : -1;
     previousIndex.current = tabIndex;
-    opacity.setValue(0.82);
-    translateX.setValue(direction * 12);
-    Animated.parallel([
-      Animated.timing(opacity, {
-        toValue: 1,
-        duration: 180,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-      Animated.timing(translateX, {
-        toValue: 0,
-        duration: 210,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [motion, opacity, tabIndex, translateX]);
+    entrance.play(direction);
+  }, [entrance, tabIndex]);
 
   return (
-    <Animated.View
-      style={[
-        styles.content,
-        {
-          opacity,
-          transform: [{ translateX }],
-        },
-      ]}>
+    <Animated.View style={[styles.content, entrance.style]}>
       {children}
     </Animated.View>
   );
