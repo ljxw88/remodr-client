@@ -61,8 +61,15 @@ Frosted chrome must be a sibling of `BlurBackdropTarget`, which constrains
 screen layout: content goes inside the target, bars go beside it.
 
 React Native modals render in their own window and cannot reach a blur target,
-so sheets stay opaque. `Colors.chrome` is tinted toward the canvas indigo so an
-opaque sheet still reads as the same family.
+so sheets stay opaque. Confirmed again by trying it: a `BlurView` inside a
+sheet blurs nothing, and the translucent fill it needs lets the transcript
+underneath read straight through the panel.
+
+An opaque sheet still reads as the same material by being built the same way —
+the canvas at its darkest with `glassStrong` laid over it, under the usual rim.
+Composited that lands on the colour a real glass panel would, because that is
+what a real one is sitting on down there. `Colors.chrome` was the earlier
+answer and was a flat slab a shade off everything around it.
 
 The scroll edge fade keeps its gradient-only treatment on Android. It sits over
 the rows it softens, so it cannot be a sibling of the content it would blur.

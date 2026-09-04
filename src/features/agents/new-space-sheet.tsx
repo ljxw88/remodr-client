@@ -4,7 +4,7 @@ import { Keyboard, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { ThemedText } from '@/components/themed-text';
 import { AppButton } from '@/components/ui/app-button';
 import { AppIcon } from '@/components/ui/app-icon';
-import { SheetHeader, SheetModal, SheetPanel } from '@/components/ui/sheet';
+import { SheetModal, SheetPanel } from '@/components/ui/sheet';
 import { TextField } from '@/components/ui/text-field';
 import { Radius, Spacing } from '@/constants/theme';
 import type { CreateSpaceInput } from '@/domain/herdr';
@@ -59,7 +59,7 @@ export function NewSpaceSheet({
       {(close) => (
         <>
       {!showFolderPicker ? (
-        <SheetPanel>
+        <SheetPanel onClose={close}>
           <ScrollView
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
@@ -67,12 +67,6 @@ export function NewSpaceSheet({
               styles.sheetContent,
               { paddingBottom: dockContentInset },
             ]}>
-            <SheetHeader
-              title="New space"
-              subtitle="Create a Herdr workspace from a folder."
-              onClose={close}
-              busy={creating}
-            />
 
             <View
               style={[

@@ -3,9 +3,8 @@ import { Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 
 import { AppButton } from '@/components/ui/app-button';
 import { AppIcon } from '@/components/ui/app-icon';
-import { ChipPicker } from '@/components/ui/chip-picker';
 import { TextField } from '@/components/ui/text-field';
-import { SheetHeader, SheetModal, SheetPanel } from '@/components/ui/sheet';
+import { SheetModal, SheetPanel } from '@/components/ui/sheet';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
 import {
@@ -16,22 +15,14 @@ import {
   type CreateAgentInput,
   type LaunchableAgentProvider,
 } from '@/domain/herdr';
-import {
-  EFFORT_LABELS,
-  modelsFor,
-  REASONING_EFFORTS,
-  supportsTuning,
-  type ReasoningEffort,
-} from '@/domain/agent-tuning';
+import { supportsTuning } from '@/domain/agent-tuning';
 import { AgentProviderIcon } from '@/features/agents/agent-provider-icon';
+import { AgentTuningPicker, type Tuning } from '@/features/agents/agent-tuning-picker';
 import { useDockContentInset } from '@/features/navigation/floating-dock';
 import { useTheme } from '@/hooks/use-theme';
 import { toUserMessage } from '@/utils/user-error';
 
 const PROVIDERS = launchableAgentProviderSchema.options;
-
-/** Stands for "send no flag", which is not the same as any real value. */
-const AUTO = 'auto';
 
 type Props = {
   manifests: AgentManifest[];
@@ -65,13 +56,12 @@ export function NewAgentSheet({
   );
   const [bypassPermissions, setBypassPermissions] = useState(true);
   const [name, setName] = useState('');
-  const [model, setModel] = useState(AUTO);
-  const [effort, setEffort] = useState<ReasoningEffort | typeof AUTO>(AUTO);
+  const [tuning, setTuning] = useState<Tuning>({
+    model: null,
+    effort: null,
+    context: null,
+  });
   const tunable = supportsTuning(provider);
-  const modelOptions = useMemo(
-    () => [{ id: AUTO, label: 'Auto' }, ...modelsFor(provider)],
-    [provider],
-  );
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const spaceAvailable = spaces.some((space) => space.id === spaceId);
@@ -88,10 +78,11 @@ export function NewAgentSheet({
         workspaceId: spaceId,
         bypassPermissions,
         name: name.trim() || undefined,
-        // Auto means send nothing and let the CLI decide, which is the only
-        // choice guaranteed to work on every account.
-        model: tunable && model !== AUTO ? model : undefined,
-        effort: tunable && effort !== AUTO ? effort : undefined,
+        // Nothing chosen means send no flag and let the CLI decide, which is
+        // the only choice guaranteed to work on every account.
+        model: (tunable && tuning.model) || undefined,
+        effort: (tunable && tuning.effort) || undefined,
+        context: (tunable && tuning.context) || undefined,
       });
     } catch (cause) {
       setError(toUserMessage(cause));
@@ -103,16 +94,10 @@ export function NewAgentSheet({
   return (
     <SheetModal closeLabel="Close new agent" onClose={onClose} busy={creating}>
       {(close) => (
-      <SheetPanel>
+      <SheetPanel onClose={close} busy={creating}>
         <ScrollView
           contentContainerStyle={[styles.sheetContent, { paddingBottom: dockContentInset }]}
           showsVerticalScrollIndicator={false}>
-          <SheetHeader
-            title="New agent"
-            subtitle="Choose an agent and the space it should work in."
-            onClose={close}
-            busy={creating}
-          />
 
           <TextField
             label="Name"
@@ -224,26 +209,11 @@ export function NewAgentSheet({
           </View>
 
           {tunable ? (
-            <>
-              <ChipPicker
-                label="MODEL"
-                options={modelOptions}
-                selectedId={model}
-                onSelect={setModel}
-              />
-              <ChipPicker
-                label="REASONING EFFORT"
-                options={[
-                  { id: AUTO, label: 'Default' },
-                  ...REASONING_EFFORTS.map((level) => ({
-                    id: level,
-                    label: EFFORT_LABELS[level],
-                  })),
-                ]}
-                selectedId={effort}
-                onSelect={(id) => setEffort(id as ReasoningEffort | typeof AUTO)}
-              />
-            </>
+            <AgentTuningPicker
+              provider={provider}
+              value={tuning}
+              onChange={setTuning}
+            />
           ) : null}
 
           <View

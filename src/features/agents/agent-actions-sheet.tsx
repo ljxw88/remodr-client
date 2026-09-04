@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet } from 'react-native';
 
 import { AppButton } from '@/components/ui/app-button';
-import { SheetHeader, SheetModal, SheetPanel } from '@/components/ui/sheet';
+import { SheetModal, SheetPanel } from '@/components/ui/sheet';
 import { TextField } from '@/components/ui/text-field';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
@@ -83,19 +83,13 @@ export function AgentActionsSheet({ agent, onClose, onClosed }: Props) {
   return (
     <SheetModal closeLabel="Close agent options" onClose={onClose} busy={busy} avoidKeyboard>
       {(close) => (
-        <SheetPanel>
+        <SheetPanel onClose={close} busy={busy}>
           <ScrollView
             contentContainerStyle={[
               styles.content,
               { paddingBottom: dockContentInset },
             ]}
             showsVerticalScrollIndicator={false}>
-            <SheetHeader
-              title="Agent"
-              subtitle="Rename it so you can find it again, or close it for good."
-              onClose={close}
-              busy={busy}
-            />
 
             <TextField
               label="Name"

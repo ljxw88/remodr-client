@@ -22,7 +22,6 @@ export const Colors = {
   // Sheets and menus render in their own window, so they cannot blur the app
   // behind them. Tinted toward the canvas indigo instead, so an opaque surface
   // still reads as part of the same material family.
-  chrome: '#161926',
   fog: 'rgba(6,7,10,0.55)',
   // Panel glass: a translucent white plate rather than an opaque grey one, so
   // controls pick up whatever the canvas is doing behind them.
