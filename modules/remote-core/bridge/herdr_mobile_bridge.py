@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import queue
+import re
 import socket
 import sqlite3
 import sys
@@ -39,8 +40,17 @@ TUNING_ARGUMENTS = {
     # Only Copilot for now. The others take a model differently, or not at all
     # from the command line, and guessing a flag would fail at startup with
     # nothing useful to show for it.
-    "copilot": {"model": "--model", "effort": "--effort"},
+    "copilot": {
+        "model": "--model",
+        "effort": "--effort",
+        "context": "--context",
+    },
 }
+
+CONTEXT_TIERS = ("default", "long_context")
+
+MODEL_SCAN_BYTES = 64 * 1024
+MODEL_PATTERN = re.compile(r'"model"\s*:\s*"([^"]+)"')
 
 REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 
@@ -92,6 +102,9 @@ class Bridge:
         self.dialog_settle_seconds = 0.25
         # Pane id -> the Copilot session id this app asked that pane to open.
         self.started_sessions: dict[str, str] = {}
+        # Pane id -> the model, effort and context it was last started with.
+        self.agent_tuning: dict[str, dict[str, Any]] = {}
+        self.session_model_cache: dict[str, tuple[tuple[int, int], str | None]] = {}
         self.output_lock = threading.Lock()
         self.state_lock = threading.Lock()
         self.refresh_lock = threading.Lock()
@@ -224,6 +237,8 @@ class Bridge:
             return self._rename_agent(payload)
         if action == "agent.close":
             return self._close_agent(payload)
+        if action == "agent.retune":
+            return self._retune_agent(payload)
         if action == "workspace.create":
             return self._create_workspace(payload)
         if action == "workspace.close":
@@ -420,6 +435,7 @@ class Bridge:
                 "deviceId": self.device_id,
                 "provider": provider,
                 "providerSessionId": provider_session_id,
+                "tuning": self._reported_tuning(pane_id, provider_session_id),
                 "herdrSessionId": self.session_name,
                 "workspaceId": workspace_id,
                 "workspaceName": workspace_labels.get(workspace_id, "Workspace"),
@@ -451,6 +467,11 @@ class Bridge:
         self.started_sessions = {
             pane: session
             for pane, session in self.started_sessions.items()
+            if pane in live_pane_ids
+        }
+        self.agent_tuning = {
+            pane: tuning
+            for pane, tuning in self.agent_tuning.items()
             if pane in live_pane_ids
         }
         for pane_id, pending in list(self.pending_agents.items()):
@@ -762,6 +783,8 @@ class Bridge:
             if session_id:
                 with self.state_lock:
                     self.started_sessions[pane_id] = session_id
+            with self.state_lock:
+                self.agent_tuning[pane_id] = self._tuning_of(payload)
             for _ in range(20):
                 self._refresh_runtime()
                 agent = next(
@@ -836,7 +859,165 @@ class Bridge:
             if effort not in REASONING_EFFORTS:
                 raise BridgeError("INVALID_EFFORT", "Unsupported reasoning effort.")
             arguments.extend([flags["effort"], effort])
+        context = payload.get("context")
+        if "context" in flags and isinstance(context, str) and context.strip():
+            if context not in CONTEXT_TIERS:
+                raise BridgeError("INVALID_CONTEXT", "Unsupported context window.")
+            arguments.extend([flags["context"], context])
         return arguments
+
+    @staticmethod
+    def _tuning_of(payload: dict[str, Any]) -> dict[str, Any]:
+        """The three settings, normalised, with absent meaning "let the CLI pick"."""
+        return {
+            key: (
+                payload.get(key).strip()
+                if isinstance(payload.get(key), str) and payload.get(key).strip()
+                else None
+            )
+            for key in ("model", "effort", "context")
+        }
+
+    def _retune_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Change the model, reasoning effort or context window of a live agent.
+
+        A model can be swapped in place — Copilot takes `/model` mid-session —
+        but effort and context are only read at startup. Those are changed by
+        quitting the CLI and starting it again on the same session id, which
+        resumes the conversation rather than beginning a new one.
+        """
+        agent = self._require_agent(payload)
+        provider = agent.get("provider")
+        if provider not in TUNING_ARGUMENTS:
+            raise BridgeError(
+                "PROVIDER_NOT_TUNABLE",
+                f"{self._provider_label(str(provider))} cannot be tuned from here.",
+            )
+        pane_id = agent.get("paneId")
+        if not isinstance(pane_id, str) or not pane_id:
+            raise BridgeError("AGENT_NOT_FOUND", "This agent has no pane.")
+
+        wanted = self._tuning_of(payload)
+        # Validate before touching anything, so a bad value cannot leave the
+        # agent stopped.
+        self._tuning_arguments(provider, wanted)
+        with self.state_lock:
+            current = dict(self.agent_tuning.get(pane_id) or {})
+            session_id = self.started_sessions.get(pane_id)
+        if not session_id:
+            session_id = agent.get("providerSessionId")
+
+        restart_needed = any(
+            wanted.get(key) != current.get(key) for key in ("effort", "context")
+        )
+        if restart_needed:
+            if not isinstance(session_id, str) or not session_id:
+                raise BridgeError(
+                    "SESSION_UNKNOWN",
+                    "This agent's session cannot be reopened, so its reasoning "
+                    "and context cannot be changed.",
+                )
+            self._restart_agent(agent, pane_id, session_id, wanted)
+        elif wanted.get("model") != current.get("model"):
+            # `auto` is what Copilot itself calls letting it choose.
+            self._herdr_request(
+                "agent.prompt",
+                {
+                    "target": pane_id,
+                    "text": f"/model {wanted.get('model') or 'auto'}",
+                },
+            )
+
+        with self.state_lock:
+            self.agent_tuning[pane_id] = wanted
+        self._refresh_runtime()
+        return {"agentId": agent["id"], "runtime": self.runtime}
+
+    def _restart_agent(
+        self,
+        agent: dict[str, Any],
+        pane_id: str,
+        session_id: str,
+        tuning: dict[str, Any],
+    ) -> None:
+        provider = str(agent.get("provider"))
+        self._herdr_request("agent.prompt", {"target": pane_id, "text": "/exit"})
+        deadline = time.monotonic() + SHELL_READY_TIMEOUT
+        while time.monotonic() < deadline:
+            time.sleep(0.3)
+            try:
+                self._herdr_request("agent.get", {"target": pane_id})
+            except BridgeError:
+                break  # No agent in the pane any more, so the shell is back.
+        args = list(BYPASS_ARGUMENTS[provider])
+        args.extend(self._tuning_arguments(provider, tuning))
+        args.extend(["--session-id", session_id])
+        # Herdr's own agent name, which it releases when the CLI exits.
+        name = str(agent.get("name") or provider)
+        try:
+            self._start_agent(name, provider, pane_id, args)
+        except BridgeError as error:
+            if error.code.lower() != "agent_name_taken":
+                raise
+            self._start_agent(
+                f"{provider}-{uuid.uuid4().hex[:4]}", provider, pane_id, args
+            )
+        with self.state_lock:
+            self.started_sessions[pane_id] = session_id
+
+    def _reported_tuning(
+        self, pane_id: str, provider_session_id: Any
+    ) -> dict[str, Any]:
+        """What the agent is actually running, as far as we can tell.
+
+        What this app last set wins, because that is what the agent will use
+        next. The session log only says which model it last *ran*, which lags
+        by a turn — right after a change it still names the old one.
+
+        For an agent this app did not start there is nothing set, and then the
+        log is the only evidence there is. Effort and context leave no trace at
+        all, so those are only ever known for an agent started from here.
+        """
+        tuning = dict(self.agent_tuning.get(pane_id) or {})
+        tuning.setdefault("model", None)
+        tuning.setdefault("effort", None)
+        tuning.setdefault("context", None)
+        if not tuning["model"]:
+            tuning["model"] = self._session_model(provider_session_id)
+        return tuning
+
+    def _session_model(self, provider_session_id: Any) -> str | None:
+        """The last model named in a Copilot session log."""
+        if not isinstance(provider_session_id, str) or not provider_session_id:
+            return None
+        path = (
+            Path.home()
+            / ".copilot"
+            / "session-state"
+            / provider_session_id
+            / "events.jsonl"
+        )
+        try:
+            stat = path.stat()
+        except OSError:
+            return None
+        version = (stat.st_size, stat.st_mtime_ns)
+        cached = self.session_model_cache.get(provider_session_id)
+        if cached and cached[0] == version:
+            return cached[1]
+        model = None
+        try:
+            with path.open("rb") as handle:
+                # Only the tail: the model is written on every turn, and the
+                # whole file is read often enough elsewhere.
+                handle.seek(max(0, stat.st_size - MODEL_SCAN_BYTES))
+                text = handle.read().decode("utf-8", "ignore")
+            matches = MODEL_PATTERN.findall(text)
+            model = matches[-1] if matches else None
+        except OSError:
+            model = None
+        self.session_model_cache[provider_session_id] = (version, model)
+        return model
 
     def _rename_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Rename by relabelling the tab the agent sits in.
@@ -874,6 +1055,7 @@ class Bridge:
         with self.state_lock:
             self.pending_agents.pop(pane_id, None)
             self.started_sessions.pop(pane_id, None)
+            self.agent_tuning.pop(pane_id, None)
         try:
             self._refresh_runtime()
         except Exception as error:

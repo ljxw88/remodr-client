@@ -1135,5 +1135,139 @@ class AgentManagementTest(unittest.TestCase):
         self.assertNotIn("a1", bridge.raw_agents)
 
 
+class AgentTuningTest(unittest.TestCase):
+    """Changing a running agent's model, reasoning effort and context."""
+
+    @staticmethod
+    def _bridge(current, provider="copilot", session="sess-1"):
+        bridge = Bridge()
+        bridge.raw_agents = {
+            "a1": {
+                "id": "a1",
+                "paneId": "p1",
+                "tabId": "w1:t1",
+                "provider": provider,
+                "name": "copilot",
+                "providerSessionId": session,
+            }
+        }
+        bridge.agent_tuning = {"p1": current}
+        bridge.started_sessions = {"p1": session} if session else {}
+        bridge._refresh_runtime = lambda: None
+        return bridge
+
+    def test_a_change_shows_at_once_rather_than_a_turn_later(self):
+        # The session log names the model the agent last ran, which still says
+        # the old one immediately after a change.
+        bridge = Bridge()
+        bridge.agent_tuning = {"p1": {"model": "claude-haiku-4.5"}}
+        bridge._session_model = lambda _session: "gpt-5.6-luna"
+        self.assertEqual(
+            bridge._reported_tuning("p1", "sess-1")["model"], "claude-haiku-4.5"
+        )
+
+    def test_an_agent_started_elsewhere_is_read_from_its_log(self):
+        # Nothing was set from here, so the log is the only evidence there is.
+        bridge = Bridge()
+        bridge.agent_tuning = {}
+        bridge._session_model = lambda _session: "gpt-5.6-luna"
+        reported = bridge._reported_tuning("p1", "sess-1")
+        self.assertEqual(reported["model"], "gpt-5.6-luna")
+        self.assertIsNone(reported["effort"])
+
+    def test_a_new_model_is_swapped_in_place(self):
+        # Copilot takes /model mid-session, so there is no reason to stop the
+        # agent and lose what it was doing.
+        bridge = self._bridge({"model": "gpt-5.4", "effort": None, "context": None})
+        sent = []
+        bridge._herdr_request = lambda method, params: sent.append((method, params)) or {}
+        bridge._retune_agent({"agentId": "a1", "model": "claude-opus-5"})
+        self.assertEqual(
+            sent, [("agent.prompt", {"target": "p1", "text": "/model claude-opus-5"})]
+        )
+
+    def test_clearing_the_model_asks_the_cli_to_choose(self):
+        bridge = self._bridge({"model": "gpt-5.4", "effort": None, "context": None})
+        sent = []
+        bridge._herdr_request = lambda method, params: sent.append((method, params)) or {}
+        bridge._retune_agent({"agentId": "a1"})
+        self.assertEqual(sent[0][1]["text"], "/model auto")
+
+    def test_a_new_effort_restarts_the_agent_on_the_same_session(self):
+        # Effort is only read at startup, so it takes a restart — but resuming
+        # the same session id keeps the conversation.
+        bridge = self._bridge({"model": "gpt-5.4", "effort": "low", "context": None})
+        sent = []
+
+        def request(method, params):
+            sent.append((method, params))
+            if method == "agent.get":
+                raise BridgeError("agent_not_found", "gone")
+            return {}
+
+        bridge._herdr_request = request
+        with patch("herdr_mobile_bridge.time.sleep"):
+            bridge._retune_agent({"agentId": "a1", "model": "gpt-5.4", "effort": "high"})
+        methods = [method for method, _ in sent]
+        self.assertEqual(methods[0], "agent.prompt")
+        self.assertEqual(sent[0][1]["text"], "/exit")
+        start = next(params for method, params in sent if method == "agent.start")
+        self.assertEqual(
+            start["args"],
+            [
+                "--allow-all-tools",
+                "--model",
+                "gpt-5.4",
+                "--effort",
+                "high",
+                "--session-id",
+                "sess-1",
+            ],
+        )
+
+    def test_a_bad_value_is_refused_before_the_agent_is_touched(self):
+        # Validating afterwards would leave the agent stopped with nothing to
+        # restart it with.
+        bridge = self._bridge({"model": None, "effort": None, "context": None})
+        sent = []
+        bridge._herdr_request = lambda method, params: sent.append((method, params)) or {}
+        with self.assertRaises(BridgeError) as caught:
+            bridge._retune_agent({"agentId": "a1", "effort": "ludicrous"})
+        self.assertEqual(caught.exception.code, "INVALID_EFFORT")
+        self.assertEqual(sent, [])
+
+    def test_an_unknown_context_is_refused(self):
+        bridge = self._bridge({"model": None, "effort": None, "context": None})
+        bridge._herdr_request = lambda method, params: {}
+        with self.assertRaises(BridgeError) as caught:
+            bridge._retune_agent({"agentId": "a1", "context": "enormous"})
+        self.assertEqual(caught.exception.code, "INVALID_CONTEXT")
+
+    def test_effort_cannot_be_changed_without_a_session_to_reopen(self):
+        bridge = self._bridge(
+            {"model": None, "effort": None, "context": None}, session=None
+        )
+        bridge.raw_agents["a1"]["providerSessionId"] = None
+        bridge._herdr_request = lambda method, params: {}
+        with self.assertRaises(BridgeError) as caught:
+            bridge._retune_agent({"agentId": "a1", "effort": "high"})
+        self.assertEqual(caught.exception.code, "SESSION_UNKNOWN")
+
+    def test_a_provider_that_takes_no_flags_is_refused(self):
+        bridge = self._bridge(
+            {"model": None, "effort": None, "context": None}, provider="claude"
+        )
+        bridge._herdr_request = lambda method, params: {}
+        with self.assertRaises(BridgeError) as caught:
+            bridge._retune_agent({"agentId": "a1", "model": "gpt-5.4"})
+        self.assertEqual(caught.exception.code, "PROVIDER_NOT_TUNABLE")
+
+    def test_a_context_window_becomes_a_command_line_argument(self):
+        self.assertEqual(
+            Bridge._tuning_arguments("copilot", {"context": "long_context"}),
+            ["--context", "long_context"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
