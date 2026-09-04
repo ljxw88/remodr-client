@@ -54,8 +54,11 @@ TUNING_ARGUMENTS = {
 
 CONTEXT_TIERS = ("default", "long_context")
 
-MODEL_SCAN_BYTES = 64 * 1024
-MODEL_PATTERN = re.compile(r'"model"\s*:\s*"([^"]+)"')
+# The events that state a session's model, reasoning effort and context
+# window. Each reports all three, so the last one seen is the current state.
+SESSION_SETTING_EVENTS = ("session.start", "session.resume", "session.model_change")
+
+ORDERED_TUNING = ("model", "effort", "context")
 
 REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 
@@ -109,7 +112,8 @@ class Bridge:
         self.started_sessions: dict[str, str] = {}
         # Pane id -> the model, effort and context it was last started with.
         self.agent_tuning: dict[str, dict[str, Any]] = {}
-        self.session_model_cache: dict[str, tuple[tuple[int, int], str | None]] = {}
+        # Session id -> (bytes of the log already read, settings found in them).
+        self.session_tuning_cache: dict[str, tuple[int, dict[str, Any]]] = {}
         self.output_lock = threading.Lock()
         self.state_lock = threading.Lock()
         self.refresh_lock = threading.Lock()
@@ -880,7 +884,7 @@ class Bridge:
                 if isinstance(payload.get(key), str) and payload.get(key).strip()
                 else None
             )
-            for key in ("model", "effort", "context")
+            for key in ORDERED_TUNING
         }
 
     def _retune_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -975,26 +979,35 @@ class Bridge:
     ) -> dict[str, Any]:
         """What the agent is actually running, as far as we can tell.
 
-        What this app last set wins, because that is what the agent will use
-        next. The session log only says which model it last *ran*, which lags
-        by a turn — right after a change it still names the old one.
+        What this app last set wins field by field, because that is what the
+        agent will use next: the log can be a moment behind a change made from
+        here.
 
-        For an agent this app did not start there is nothing set, and then the
-        log is the only evidence there is. Effort and context leave no trace at
-        all, so those are only ever known for an agent started from here.
+        Everything not set from here comes from the log, which is how a
+        conversation started before this bridge ran — or before it last
+        restarted — still shows what it is actually running instead of
+        claiming a default it never had.
         """
-        tuning = dict(self.agent_tuning.get(pane_id) or {})
-        tuning.setdefault("model", None)
-        tuning.setdefault("effort", None)
-        tuning.setdefault("context", None)
-        if not tuning["model"]:
-            tuning["model"] = self._session_model(provider_session_id)
-        return tuning
+        ours = self.agent_tuning.get(pane_id) or {}
+        logged = self._session_tuning(provider_session_id)
+        return {key: ours.get(key) or logged.get(key) for key in ORDERED_TUNING}
 
-    def _session_model(self, provider_session_id: Any) -> str | None:
-        """The last model named in a Copilot session log."""
+    def _session_tuning(self, provider_session_id: Any) -> dict[str, Any]:
+        """The model, reasoning effort and context window a session is running.
+
+        Only the session-level events carry all three, and they are the CLI's
+        own record: it writes one when a session starts, when it resumes, and
+        whenever any of the three is changed — including from the terminal
+        rather than from here. Per-turn events name a model but never a
+        context window, so the tail alone is not enough.
+
+        A log is append-only, so each call reads only what has arrived since
+        the last one. Scanning the whole file every time would mean re-reading
+        megabytes a second while an agent is working.
+        """
+        empty: dict[str, Any] = {"model": None, "effort": None, "context": None}
         if not isinstance(provider_session_id, str) or not provider_session_id:
-            return None
+            return dict(empty)
         path = (
             Path.home()
             / ".copilot"
@@ -1003,26 +1016,54 @@ class Bridge:
             / "events.jsonl"
         )
         try:
-            stat = path.stat()
+            size = path.stat().st_size
         except OSError:
-            return None
-        version = (stat.st_size, stat.st_mtime_ns)
-        cached = self.session_model_cache.get(provider_session_id)
-        if cached and cached[0] == version:
-            return cached[1]
-        model = None
+            return dict(empty)
+
+        offset, tuning = self.session_tuning_cache.get(
+            provider_session_id, (0, dict(empty))
+        )
+        if size < offset:
+            # Truncated or replaced, so nothing read before can be trusted.
+            offset, tuning = 0, dict(empty)
+        if size == offset:
+            return dict(tuning)
+
+        tuning = dict(tuning)
         try:
             with path.open("rb") as handle:
-                # Only the tail: the model is written on every turn, and the
-                # whole file is read often enough elsewhere.
-                handle.seek(max(0, stat.st_size - MODEL_SCAN_BYTES))
-                text = handle.read().decode("utf-8", "ignore")
-            matches = MODEL_PATTERN.findall(text)
-            model = matches[-1] if matches else None
+                handle.seek(offset)
+                chunk = handle.read()
         except OSError:
-            model = None
-        self.session_model_cache[provider_session_id] = (version, model)
-        return model
+            return dict(tuning)
+
+        # A read can land mid-line, so the last fragment is left for next time.
+        consumed = chunk.rfind(b"\n") + 1
+        for raw in chunk[:consumed].splitlines():
+            if b'"session.' not in raw:
+                continue
+            try:
+                event = json.loads(raw)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            if event.get("type") not in SESSION_SETTING_EVENTS:
+                continue
+            data = event.get("data")
+            if not isinstance(data, dict):
+                continue
+            # Each of these reports the whole set, and a null is meaningful:
+            # it is the CLI saying it will choose for itself.
+            tuning = {
+                "model": data.get("model") or None,
+                "effort": data.get("reasoningEffort") or None,
+                "context": data.get("contextTier") or None,
+            }
+
+        self.session_tuning_cache[provider_session_id] = (
+            offset + consumed,
+            dict(tuning),
+        )
+        return dict(tuning)
 
     def _rename_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Rename by relabelling the tab the agent sits in.

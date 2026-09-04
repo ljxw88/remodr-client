@@ -1,6 +1,8 @@
 import {
+  contextChoices,
   contextLabel,
   contextsFor,
+  effortChoices,
   effortsFor,
   modelLabel,
   modelsFor,
@@ -134,6 +136,40 @@ describe('the catalogue itself', () => {
       const ids = modelsFor(provider).map((model) => model.id);
       expect(new Set(ids).size).toBe(ids.length);
     }
+  });
+});
+
+describe('what is already in force', () => {
+  it('shows a window the model does not list, so it is not hidden', () => {
+    // A session can be on a long window with no model pinned at all — set
+    // before the model was, or never pinned. Leaving it out would show the
+    // agent running a default it is not.
+    const choices = contextChoices('copilot', null, 'long_context');
+    expect(choices.map((option) => option.tier)).toEqual(['long_context']);
+    // No model means no size to name it by.
+    expect(choices.map(contextLabel)).toEqual(['Long']);
+  });
+
+  it('shows an effort the model does not list', () => {
+    expect(effortChoices('copilot', null, 'xhigh')).toEqual(['xhigh']);
+  });
+
+  it('does not repeat one the model already offers', () => {
+    expect(effortChoices('copilot', 'gpt-5.6-sol', 'max')).toEqual(
+      effortsFor('copilot', 'gpt-5.6-sol'),
+    );
+    expect(contextChoices('copilot', 'gpt-5.6-sol', 'long_context')).toEqual(
+      contextsFor('copilot', 'gpt-5.6-sol'),
+    );
+  });
+
+  it('offers only the model\u2019s own list when nothing is in force', () => {
+    expect(effortChoices('copilot', 'gemini-3.8-flash', null)).toEqual([
+      'low',
+      'medium',
+      'high',
+    ]);
+    expect(contextChoices('copilot', 'claude-haiku-4.5', null)).toEqual([]);
   });
 });
 

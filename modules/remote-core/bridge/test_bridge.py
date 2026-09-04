@@ -1163,6 +1163,110 @@ class AgentTuningTest(unittest.TestCase):
         bridge._refresh_runtime = lambda: None
         return bridge
 
+    def _write_session(self, root, session_id, events):
+        directory = Path(root) / ".copilot" / "session-state" / session_id
+        directory.mkdir(parents=True, exist_ok=True)
+        with (directory / "events.jsonl").open("a") as handle:
+            for event in events:
+                handle.write(json.dumps(event) + "\n")
+
+    def test_settings_are_read_from_the_session_log(self):
+        # Only the session-level events carry a context window; per-turn ones
+        # name a model and nothing else.
+        with tempfile.TemporaryDirectory() as root:
+            with patch("herdr_mobile_bridge.Path.home", return_value=Path(root)):
+                bridge = Bridge()
+                self._write_session(
+                    root,
+                    "s1",
+                    [
+                        {
+                            "type": "session.start",
+                            "data": {
+                                "model": None,
+                                "reasoningEffort": "medium",
+                                "contextTier": None,
+                            },
+                        },
+                        {"type": "assistant.message", "data": {"model": "gpt-5.4"}},
+                        {
+                            "type": "session.model_change",
+                            "data": {
+                                "model": "gpt-5.6-sol",
+                                "reasoningEffort": "max",
+                                "contextTier": "long_context",
+                            },
+                        },
+                    ],
+                )
+                self.assertEqual(
+                    bridge._session_tuning("s1"),
+                    {
+                        "model": "gpt-5.6-sol",
+                        "effort": "max",
+                        "context": "long_context",
+                    },
+                )
+
+    def test_only_the_newly_written_part_of_a_log_is_read_again(self):
+        # Logs are append-only and reach megabytes, and this runs on every
+        # snapshot while an agent works.
+        with tempfile.TemporaryDirectory() as root:
+            with patch("herdr_mobile_bridge.Path.home", return_value=Path(root)):
+                bridge = Bridge()
+                self._write_session(
+                    root,
+                    "s1",
+                    [
+                        {
+                            "type": "session.start",
+                            "data": {"model": "gpt-5.4", "reasoningEffort": "low"},
+                        }
+                    ],
+                )
+                first = bridge._session_tuning("s1")
+                self.assertEqual(first["model"], "gpt-5.4")
+                offset = bridge.session_tuning_cache["s1"][0]
+
+                self._write_session(
+                    root,
+                    "s1",
+                    [
+                        {
+                            "type": "session.resume",
+                            "data": {
+                                "model": "grok-4.6",
+                                "reasoningEffort": "xhigh",
+                                "contextTier": "long_context",
+                            },
+                        }
+                    ],
+                )
+                second = bridge._session_tuning("s1")
+                self.assertEqual(second["model"], "grok-4.6")
+                self.assertEqual(second["context"], "long_context")
+                self.assertGreater(bridge.session_tuning_cache["s1"][0], offset)
+
+    def test_a_log_with_nothing_to_say_reports_nothing(self):
+        with tempfile.TemporaryDirectory() as root:
+            with patch("herdr_mobile_bridge.Path.home", return_value=Path(root)):
+                bridge = Bridge()
+                self._write_session(
+                    root, "s1", [{"type": "assistant.message", "data": {"model": "x"}}]
+                )
+                self.assertEqual(
+                    bridge._session_tuning("s1"),
+                    {"model": None, "effort": None, "context": None},
+                )
+
+    def test_a_missing_log_reports_nothing(self):
+        with tempfile.TemporaryDirectory() as root:
+            with patch("herdr_mobile_bridge.Path.home", return_value=Path(root)):
+                self.assertEqual(
+                    Bridge()._session_tuning("nope"),
+                    {"model": None, "effort": None, "context": None},
+                )
+
     def test_every_tunable_cli_is_one_the_bridge_can_launch(self):
         # The app decides which models to offer; this decides how to send them.
         # A CLI listed here with no counterpart there is never asked for, and
@@ -1176,19 +1280,44 @@ class AgentTuningTest(unittest.TestCase):
         # the old one immediately after a change.
         bridge = Bridge()
         bridge.agent_tuning = {"p1": {"model": "claude-haiku-4.5"}}
-        bridge._session_model = lambda _session: "gpt-5.6-luna"
+        bridge._session_tuning = lambda _session: {
+            "model": "gpt-5.6-luna",
+            "effort": None,
+            "context": None,
+        }
         self.assertEqual(
             bridge._reported_tuning("p1", "sess-1")["model"], "claude-haiku-4.5"
         )
 
     def test_an_agent_started_elsewhere_is_read_from_its_log(self):
-        # Nothing was set from here, so the log is the only evidence there is.
+        # Nothing was set from here — a conversation from before this bridge
+        # ran — so the log is the only evidence there is, and all three come
+        # from it rather than showing a default the agent never had.
         bridge = Bridge()
         bridge.agent_tuning = {}
-        bridge._session_model = lambda _session: "gpt-5.6-luna"
-        reported = bridge._reported_tuning("p1", "sess-1")
-        self.assertEqual(reported["model"], "gpt-5.6-luna")
-        self.assertIsNone(reported["effort"])
+        bridge._session_tuning = lambda _session: {
+            "model": "gpt-5.6-luna",
+            "effort": "xhigh",
+            "context": "long_context",
+        }
+        self.assertEqual(
+            bridge._reported_tuning("p1", "sess-1"),
+            {"model": "gpt-5.6-luna", "effort": "xhigh", "context": "long_context"},
+        )
+
+    def test_settings_are_taken_field_by_field(self):
+        # A model set from here with an effort only the log knows about.
+        bridge = Bridge()
+        bridge.agent_tuning = {"p1": {"model": "gpt-5.4", "effort": None, "context": None}}
+        bridge._session_tuning = lambda _session: {
+            "model": "gpt-5.6-luna",
+            "effort": "high",
+            "context": "long_context",
+        }
+        self.assertEqual(
+            bridge._reported_tuning("p1", "sess-1"),
+            {"model": "gpt-5.4", "effort": "high", "context": "long_context"},
+        )
 
     def test_a_new_model_is_swapped_in_place(self):
         # Copilot takes /model mid-session, so there is no reason to stop the

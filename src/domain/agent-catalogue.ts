@@ -299,3 +299,38 @@ export const EFFORT_LABELS: Record<ReasoningEffort, string> = {
 export function contextLabel(option: ContextOption): string {
   return option.size;
 }
+
+/**
+ * The tiers to show for a model, with anything already in force included.
+ *
+ * An agent can be running a window this model does not list — set before the
+ * model was, or with no model pinned at all, where there is no size to name it
+ * by. Leaving it out would show the agent as running a default it is not.
+ */
+export function contextChoices(
+  provider: AgentProvider,
+  modelId: string | null | undefined,
+  current: ContextTier | null,
+): ContextOption[] {
+  const known = contextsFor(provider, modelId);
+  if (!current || known.some((option) => option.tier === current)) {
+    return known;
+  }
+  return [...known, { tier: current, size: TIER_NAMES[current] }];
+}
+
+/** Only for a window with no size to show, which is a window off the list. */
+const TIER_NAMES: Record<ContextTier, string> = {
+  default: 'Standard',
+  long_context: 'Long',
+};
+
+/** The efforts to show for a model, with anything already in force included. */
+export function effortChoices(
+  provider: AgentProvider,
+  modelId: string | null | undefined,
+  current: ReasoningEffort | null,
+): ReasoningEffort[] {
+  const known = effortsFor(provider, modelId);
+  return !current || known.includes(current) ? known : [...known, current];
+}

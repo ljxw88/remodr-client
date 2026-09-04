@@ -1,9 +1,9 @@
 import { ChipPicker } from '@/components/ui/chip-picker';
 import {
+  contextChoices,
   contextLabel,
-  contextsFor,
   EFFORT_LABELS,
-  effortsFor,
+  effortChoices,
   modelsFor,
   tuningForModel,
   type ContextTier,
@@ -31,8 +31,8 @@ type Props = {
  * chooses, and there is no telling which range would apply.
  */
 export function AgentTuningPicker({ provider, value, onChange }: Props) {
-  const efforts = effortsFor(provider, value.model);
-  const contexts = contextsFor(provider, value.model);
+  const efforts = effortChoices(provider, value.model, value.effort);
+  const contexts = contextChoices(provider, value.model, value.context);
 
   return (
     <>
