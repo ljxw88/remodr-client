@@ -1,4 +1,3 @@
-import { Stack } from 'expo-router';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { Screen } from '@/components/ui/screen';
@@ -29,15 +28,6 @@ export default function DiagnosticsScreen() {
 
   return (
     <Screen>
-      <Stack.Screen
-        options={{
-          title: 'Diagnostics',
-          headerShown: true,
-          headerStyle: { backgroundColor: 'transparent' },
-          headerTintColor: theme.text,
-          headerShadowVisible: false,
-        }}
-      />
       <ScrollView contentContainerStyle={styles.content}>
         <View
           style={[

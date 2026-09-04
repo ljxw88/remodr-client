@@ -1,7 +1,5 @@
-import { Stack } from 'expo-router';
-
-import { useStackScreenOptions } from '@/features/navigation/stack-screen-options';
+import { RouteStack } from '@/features/navigation/route-stack';
 
 export default function AgentsLayout() {
-  return <Stack screenOptions={useStackScreenOptions()} />;
+  return <RouteStack />;
 }

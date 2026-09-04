@@ -322,18 +322,16 @@ chromatic orb.
 ## Motion, feedback, and accessibility
 
 - Use subtle press-scale and opacity feedback; avoid decorative animation.
-- A push slides in from the right rather than dissolving. A cross-fade needs
-  one screen to be hiding the other to read as a change of place; ours share a
-  canvas and sit at the same brightness, so a dissolve looks like the screen
-  being left refusing to go.
-- Transition length is set by the preset, not by a duration. Android maps each
-  preset to a fixed animation resource, so `animationDuration` does nothing
-  there. We use `ios_from_right` over `slide_from_right` (400ms): opening a
-  conversation should feel like the tap landed, not like waiting.
-- The preset's own floor is 200ms, and the next preset down is a cut. To get
-  below it, `plugins/with-stack-transition-duration.js` rewrites the preset's
-  animation resources at build time; we run at 100ms. The duration lives in
-  that plugin and changing it needs a rebuild, not a reload.
+- A push replaces what it covers outright, with no transition — the same thing
+  the dock does when it swaps tabs. A cross-fade draws both screens at once,
+  and ours share a canvas at the same brightness, so it reads as the screen
+  being left refusing to go. A slide avoids that but costs 200-400ms that
+  cannot be shortened from JavaScript.
+- Any route that can be pushed over another paints the canvas behind its own
+  header. Headers are transparent, and a route's content starts below its
+  header, so that band is one the route never covers — during a transition
+  what shows through it is the screen being left, not the canvas. See
+  `features/navigation/route-stack.tsx`.
 - Frosted chrome may only sample a blur target on a screen that is never
   dismissed. A `BlurTargetView` draws nothing from the moment its screen starts
   animating away, so its contents blink out while the screen is still visible;

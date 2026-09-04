@@ -27,7 +27,6 @@
     },
     "plugins": [
       "expo-router",
-      "./plugins/with-stack-transition-duration",
       [
         "expo-splash-screen",
         {
