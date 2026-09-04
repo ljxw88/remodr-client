@@ -326,6 +326,10 @@ chromatic orb.
   one screen to be hiding the other to read as a change of place; ours share a
   canvas and sit at the same brightness, so a dissolve looks like the screen
   being left refusing to go.
+- Transition length is set by the preset, not by a duration. Android maps each
+  preset to a fixed animation resource, so `animationDuration` does nothing
+  there. We use `ios_from_right` (200ms) over `slide_from_right` (400ms):
+  opening a conversation should feel like the tap landed, not like waiting.
 - Frosted chrome may only sample a blur target on a screen that is never
   dismissed. A `BlurTargetView` draws nothing from the moment its screen starts
   animating away, so its contents blink out while the screen is still visible;
