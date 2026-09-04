@@ -51,10 +51,8 @@ export function useRevealedText(text: string, enabled: boolean): string {
     rate: MIN_CHARS_PER_TICK,
   }));
 
-  const caughtUp = reveal.shown >= text.length;
-
   useEffect(() => {
-    if (caughtUp) {
+    if (reveal.shown >= text.length) {
       return;
     }
     // Advanced from a timer, never straight from the effect body, so a render
@@ -80,7 +78,10 @@ export function useRevealedText(text: string, enabled: boolean): string {
       enabled ? TICK_MS : 0,
     );
     return () => clearTimeout(timer);
-  }, [caughtUp, enabled, text]);
+    // `reveal` itself is the dependency, not just whether it has caught up:
+    // each tick has to re-run this to schedule the next one. Depending on a
+    // derived boolean instead stalled the reveal after a single step.
+  }, [enabled, reveal, text]);
 
   return text.slice(0, reveal.shown);
 }
