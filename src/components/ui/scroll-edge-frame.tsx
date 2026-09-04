@@ -193,11 +193,23 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
+  /**
+   * No `zIndex`, deliberately.
+   *
+   * The fades are the last children of the frame, so they already draw over the
+   * rows they soften — the ordering they need costs nothing. Asking for it
+   * again by number is not free, though: React Native maps `zIndex` onto
+   * Android's `translationZ`, and that lifts a view in the *window* rather than
+   * among its siblings. A fade raised that way sails over anything floating on
+   * the screen that has not also asked to be lifted, which is how the composer
+   * and the dock ended up with the closing fade painted across them — dimming
+   * toward the bottom edge, so a panel meant to read as one material shaded off
+   * into the canvas from the middle down.
+   */
   edge: {
     position: 'absolute',
     left: -Spacing.three,
     right: -Spacing.three,
-    zIndex: 10,
     overflow: 'hidden',
   },
   top: {

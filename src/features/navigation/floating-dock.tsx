@@ -118,14 +118,26 @@ export function DockMotionProvider({ children }: PropsWithChildren) {
   );
 }
 
+/**
+ * Where each tab lives, in the order they sit in the dock.
+ *
+ * Doubles as the test for whether the tabs are the top of the stack at all: a
+ * route pushed over them keeps them mounted but out of sight, and `usePathname`
+ * is global, so while covered it reports the route on top rather than the tab
+ * still underneath it.
+ */
+const TabRoutes = ['/', '/servers', '/settings'];
+
 export function AnimatedTabContent({ children }: PropsWithChildren) {
   const motion = useContext(DockMotionContext);
   if (!motion) {
     throw new Error('AnimatedTabContent must be used inside DockMotionProvider');
   }
   const pathname = usePathname();
-  const tabIndex = pathname === '/servers' ? 1 : pathname === '/settings' ? 2 : 0;
+  const covered = !TabRoutes.includes(pathname);
+  const tabIndex = covered ? -1 : TabRoutes.indexOf(pathname);
   const previousIndex = useRef(tabIndex);
+  const wasCovered = useRef(covered);
   const mounted = useRef(false);
   const entrance = useScreenEntrance();
 
@@ -135,12 +147,31 @@ export function AnimatedTabContent({ children }: PropsWithChildren) {
     if (!mounted.current) {
       mounted.current = true;
       previousIndex.current = tabIndex;
+      wasCovered.current = covered;
       return;
     }
+
+    // Nothing to settle while something is drawn over us, and nothing worth
+    // remembering either — the tab underneath has not changed, so the index we
+    // are already holding is still the one to come back to.
+    if (covered) {
+      wasCovered.current = true;
+      return;
+    }
+
+    // Uncovered by a close. The route that was on top sat above us, so the tab
+    // it uncovers arrives the way anything arrives when you go back.
+    if (wasCovered.current) {
+      wasCovered.current = false;
+      previousIndex.current = tabIndex;
+      entrance.play(-1);
+      return;
+    }
+
     const direction = tabIndex >= previousIndex.current ? 1 : -1;
     previousIndex.current = tabIndex;
     entrance.play(direction);
-  }, [entrance, tabIndex]);
+  }, [covered, entrance, tabIndex]);
 
   return (
     <Animated.View style={[styles.content, entrance.style]}>

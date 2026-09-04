@@ -349,6 +349,12 @@ chromatic orb.
   animating away, so its contents blink out while the screen is still visible;
   chrome outside the target keeps drawing, and the screen reads as having
   thrown its content away. The tab bar qualifies, a pushed route does not.
+- Never set `zIndex` to order something that declaration order already orders.
+  React Native maps `zIndex` onto Android's `translationZ`, which lifts a view
+  in the *window* rather than among its siblings, so it sails over floating
+  chrome in a completely different part of the tree. A `zIndex: 10` on the
+  scroll edge fade painted the closing dissolve across the composer and the
+  dock, shading both off into the canvas from the middle down.
 - Press-scale belongs to controls that stand alone on the canvas. A row that
   fills its card edge to edge must not scale: shrinking it pulls the pressed
   highlight inwards and leaves the card showing down both sides.
