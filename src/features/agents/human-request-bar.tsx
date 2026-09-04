@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { AppIcon } from '@/components/ui/app-icon';
-import { glassRim } from '@/components/ui/glass-surface';
+import { GlassSurface, glassRim } from '@/components/ui/glass-surface';
 import { Radius, Spacing } from '@/constants/theme';
 import type { HumanRequest } from '@/domain/herdr';
 import { answerBodyFor, answerOptions } from '@/features/agents/human-request';
@@ -99,115 +99,151 @@ export function HumanRequestBar({ agentId, request }: Props) {
   }
 
   return (
-    <View style={styles.bar}>
-      <View style={styles.heading}>
-        <AppIcon
-          name={{ ios: 'questionmark.circle', android: 'help', web: 'help' }}
-          size={14}
-          tintColor={theme.accent}
-          fallback="?"
-        />
-        <ThemedText type="label" style={{ color: theme.accent }}>
-          {sent ? 'ANSWER SENT' : request.multiSelect ? 'CHOOSE ANY' : 'NEEDS YOUR INPUT'}
-        </ThemedText>
-      </View>
+    <View style={styles.wrapper}>
+      {/* A surface of its own rather than bare text over the composer. The
+          transcript scrolls underneath this at every position but the very
+          bottom, and without something opaque the two read straight through
+          each other. Same chrome as the input card below, so the pair reads as
+          one stack. */}
+      <GlassSurface tone="chrome" strength="strong" highlight style={styles.surface}>
+        <View style={styles.content}>
+          <View style={styles.heading}>
+            <AppIcon
+              name={{ ios: 'questionmark.circle', android: 'help', web: 'help' }}
+              size={14}
+              tintColor={theme.accent}
+              fallback="?"
+            />
+            <ThemedText type="label" style={{ color: theme.accent }}>
+              {sent ? 'ANSWER SENT' : request.multiSelect ? 'CHOOSE ANY' : 'NEEDS YOUR INPUT'}
+            </ThemedText>
+          </View>
 
-      {/* Tappable to expand, because while the question is open this is its
-          only rendering — the transcript keeps one only once it is answered —
-          and the bridge falls back to a field's description, which is prose. */}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={request.question}
-        accessibilityState={{ expanded }}
-        onPress={() => setExpanded((current) => !current)}>
-        <ThemedText type="small" numberOfLines={expanded ? undefined : 3}>
-          {request.question}
-        </ThemedText>
-      </Pressable>
+          {/* Tappable to expand, because while the question is open this is its
+              only rendering — the transcript keeps one only once it is
+              answered — and the bridge falls back to a schema field's
+              description, which is prose. */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={request.question}
+            accessibilityState={{ expanded }}
+            onPress={() => setExpanded((current) => !current)}>
+            <ThemedText type="small" numberOfLines={expanded ? undefined : 3}>
+              {request.question}
+            </ThemedText>
+          </Pressable>
 
-      <View style={styles.options}>
-        {options.map((option) => {
-          const isSelected = selected.includes(option.id);
-          return (
+          <View style={styles.options}>
+            {options.map((option) => {
+              const isSelected = selected.includes(option.id);
+              return (
+                <Pressable
+                  key={option.id}
+                  accessibilityRole={request.multiSelect ? 'checkbox' : 'button'}
+                  accessibilityLabel={option.label}
+                  accessibilityHint={option.description ?? undefined}
+                  accessibilityState={{ selected: isSelected, disabled: locked }}
+                  disabled={locked}
+                  onPress={() => choose(option.id)}
+                  style={({ pressed }) => [
+                    styles.option,
+                    glassRim(isSelected ? theme.accent : undefined),
+                    {
+                      backgroundColor: isSelected
+                        ? theme.accentSoft
+                        : theme.backgroundElement,
+                      opacity: locked ? 0.5 : pressed ? 0.72 : 1,
+                    },
+                  ]}>
+                  <ThemedText
+                    type="smallBold"
+                    style={{ color: isSelected ? theme.accent : theme.text }}>
+                    {option.label}
+                  </ThemedText>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {request.multiSelect ? (
             <Pressable
-              key={option.id}
-              accessibilityRole={request.multiSelect ? 'checkbox' : 'button'}
-              accessibilityLabel={option.label}
-              accessibilityHint={option.description ?? undefined}
-              accessibilityState={{ selected: isSelected, disabled: locked }}
-              disabled={locked}
-              onPress={() => choose(option.id)}
+              accessibilityRole="button"
+              accessibilityLabel="Send selected answers"
+              accessibilityState={{ disabled: locked || selected.length === 0 }}
+              disabled={locked || selected.length === 0}
+              onPress={() => void answer(selected)}
               style={({ pressed }) => [
-                styles.option,
-                glassRim(isSelected ? theme.accent : undefined),
+                styles.confirm,
                 {
-                  backgroundColor: isSelected ? theme.accentSoft : theme.backgroundElement,
-                  opacity: locked ? 0.5 : pressed ? 0.72 : 1,
+                  backgroundColor: theme.accent,
+                  opacity:
+                    locked || selected.length === 0 ? 0.4 : pressed ? 0.8 : 1,
                 },
               ]}>
-              <ThemedText
-                type="smallBold"
-                style={{ color: isSelected ? theme.accent : theme.text }}>
-                {option.label}
+              <ThemedText type="smallBold" style={{ color: theme.onAccent }}>
+                {sent
+                  ? 'Answer sent'
+                  : selected.length > 0
+                    ? `Send ${selected.length} selected`
+                    : 'Select an answer'}
               </ThemedText>
             </Pressable>
-          );
-        })}
-      </View>
+          ) : null}
 
-      {request.multiSelect ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Send selected answers"
-          accessibilityState={{ disabled: locked || selected.length === 0 }}
-          disabled={locked || selected.length === 0}
-          onPress={() => void answer(selected)}
-          style={({ pressed }) => [
-            styles.confirm,
-            {
-              backgroundColor: theme.accent,
-              opacity: locked || selected.length === 0 ? 0.4 : pressed ? 0.8 : 1,
-            },
-          ]}>
-          <ThemedText type="smallBold" style={{ color: theme.onAccent }}>
-            {sent
-              ? 'Answer sent'
-              : selected.length > 0
-                ? `Send ${selected.length} selected`
-                : 'Select an answer'}
-          </ThemedText>
-        </Pressable>
-      ) : null}
-
-      {error ? (
-        <ThemedText type="caption" themeColor="danger">
-          {error}
-        </ThemedText>
-      ) : null}
+          {error ? (
+            <ThemedText type="caption" themeColor="danger">
+              {error}
+            </ThemedText>
+          ) : null}
+        </View>
+      </GlassSurface>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  bar: {
-    gap: Spacing.one,
+  wrapper: {
+    borderRadius: Radius.glass,
+    overflow: 'hidden',
+    // Runs on behind the input card rather than stopping short of it. The
+    // composer's gap would otherwise be a band of clear space with the
+    // transcript scrolling through it, between two panels that read as one.
+    marginBottom: -Spacing.two,
+  },
+  surface: {
+    borderRadius: Radius.glass,
+    overflow: 'hidden',
+    padding: 0,
+  },
+  content: {
     paddingHorizontal: Spacing.two,
-    paddingVertical: Spacing.one + Spacing.half,
+    paddingTop: Spacing.one + Spacing.half,
+    // Deeper than the top to leave room under the answers once the card
+    // below has covered the overlap.
+    paddingBottom: Spacing.two + Spacing.one,
+    // The label is a caption for the question, so it sits closer to it than
+    // the answers do. An even gap throughout read as three unrelated rows.
+    gap: Spacing.one,
   },
   heading: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.half,
+    // Pulled up against the question it introduces.
+    marginBottom: -Spacing.half,
   },
   options: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.one,
+    // Answers are the action, so they get more room above them than the
+    // question got below its label.
+    marginTop: Spacing.half,
   },
   option: {
     minHeight: 40,
     justifyContent: 'center',
-    paddingHorizontal: Spacing.one + Spacing.half,
+    paddingHorizontal: Spacing.two,
     borderRadius: Radius.pill,
   },
   confirm: {

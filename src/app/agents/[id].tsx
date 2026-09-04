@@ -23,7 +23,7 @@ import { GlassSurface } from '@/components/ui/glass-surface';
 import { Screen } from '@/components/ui/screen';
 import { ScrollEdgeFrame } from '@/components/ui/scroll-edge-frame';
 import { ThemedText } from '@/components/themed-text';
-import { Colors, Fonts, Radius, Spacing } from '@/constants/theme';
+import { Colors, Fonts, Radius, ScrollEdgeFade, Spacing } from '@/constants/theme';
 import {
   providerLabel,
   statusLabel,
@@ -237,7 +237,11 @@ export default function AgentConversationScreen() {
               <ThemedText type="small">Reconnecting</ThemedText>
             </GlassSurface>
           ) : null}
-          <ScrollEdgeFrame inverted>
+          <ScrollEdgeFrame
+            inverted
+            // The fade is what stops rows reading through the gaps between the
+            // composer's stacked panels, so it has to reach as far as they do.
+            bottomHeight={Math.max(ScrollEdgeFade.bottomHeight, composerHeight)}>
             {(onScroll) => (
               <FlatList
                 ref={listRef}

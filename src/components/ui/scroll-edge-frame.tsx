@@ -24,6 +24,13 @@ type Props = {
    * them.
    */
   inverted?: boolean;
+  /**
+   * How far the closing fade reaches. Defaults to the token, but a screen with
+   * chrome floating over the list should pass that chrome's height: the fade is
+   * what stops rows reading through the gaps between floating panels, so a
+   * fade shorter than the chrome leaves a band where they show through.
+   */
+  bottomHeight?: number;
 };
 
 export function ScrollEdgeFrame({
@@ -32,6 +39,7 @@ export function ScrollEdgeFrame({
   top = true,
   bottom = true,
   inverted = false,
+  bottomHeight: bottomReach = bottomHeight,
 }: Props) {
   const blurTarget = useRef<View | null>(null);
   const [topOpacity] = useState(() => new Animated.Value(0));
@@ -90,7 +98,11 @@ export function ScrollEdgeFrame({
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
           pointerEvents="none"
-          style={[styles.edge, styles.bottom, { opacity: bottomOpacity }]}>
+          style={[
+            styles.edge,
+            styles.bottom,
+            { height: bottomReach, opacity: bottomOpacity },
+          ]}>
           {supportsCroppedEdgeBlur ? (
             <BlurView
               blurTarget={blurTarget}
