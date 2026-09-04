@@ -1,10 +1,10 @@
 import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { glassRim } from '@/components/ui/glass-surface';
-import { Fonts, Radius, Spacing } from '@/constants/theme';
+import { ControlHeight, Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
-type Variant = 'primary' | 'secondary';
+type Variant = 'primary' | 'secondary' | 'danger';
 
 type Props = {
   label: string;
@@ -22,9 +22,7 @@ export function AppButton({
   accessibilityHint,
 }: Props) {
   const theme = useTheme();
-  const backgroundColor = variant === 'primary' ? theme.accent : theme.glassStrong;
-  const color = variant === 'secondary' ? theme.text : theme.onAccent;
-  const borderColor = variant === 'secondary' ? theme.glassBorder : backgroundColor;
+  const { backgroundColor, color, borderColor } = TONES[variant](theme);
 
   return (
     <Pressable
@@ -48,9 +46,37 @@ export function AppButton({
   );
 }
 
+type Theme = ReturnType<typeof useTheme>;
+
+/**
+ * What each variant is made of. `danger` is an outline rather than a fill: the
+ * destructive action is never the one being encouraged, so it carries the
+ * warning in its colour without also carrying the weight of a filled button.
+ */
+const TONES: Record<
+  Variant,
+  (theme: Theme) => { backgroundColor: string; color: string; borderColor: string }
+> = {
+  primary: (theme) => ({
+    backgroundColor: theme.accent,
+    color: theme.onAccent,
+    borderColor: theme.accent,
+  }),
+  secondary: (theme) => ({
+    backgroundColor: theme.glassStrong,
+    color: theme.text,
+    borderColor: theme.glassBorder,
+  }),
+  danger: (theme) => ({
+    backgroundColor: 'transparent',
+    color: theme.danger,
+    borderColor: theme.danger,
+  }),
+};
+
 const styles = StyleSheet.create({
   button: {
-    minHeight: 48,
+    minHeight: ControlHeight.regular,
     borderRadius: Radius.pill,
     alignItems: 'center',
     justifyContent: 'center',

@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { Spacing } from '@/constants/theme';
+import { ControlHeight, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 export type ChipOption = {
@@ -61,7 +61,7 @@ export function ChipPicker({ label, options, selectedId, onSelect }: Props) {
   );
 }
 
-const CHIP_HEIGHT = 36;
+const CHIP_HEIGHT = ControlHeight.compact;
 
 const styles = StyleSheet.create({
   group: {

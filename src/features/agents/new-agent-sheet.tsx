@@ -6,7 +6,7 @@ import { AppIcon } from '@/components/ui/app-icon';
 import { TextField } from '@/components/ui/text-field';
 import { SheetModal, SheetPanel } from '@/components/ui/sheet';
 import { ThemedText } from '@/components/themed-text';
-import { Radius, Spacing } from '@/constants/theme';
+import { ControlHeight, Radius, Spacing } from '@/constants/theme';
 import {
   launchableAgentProviderSchema,
   providerLabel,
@@ -267,11 +267,12 @@ const styles = StyleSheet.create({
   },
   provider: {
     width: '48.5%',
-    minHeight: 62,
+    minHeight: ControlHeight.regular,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.one,
     paddingHorizontal: Spacing.one + Spacing.half,
+    paddingVertical: Spacing.half,
     borderWidth: 1,
     borderRadius: Radius.control,
   },
@@ -286,11 +287,12 @@ const styles = StyleSheet.create({
     gap: Spacing.one,
   },
   space: {
-    minHeight: 58,
+    minHeight: ControlHeight.row,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.one,
     paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.half,
     borderWidth: 1,
     borderRadius: Radius.control,
   },
@@ -299,11 +301,12 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   permissions: {
-    minHeight: 64,
+    minHeight: ControlHeight.row,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
     paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.half,
     borderWidth: 1,
     borderRadius: Radius.control,
   },

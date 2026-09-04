@@ -6,7 +6,7 @@ import { AppButton } from '@/components/ui/app-button';
 import { AppIcon } from '@/components/ui/app-icon';
 import { SheetModal, SheetPanel } from '@/components/ui/sheet';
 import { TextField } from '@/components/ui/text-field';
-import { Radius, Spacing } from '@/constants/theme';
+import { ControlHeight, Radius, Spacing } from '@/constants/theme';
 import type { CreateSpaceInput } from '@/domain/herdr';
 import { RemoteFolderPicker } from '@/features/files/remote-folder-picker';
 import { useDockContentInset } from '@/features/navigation/floating-dock';
@@ -174,17 +174,18 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
   },
   device: {
-    minHeight: 62,
+    minHeight: ControlHeight.row,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.one,
     paddingHorizontal: Spacing.one + Spacing.half,
+    paddingVertical: Spacing.half,
     borderWidth: 1,
     borderRadius: Radius.control,
   },
   deviceIcon: {
-    width: 38,
-    height: 38,
+    width: ControlHeight.compact,
+    height: ControlHeight.compact,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 12,
@@ -194,10 +195,10 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   folderPickerButton: {
-    width: 40,
-    height: 40,
+    width: ControlHeight.compact,
+    height: ControlHeight.compact,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 14,
+    borderRadius: 12,
   },
 });

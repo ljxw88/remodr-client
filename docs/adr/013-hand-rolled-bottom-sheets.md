@@ -71,3 +71,15 @@ rather than the idea.
 - The exit must survive interruption: a re-layout must not restart the entrance
   mid-close, and the close callback must fire however the animation ends.
 - Do not add a gesture library for sheets without adding the gestures.
+- A control inside a sheet takes its height from `ControlHeight` in
+  `constants/theme.ts`, and its horizontal inset from the panel rather than
+  from its own content style. There are three heights on purpose: `compact` for
+  a chip, an icon tile or a button tucked inside another control, `regular` for
+  a button, a text field or a single-line row, and `row` for a row carrying an
+  icon or a second line. A fourth number is how one sheet ended up stacking a
+  36, a 46, a 48, a 58 and a 64 that no one had chosen.
+- Pair a minimum height with vertical padding small enough that the minimum is
+  what governs at the default font scale. Padding that already exceeds it makes
+  the token decorative and the row a few points taller than its neighbours.
+- An icon-only control may sit at `regular` rather than Android's 48dp minimum
+  target, but only with `hitSlop` making up the difference.

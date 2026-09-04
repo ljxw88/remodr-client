@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { StyleSheet, TextInput, View, type KeyboardTypeOptions, type TextInputProps } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { Fonts, Radius, Spacing } from '@/constants/theme';
+import { Fonts, ControlHeight, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 type Props = {
@@ -96,7 +96,7 @@ const styles = StyleSheet.create({
     gap: Spacing.one,
   },
   inputFrame: {
-    minHeight: 48,
+    minHeight: ControlHeight.regular,
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
@@ -104,7 +104,9 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    minHeight: 46,
+    // The frame's own minimum, less its border, so the field is one height
+    // rather than two that disagree by a couple of points.
+    minHeight: ControlHeight.regular - 2,
     paddingHorizontal: Spacing.two,
     fontSize: 16,
     letterSpacing: -0.16,

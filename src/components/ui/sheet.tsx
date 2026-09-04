@@ -22,7 +22,7 @@ import {
 
 import { AppIcon } from '@/components/ui/app-icon';
 import { glassRim } from '@/components/ui/glass-surface';
-import { Radius, Spacing } from '@/constants/theme';
+import { ControlHeight, Radius, Spacing } from '@/constants/theme';
 import { useReduceMotion } from '@/hooks/use-reduce-motion';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -287,9 +287,11 @@ const styles = StyleSheet.create({
     top: Spacing.one,
     right: Spacing.one,
     zIndex: 1,
-    // 48dp is Android's minimum touch target; 44 is the iOS figure.
-    width: 48,
-    height: 48,
+    // Drawn at the height everything else in the sheet is drawn at. The slack
+    // that leaves against Android's 48dp minimum target is made up by the
+    // hitSlop, which costs nothing on screen.
+    width: ControlHeight.regular,
+    height: ControlHeight.regular,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -5,7 +5,7 @@ import { AppButton } from '@/components/ui/app-button';
 import { AppIcon, type AppIconName } from '@/components/ui/app-icon';
 import { SheetModal, SheetPanel } from '@/components/ui/sheet';
 import { ThemedText } from '@/components/themed-text';
-import { Fonts, Radius, Spacing } from '@/constants/theme';
+import { ControlHeight, Fonts, Radius, Spacing } from '@/constants/theme';
 import { useSubscription } from '@/features/subscription/use-subscription';
 import { useDockContentInset } from '@/features/navigation/floating-dock';
 import { useTheme } from '@/hooks/use-theme';
@@ -286,8 +286,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     right: 0,
-    width: 44,
-    height: 44,
+    width: ControlHeight.regular,
+    height: ControlHeight.regular,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: Radius.pill,
@@ -322,8 +322,8 @@ const styles = StyleSheet.create({
     gap: Spacing.one + Spacing.half,
   },
   featureIconFrame: {
-    width: 34,
-    height: 34,
+    width: ControlHeight.compact,
+    height: ControlHeight.compact,
     borderRadius: Radius.tag,
     alignItems: 'center',
     justifyContent: 'center',
@@ -334,17 +334,19 @@ const styles = StyleSheet.create({
   },
   featureDivider: {
     height: StyleSheet.hairlineWidth,
-    marginLeft: 46,
+    // Starts where the copy starts, past the icon and the gap after it.
+    marginLeft: ControlHeight.compact + Spacing.one + Spacing.half,
   },
   planOptions: {
     gap: Spacing.one,
   },
   planCard: {
+    minHeight: ControlHeight.row,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: Spacing.two,
-    paddingVertical: Spacing.one + Spacing.half,
+    paddingVertical: Spacing.half,
     borderRadius: Radius.control,
     borderWidth: 1.5,
   },

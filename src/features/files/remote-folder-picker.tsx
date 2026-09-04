@@ -13,7 +13,7 @@ import { AppIcon } from '@/components/ui/app-icon';
 import { RemotePathBar } from '@/features/files/remote-path-bar';
 import { SheetPanel } from '@/components/ui/sheet';
 import { ThemedText } from '@/components/themed-text';
-import { Radius, Spacing } from '@/constants/theme';
+import { ControlHeight, Radius, Spacing } from '@/constants/theme';
 import type { RemoteFile } from '@/domain/remote';
 import {
   childRemoteFolderPath,
@@ -226,8 +226,8 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   iconButton: {
-    width: 44,
-    height: 44,
+    width: ControlHeight.regular,
+    height: ControlHeight.regular,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: Radius.pill,
@@ -237,17 +237,18 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.one,
   },
   folder: {
-    minHeight: 58,
+    minHeight: ControlHeight.row,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.one + Spacing.half,
     paddingHorizontal: Spacing.one + Spacing.half,
+    paddingVertical: Spacing.half,
     borderWidth: 1,
     borderRadius: Radius.control,
   },
   folderIcon: {
-    width: 36,
-    height: 36,
+    width: ControlHeight.compact,
+    height: ControlHeight.compact,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 11,

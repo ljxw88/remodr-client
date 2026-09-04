@@ -103,6 +103,8 @@ export function AgentTuningSheet({ agent, onClose }: Props) {
 const styles = StyleSheet.create({
   content: {
     gap: Spacing.two,
-    padding: Spacing.two,
+    // Horizontal inset comes from the panel, which every sheet shares. Adding
+    // it again here set this sheet in from the edge further than the others.
+    paddingVertical: Spacing.two,
   },
 });

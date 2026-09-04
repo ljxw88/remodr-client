@@ -285,7 +285,7 @@ const styles = StyleSheet.create({
     borderRadius: OPTION_HEIGHT / 2,
   },
   confirm: {
-    minHeight: 40,
+    minHeight: OPTION_HEIGHT,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: Radius.pill,

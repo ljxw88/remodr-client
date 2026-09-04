@@ -134,4 +134,24 @@ export const Spacing = {
   five: 48,
 } as const;
 
+/**
+ * The three heights a control is built to.
+ *
+ * Three, so that a panel reads as a set of related things rather than a ladder
+ * of near-misses. Before this, one sheet stacked a 36, a 46, a 48, a 58 and a
+ * 64 on top of each other, and not one of those gaps was a decision anybody
+ * had made.
+ *
+ * Each is a minimum, never a fixed size: at a large font scale the content
+ * grows past it rather than being clipped by it.
+ */
+export const ControlHeight = {
+  /** A chip, an icon tile, or a button tucked inside another control. */
+  compact: 36,
+  /** A button, a text field, or a row of a single line. */
+  regular: 44,
+  /** A row carrying an icon, or a name with a second line under it. */
+  row: 56,
+} as const;
+
 export const MaxContentWidth = 1200;

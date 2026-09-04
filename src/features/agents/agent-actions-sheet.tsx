@@ -1,14 +1,13 @@
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { Alert, ScrollView, StyleSheet } from 'react-native';
 
 import { AppButton } from '@/components/ui/app-button';
 import { SheetModal, SheetPanel } from '@/components/ui/sheet';
 import { TextField } from '@/components/ui/text-field';
 import { ThemedText } from '@/components/themed-text';
-import { Radius, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
 import type { RemoteAgent } from '@/domain/herdr';
 import { useDockContentInset } from '@/features/navigation/floating-dock';
-import { useTheme } from '@/hooks/use-theme';
 import { herdrRepository } from '@/services/herdr-repository';
 import { toUserMessage } from '@/utils/user-error';
 
@@ -28,7 +27,6 @@ type Props = {
  * everywhere it appears.
  */
 export function AgentActionsSheet({ agent, onClose, onClosed }: Props) {
-  const theme = useTheme();
   const dockContentInset = useDockContentInset();
   const [name, setName] = useState(agent.title);
   const [busy, setBusy] = useState(false);
@@ -105,23 +103,13 @@ export function AgentActionsSheet({ agent, onClose, onClosed }: Props) {
               disabled={!canRename}
             />
 
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Close this agent"
-              accessibilityState={{ disabled: busy }}
-              disabled={busy}
+            <AppButton
+              label="Close agent"
+              variant="danger"
               onPress={() => confirmClose(close)}
-              style={({ pressed }) => [
-                styles.danger,
-                {
-                  borderColor: theme.danger,
-                  opacity: busy ? 0.4 : pressed ? 0.72 : 1,
-                },
-              ]}>
-              <ThemedText type="smallBold" style={{ color: theme.danger }}>
-                Close agent
-              </ThemedText>
-            </Pressable>
+              disabled={busy}
+              accessibilityHint="Stops this agent and ends its conversation"
+            />
 
             {error ? (
               <ThemedText type="caption" themeColor="danger">
@@ -138,13 +126,8 @@ export function AgentActionsSheet({ agent, onClose, onClosed }: Props) {
 const styles = StyleSheet.create({
   content: {
     gap: Spacing.two,
-    padding: Spacing.two,
-  },
-  danger: {
-    minHeight: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderRadius: Radius.control,
+    // Horizontal inset comes from the panel, which every sheet shares. Adding
+    // it again here set this sheet in from the edge further than the others.
+    paddingVertical: Spacing.two,
   },
 });
