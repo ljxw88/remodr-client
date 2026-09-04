@@ -328,8 +328,12 @@ chromatic orb.
   being left refusing to go.
 - Transition length is set by the preset, not by a duration. Android maps each
   preset to a fixed animation resource, so `animationDuration` does nothing
-  there. We use `ios_from_right` (200ms) over `slide_from_right` (400ms):
-  opening a conversation should feel like the tap landed, not like waiting.
+  there. We use `ios_from_right` over `slide_from_right` (400ms): opening a
+  conversation should feel like the tap landed, not like waiting.
+- The preset's own floor is 200ms, and the next preset down is a cut. To get
+  below it, `plugins/with-stack-transition-duration.js` rewrites the preset's
+  animation resources at build time; we run at 100ms. The duration lives in
+  that plugin and changing it needs a rebuild, not a reload.
 - Frosted chrome may only sample a blur target on a screen that is never
   dismissed. A `BlurTargetView` draws nothing from the moment its screen starts
   animating away, so its contents blink out while the screen is still visible;

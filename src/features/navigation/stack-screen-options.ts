@@ -31,13 +31,16 @@ export function useStackScreenOptions(): ScreenOptions {
      * legible over the arriving screen for the length of the animation. A
      * slide never puts both in the same place at once.
      *
-     * This is the only lever on how long that takes. `animationDuration` is an
-     * iOS-only option: react-native-screens hands Android a fixed XML resource
-     * per preset, so the duration is whatever that file says and nothing in JS
-     * can move it. The presets that keep one screen covering the other are
-     * `slide_from_right` at `config_mediumAnimTime` (400ms), this one at
-     * `config_shortAnimTime` (200ms), and `none` at 20ms. We take the middle:
-     * half the wait, still long enough to read as a slide rather than a cut.
+     * How long it takes is set natively, not here. `animationDuration` is an
+     * iOS-only option — react-native-screens' Android `setTransitionDuration`
+     * is literally `= Unit` — and each preset is hard-wired to a fixed
+     * animation resource: `slide_from_right` is 400ms, this one is 200ms, and
+     * the only thing below that is `none` at 20ms, which is a cut. To get a
+     * value in between, `plugins/with-stack-transition-duration.js` overrides
+     * this preset's four resources at build time. It currently runs at 100ms.
+     *
+     * So there are two things to change and they live apart: the preset here,
+     * and its duration in that plugin. Changing the plugin needs a rebuild.
      *
      * `ios_from_right` also drifts the outgoing screen 30% to the left instead
      * of pushing it a full width off, so the two move together and the arrival
