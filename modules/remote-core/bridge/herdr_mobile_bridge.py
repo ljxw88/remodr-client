@@ -29,6 +29,21 @@ BYPASS_ARGUMENTS = {
     "copilot": ["--allow-all-tools"],
     "opencode": ["--auto"],
 }
+SHELL_READY_TIMEOUT = 20
+"""How long a freshly made pane is given to reach its shell prompt."""
+
+MAX_AGENT_NAME = 60
+"""Longest name a tab label will carry, so one cannot fill the list row."""
+
+TUNING_ARGUMENTS = {
+    # Only Copilot for now. The others take a model differently, or not at all
+    # from the command line, and guessing a flag would fail at startup with
+    # nothing useful to show for it.
+    "copilot": {"model": "--model", "effort": "--effort"},
+}
+
+REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+
 SUBSCRIPTION_RETRY_INITIAL = 0.25
 SUBSCRIPTION_RETRY_MAX = 2.0
 SUBSCRIPTIONS = (
@@ -75,6 +90,8 @@ class Bridge:
         # How long the agent's question dialog is given to redraw between
         # keystroke batches. An attribute so tests can drive it at zero.
         self.dialog_settle_seconds = 0.25
+        # Pane id -> the Copilot session id this app asked that pane to open.
+        self.started_sessions: dict[str, str] = {}
         self.output_lock = threading.Lock()
         self.state_lock = threading.Lock()
         self.refresh_lock = threading.Lock()
@@ -203,6 +220,10 @@ class Bridge:
             return {"accepted": True}
         if action == "agent.create":
             return self._create_agent(payload)
+        if action == "agent.rename":
+            return self._rename_agent(payload)
+        if action == "agent.close":
+            return self._close_agent(payload)
         if action == "workspace.create":
             return self._create_workspace(payload)
         if action == "workspace.close":
@@ -380,10 +401,18 @@ class Bridge:
                 continue
             provider = self._provider(raw.get("agent"))
             session = raw.get("agent_session")
+            pane_id = str(raw.get("pane_id") or "")
             provider_session_id = (
                 session.get("value") if isinstance(session, dict) else None
             )
-            agent_id = self._stable_agent_id(str(raw.get("pane_id") or ""))
+            if not provider_session_id:
+                # Herdr only learns a session id once the agent writes its
+                # state out, which is after it has done something. For an agent
+                # this app started we already know it, so the conversation can
+                # be read from the first moment rather than falling back to
+                # scraping the terminal.
+                provider_session_id = self.started_sessions.get(pane_id)
+            agent_id = self._stable_agent_id(pane_id)
             workspace_id = str(raw.get("workspace_id") or "")
             capabilities = self._agent_capabilities(provider, provider_session_id)
             agent = {
@@ -418,6 +447,11 @@ class Bridge:
             str(pane.get("pane_id"))
             for pane in (panes if isinstance(panes, list) else [])
             if isinstance(pane, dict) and pane.get("pane_id")
+        }
+        self.started_sessions = {
+            pane: session
+            for pane, session in self.started_sessions.items()
+            if pane in live_pane_ids
         }
         for pane_id, pending in list(self.pending_agents.items()):
             if pane_id in detected_pane_ids or pane_id not in live_pane_ids:
@@ -657,6 +691,13 @@ class Bridge:
         provider = payload.get("provider")
         workspace_id = payload.get("workspaceId")
         bypass_permissions = payload.get("bypassPermissions", True)
+        name_input = payload.get("name")
+        label = (
+            name_input.strip()[:MAX_AGENT_NAME]
+            if isinstance(name_input, str) and name_input.strip()
+            else ""
+        )
+        tuning = self._tuning_arguments(provider, payload)
         if provider not in SUPPORTED_PROVIDERS:
             raise BridgeError("INVALID_PROVIDER", "Unsupported agent provider.")
         if not isinstance(workspace_id, str) or not workspace_id:
@@ -692,7 +733,10 @@ class Bridge:
             {
                 "focus": False,
                 "workspace_id": workspace_id,
-                "label": provider,
+                # The label is what the agent is called in the list. Without
+                # one every new agent arrives as "GitHub Copilot", which is
+                # unfindable once there is more than one.
+                "label": label or provider,
             },
         )
         root_pane = tab_result.get("root_pane")
@@ -703,7 +747,9 @@ class Bridge:
             raise BridgeError("INVALID_HERDR_RESPONSE", "New agent pane is missing.")
 
         name = provider
-        args = BYPASS_ARGUMENTS[provider] if bypass_permissions else []
+        args = list(BYPASS_ARGUMENTS[provider]) if bypass_permissions else []
+        args.extend(tuning)
+        session_id = self._new_session_arguments(provider, label, args)
         try:
             try:
                 self._start_agent(name, provider, pane_id, args)
@@ -713,6 +759,9 @@ class Bridge:
                 name = f"{provider}-{uuid.uuid4().hex[:4]}"
                 self._start_agent(name, provider, pane_id, args)
             agent_id = self._stable_agent_id(pane_id)
+            if session_id:
+                with self.state_lock:
+                    self.started_sessions[pane_id] = session_id
             for _ in range(20):
                 self._refresh_runtime()
                 agent = next(
@@ -746,6 +795,105 @@ class Bridge:
             except Exception as cleanup_error:
                 self._diagnostic("AGENT_CLEANUP", repr(cleanup_error))
             raise
+
+    @staticmethod
+    def _new_session_arguments(
+        provider: Any, label: str, args: list[str]
+    ) -> str | None:
+        """Make the agent open a brand new session, and say which one.
+
+        Left to itself Copilot offers to resume, and an unfinished session in
+        the same folder puts a restore picker up instead of a prompt. A new
+        agent then looks empty, and the first message typed at it is swallowed
+        by the picker's search box rather than reaching the agent.
+
+        Naming the session as well when the user named the agent keeps the two
+        the same thing rather than two names for one piece of work.
+        """
+        if str(provider) != "copilot":
+            return None
+        session_id = str(uuid.uuid4())
+        args.extend(["--session-id", session_id])
+        if label:
+            args.extend(["--name", label])
+        return session_id
+
+    @staticmethod
+    def _tuning_arguments(provider: Any, payload: dict[str, Any]) -> list[str]:
+        """Model and reasoning effort, as command-line arguments.
+
+        Both are left off entirely unless asked for, so the agent keeps its own
+        default — which for a model is the CLI picking one, and is the only
+        choice guaranteed to be available on every account.
+        """
+        flags = TUNING_ARGUMENTS.get(str(provider), {})
+        arguments: list[str] = []
+        model = payload.get("model")
+        if "model" in flags and isinstance(model, str) and model.strip():
+            arguments.extend([flags["model"], model.strip()])
+        effort = payload.get("effort")
+        if "effort" in flags and isinstance(effort, str) and effort.strip():
+            if effort not in REASONING_EFFORTS:
+                raise BridgeError("INVALID_EFFORT", "Unsupported reasoning effort.")
+            arguments.extend([flags["effort"], effort])
+        return arguments
+
+    def _rename_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Rename by relabelling the tab the agent sits in.
+
+        Herdr's own agent name is an identifier — lowercase, no spaces, unique
+        among live agents — so it cannot hold what someone would actually call
+        a piece of work. The tab label has no such rules, and the title shown
+        for an agent already prefers it.
+        """
+        agent = self._require_agent(payload)
+        name = payload.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise BridgeError("INVALID_NAME", "A name is required.")
+        tab_id = agent.get("tabId") or agent.get("tab_id")
+        if not isinstance(tab_id, str) or not tab_id:
+            raise BridgeError("AGENT_NOT_FOUND", "This agent has no tab to rename.")
+        self._herdr_request(
+            "tab.rename", {"tab_id": tab_id, "label": name.strip()[:MAX_AGENT_NAME]}
+        )
+        self._refresh_runtime()
+        return {"agentId": agent["id"], "runtime": self.runtime}
+
+    def _close_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Close the agent's pane, which stops the agent with it.
+
+        The pane rather than the tab: an agent started outside this app can be
+        sharing a tab with panes nobody asked us to touch.
+        """
+        agent = self._require_agent(payload)
+        agent_id = agent["id"]
+        pane_id = agent.get("paneId")
+        if not isinstance(pane_id, str) or not pane_id:
+            raise BridgeError("AGENT_NOT_FOUND", "This agent has no pane to close.")
+        self._herdr_request("pane.close", {"pane_id": pane_id})
+        with self.state_lock:
+            self.pending_agents.pop(pane_id, None)
+            self.started_sessions.pop(pane_id, None)
+        try:
+            self._refresh_runtime()
+        except Exception as error:
+            self._diagnostic("AGENT_CLOSE_REFRESH", repr(error))
+            self._remove_agent_from_runtime(agent_id)
+        return {"agentId": agent_id, "runtime": self.runtime}
+
+    def _remove_agent_from_runtime(self, agent_id: str) -> None:
+        with self.refresh_lock:
+            with self.state_lock:
+                self.runtime = {
+                    **self.runtime,
+                    "agents": [
+                        agent
+                        for agent in self.runtime.get("agents", [])
+                        if not isinstance(agent, dict) or agent.get("id") != agent_id
+                    ],
+                    "lastRuntimeEvent": time.time(),
+                }
+                self.raw_agents.pop(agent_id, None)
 
     def _install_pending_agent(
         self,
@@ -814,7 +962,12 @@ class Bridge:
             pinned_terminal_id = self._pane_terminal_id(pane_id)
         except Exception:
             pinned_terminal_id = None
-        deadline = time.monotonic() + 2
+        # A pane this app just made has nothing in it but a shell starting up,
+        # so "busy" only ever means "not at its prompt yet" and waiting is
+        # always the right answer. Two seconds was not enough for a shell with
+        # a real profile behind it — version managers, hooks — and the failure
+        # surfaced as a raw herdr message where an agent should have been.
+        deadline = time.monotonic() + SHELL_READY_TIMEOUT
         while True:
             try:
                 self._herdr_request(
@@ -828,16 +981,20 @@ class Bridge:
                 )
                 return
             except BridgeError as error:
-                if (
-                    error.code != "agent_pane_busy"
-                    or time.monotonic() >= deadline
-                    or pinned_terminal_id is None
-                    or not self._pane_shell_still_initializing(
-                        pane_id, pinned_terminal_id
-                    )
+                if error.code != "agent_pane_busy":
+                    raise
+                # A replaced terminal means something other than a slow
+                # profile is going on, and no amount of waiting fixes it.
+                if pinned_terminal_id is None or not self._pane_terminal_unchanged(
+                    pane_id, pinned_terminal_id
                 ):
                     raise
-                time.sleep(0.1)
+                if time.monotonic() >= deadline:
+                    raise BridgeError(
+                        "SHELL_NOT_READY",
+                        "The shell for this agent did not finish starting up.",
+                    ) from error
+                time.sleep(0.2)
 
     def _pane_terminal_id(self, pane_id: str) -> str | None:
         result = self._herdr_request("pane.get", {"pane_id": pane_id})
@@ -845,83 +1002,18 @@ class Bridge:
         terminal_id = pane.get("terminal_id") if isinstance(pane, dict) else None
         return terminal_id if isinstance(terminal_id, str) else None
 
-    def _pane_shell_still_initializing(
-        self, pane_id: str, pinned_terminal_id: str
-    ) -> bool:
+    def _pane_terminal_unchanged(self, pane_id: str, pinned_terminal_id: str) -> bool:
+        """Whether the pane still holds the terminal we started waiting on.
+
+        This is the whole test for whether waiting is worthwhile. Asking the
+        process list whether a shell looks like it is still starting up is a
+        guess, and it guessed wrong for shells with a real profile behind them
+        — version managers, hooks — which then failed instead of waiting.
+        """
         try:
-            if self._pane_terminal_id(pane_id) != pinned_terminal_id:
-                return False
-            result = self._herdr_request(
-                "pane.process_info", {"pane_id": pane_id}
-            )
-            process_info = result.get("process_info")
-            return self._process_info_shows_shell_initialization(process_info)
+            return self._pane_terminal_id(pane_id) == pinned_terminal_id
         except Exception:
             return False
-
-    @staticmethod
-    def _process_info_shows_shell_initialization(process_info: Any) -> bool:
-        if not isinstance(process_info, dict):
-            return False
-        shell_pid = Bridge._exact_uint64(process_info.get("shell_pid"))
-        foreground_group = Bridge._exact_uint64(
-            process_info.get("foreground_process_group_id")
-        )
-        if shell_pid is None or foreground_group != shell_pid:
-            return False
-        processes = process_info.get("foreground_processes")
-        if not isinstance(processes, list):
-            return False
-        shell_names = {
-            "sh",
-            "bash",
-            "dash",
-            "zsh",
-            "fish",
-            "ksh",
-            "mksh",
-            "csh",
-            "tcsh",
-            "elvish",
-            "xonsh",
-            "nu",
-            "pwsh",
-            "powershell",
-            "cmd",
-        }
-        for process in processes:
-            if not isinstance(process, dict):
-                continue
-            process_pid = Bridge._exact_uint64(process.get("pid"))
-            if process_pid != shell_pid:
-                continue
-            candidates = []
-            name = process.get("name")
-            argv = process.get("argv")
-            if isinstance(name, str):
-                candidates.append(name)
-            if isinstance(argv, list) and argv and isinstance(argv[0], str):
-                candidates.append(argv[0])
-            for candidate in candidates:
-                normalized = candidate.replace("\\", "/").rsplit("/", 1)[-1]
-                normalized = normalized.lstrip("-").lower()
-                if normalized.endswith(".exe"):
-                    normalized = normalized[:-4]
-                if normalized in shell_names:
-                    return True
-        return False
-
-    @staticmethod
-    def _exact_uint64(value: Any) -> int | None:
-        if isinstance(value, bool):
-            return None
-        if isinstance(value, int):
-            integer = value
-        elif isinstance(value, float) and value.is_integer():
-            integer = int(value)
-        else:
-            return None
-        return integer if 0 <= integer <= 18_446_744_073_709_551_615 else None
 
     def _agent_display_title(
         self,

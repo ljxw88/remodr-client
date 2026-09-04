@@ -429,6 +429,51 @@ class BridgeProtocolTest(unittest.TestCase):
 
         self.assertEqual(starts, 2)
 
+    def test_agent_start_waits_out_a_shell_with_a_slow_profile(self):
+        # The pane belongs to a tab this app just made, so "busy" only ever
+        # means the shell has not reached its prompt. Giving up produced a raw
+        # herdr message where an agent should have been.
+        bridge = Bridge()
+        attempts = 0
+
+        def request(method, _params):
+            nonlocal attempts
+            if method == "pane.get":
+                return {"pane": {"terminal_id": "terminal-1"}}
+            if method == "agent.start":
+                attempts += 1
+                if attempts < 12:
+                    raise BridgeError("agent_pane_busy", "Pane is busy")
+                return {}
+            self.fail(f"Unexpected request: {method}")
+
+        with (
+            patch.object(bridge, "_herdr_request", side_effect=request),
+            patch("herdr_mobile_bridge.time.sleep"),
+        ):
+            bridge._start_agent("copilot", "copilot", "p2", [])
+        self.assertEqual(attempts, 12)
+
+    def test_agent_start_gives_up_with_something_sayable(self):
+        bridge = Bridge()
+        clock = iter([0.0] + [100.0] * 10)
+
+        def request(method, _params):
+            if method == "pane.get":
+                return {"pane": {"terminal_id": "terminal-1"}}
+            if method == "agent.start":
+                raise BridgeError("agent_pane_busy", "Pane is busy")
+            self.fail(f"Unexpected request: {method}")
+
+        with (
+            patch.object(bridge, "_herdr_request", side_effect=request),
+            patch("herdr_mobile_bridge.time.sleep"),
+            patch("herdr_mobile_bridge.time.monotonic", side_effect=lambda: next(clock)),
+        ):
+            with self.assertRaises(BridgeError) as caught:
+                bridge._start_agent("copilot", "copilot", "p2", [])
+        self.assertEqual(caught.exception.code, "SHELL_NOT_READY")
+
     def test_agent_start_preserves_busy_error_if_terminal_identity_changes(self):
         bridge = Bridge()
         terminal_ids = iter(("terminal-1", "terminal-2"))
@@ -443,19 +488,6 @@ class BridgeProtocolTest(unittest.TestCase):
         with patch.object(bridge, "_herdr_request", side_effect=request):
             with self.assertRaisesRegex(BridgeError, "Pane is busy"):
                 bridge._start_agent("copilot", "copilot", "p2", [])
-
-    def test_shell_initialization_accepts_exact_float_ids_and_argv_shell(self):
-        self.assertTrue(
-            Bridge._process_info_shows_shell_initialization(
-                {
-                    "shell_pid": 42.0,
-                    "foreground_process_group_id": 42,
-                    "foreground_processes": [
-                        {"pid": 42.0, "name": "wrapper", "argv": ["-zsh"]}
-                    ],
-                }
-            )
-        )
 
     def test_pending_agent_survives_snapshots_until_its_pane_closes(self):
         bridge = Bridge()
@@ -982,6 +1014,125 @@ class HumanQuestionTest(unittest.TestCase):
             [method for method, _ in sent],
             ["agent.prompt", "agent.send_keys", "agent.send_keys", "agent.send_keys"],
         )
+
+
+class AgentManagementTest(unittest.TestCase):
+    """Naming, tuning, renaming and closing a single agent."""
+
+    def test_a_model_and_effort_become_command_line_arguments(self):
+        self.assertEqual(
+            Bridge._tuning_arguments("copilot", {"model": "gpt-5.4", "effort": "high"}),
+            ["--model", "gpt-5.4", "--effort", "high"],
+        )
+
+    def test_nothing_is_passed_when_nothing_was_chosen(self):
+        # No model means the CLI picks one, which is the only choice that is
+        # available on every account.
+        self.assertEqual(Bridge._tuning_arguments("copilot", {}), [])
+        self.assertEqual(
+            Bridge._tuning_arguments("copilot", {"model": "", "effort": None}), []
+        )
+
+    def test_other_providers_are_left_alone(self):
+        # They take a model differently, or not from the command line at all,
+        # and a guessed flag would fail at startup.
+        self.assertEqual(
+            Bridge._tuning_arguments("claude", {"model": "gpt-5.4", "effort": "high"}), []
+        )
+
+    def test_an_unknown_effort_is_refused_rather_than_passed_on(self):
+        with self.assertRaises(BridgeError) as caught:
+            Bridge._tuning_arguments("copilot", {"effort": "ludicrous"})
+        self.assertEqual(caught.exception.code, "INVALID_EFFORT")
+
+    def test_a_new_agent_is_made_to_open_a_brand_new_session(self):
+        # Left to itself Copilot offers to resume, and an unfinished session in
+        # the same folder puts a restore picker up instead of a prompt. The new
+        # agent then looks empty, and the first message typed at it goes into
+        # the picker's search box rather than to the agent.
+        args = []
+        session_id = Bridge._new_session_arguments("copilot", "Tidy the changelog", args)
+        self.assertEqual(
+            args, ["--session-id", session_id, "--name", "Tidy the changelog"]
+        )
+        self.assertIsNotNone(session_id)
+
+    def test_an_unnamed_agent_still_gets_its_own_session(self):
+        args = []
+        session_id = Bridge._new_session_arguments("copilot", "", args)
+        self.assertEqual(args, ["--session-id", session_id])
+
+    def test_only_copilot_is_told_which_session_to_open(self):
+        args = []
+        self.assertIsNone(Bridge._new_session_arguments("claude", "Name", args))
+        self.assertEqual(args, [])
+
+    def test_a_started_session_is_known_before_herdr_reports_it(self):
+        # Herdr only learns the id once the agent writes its state out. Until
+        # then the conversation would fall back to scraping the terminal.
+        bridge = Bridge()
+        bridge.started_sessions = {"w1:p1": "session-abc"}
+        snapshot = {
+            "agents": [{"pane_id": "w1:p1", "agent": "copilot", "workspace_id": "w1"}],
+            "workspaces": [],
+            "tabs": [],
+            "panes": [{"pane_id": "w1:p1"}],
+        }
+        with patch.object(bridge, "_herdr_request", return_value={"snapshot": snapshot}):
+            bridge._refresh_runtime()
+        self.assertEqual(
+            bridge.runtime["agents"][0]["providerSessionId"], "session-abc"
+        )
+
+    def test_renaming_relabels_the_tab_the_agent_sits_in(self):
+        # Herdr's agent name is an identifier and cannot hold a sentence, but
+        # the title shown for an agent already prefers the tab's label.
+        bridge = Bridge()
+        sent = []
+        bridge._herdr_request = lambda method, params: sent.append((method, params)) or {}
+        bridge._refresh_runtime = lambda: None
+        bridge.raw_agents = {"a1": {"id": "a1", "paneId": "p1", "tabId": "w1:t1"}}
+        bridge._rename_agent({"agentId": "a1", "name": "  Refactor the parser  "})
+        self.assertEqual(
+            sent, [("tab.rename", {"tab_id": "w1:t1", "label": "Refactor the parser"})]
+        )
+
+    def test_a_name_is_required_to_rename(self):
+        bridge = Bridge()
+        bridge.raw_agents = {"a1": {"id": "a1", "paneId": "p1", "tabId": "w1:t1"}}
+        with self.assertRaises(BridgeError) as caught:
+            bridge._rename_agent({"agentId": "a1", "name": "   "})
+        self.assertEqual(caught.exception.code, "INVALID_NAME")
+
+    def test_closing_an_agent_closes_its_pane_not_its_tab(self):
+        # An agent started outside this app can share a tab with panes nobody
+        # asked us to touch.
+        bridge = Bridge()
+        sent = []
+        bridge._herdr_request = lambda method, params: sent.append((method, params)) or {}
+        bridge._refresh_runtime = lambda: None
+        bridge.raw_agents = {"a1": {"id": "a1", "paneId": "p1", "tabId": "w1:t1"}}
+        bridge._close_agent({"agentId": "a1"})
+        self.assertEqual(sent, [("pane.close", {"pane_id": "p1"})])
+
+    def test_a_closed_agent_leaves_the_list_even_if_the_refresh_fails(self):
+        bridge = Bridge()
+
+        def request(method, params):
+            return {}
+
+        def failing_refresh():
+            raise OSError("herdr went away")
+
+        bridge._herdr_request = request
+        bridge._refresh_runtime = failing_refresh
+        bridge.raw_agents = {"a1": {"id": "a1", "paneId": "p1", "tabId": "w1:t1"}}
+        bridge.runtime = {"agents": [{"id": "a1"}, {"id": "a2"}]}
+        result = bridge._close_agent({"agentId": "a1"})
+        self.assertEqual(
+            [agent["id"] for agent in result["runtime"]["agents"]], ["a2"]
+        )
+        self.assertNotIn("a1", bridge.raw_agents)
 
 
 if __name__ == "__main__":
