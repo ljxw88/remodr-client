@@ -18,6 +18,12 @@ type Props = {
   onScroll?: ScrollHandler;
   top?: boolean;
   bottom?: boolean;
+  /**
+   * Set when wrapping an inverted list. Offset zero is then the *bottom* of the
+   * content rather than the top, so the two fades swap which measurement drives
+   * them.
+   */
+  inverted?: boolean;
 };
 
 export function ScrollEdgeFrame({
@@ -25,6 +31,7 @@ export function ScrollEdgeFrame({
   onScroll,
   top = true,
   bottom = true,
+  inverted = false,
 }: Props) {
   const blurTarget = useRef<View | null>(null);
   const [topOpacity] = useState(() => new Animated.Value(0));
@@ -34,11 +41,13 @@ export function ScrollEdgeFrame({
       const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
       const remaining =
         contentSize.height - layoutMeasurement.height - contentOffset.y;
-      topOpacity.setValue(Math.min(1, Math.max(0, contentOffset.y / 18)));
-      bottomOpacity.setValue(Math.min(1, Math.max(0, remaining / 28)));
+      const fromStart = inverted ? remaining : contentOffset.y;
+      const fromEnd = inverted ? contentOffset.y : remaining;
+      topOpacity.setValue(Math.min(1, Math.max(0, fromStart / 18)));
+      bottomOpacity.setValue(Math.min(1, Math.max(0, fromEnd / 28)));
       onScroll?.(event);
     },
-    [bottomOpacity, onScroll, topOpacity],
+    [bottomOpacity, inverted, onScroll, topOpacity],
   );
   const scrollContent = children(handleScroll);
   /**

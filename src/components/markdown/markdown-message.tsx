@@ -18,6 +18,13 @@ const REMEND_OPTIONS = {
 
 export function MarkdownMessage({ children }: { children: string }) {
   const { width } = useWindowDimensions();
+  /**
+   * Memoised because `useMarkdown` keys its parser on the renderer's identity
+   * and its output on that parser. A renderer built inline would be a new
+   * object every render, so every re-render of the transcript would re-lex and
+   * re-parse every message — and the row heights would churn with it.
+   */
+  const renderer = useMemo(() => new ChatMarkdownRenderer(width), [width]);
   const value = useMemo(() => {
     const clamped = children.slice(0, MAX_MARKDOWN_LENGTH);
     try {
@@ -27,11 +34,11 @@ export function MarkdownMessage({ children }: { children: string }) {
     }
   }, [children]);
 
-  const elements = useMarkdown(value, {
-    renderer: new ChatMarkdownRenderer(width),
-    styles: markdownStyles,
-    colorScheme: 'dark',
-  });
+  const options = useMemo(
+    () => ({ renderer, styles: markdownStyles, colorScheme: 'dark' as const }),
+    [renderer],
+  );
+  const elements = useMarkdown(value, options);
 
   if (!value.trim()) {
     return null;

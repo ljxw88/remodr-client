@@ -32,6 +32,7 @@ import {
   type RemoteAgent,
 } from '@/domain/herdr';
 import { useAgentConversation, useHerdr } from '@/features/agents/use-herdr';
+import { useRevealedText } from '@/features/agents/use-revealed-text';
 import {
   groupToolActivity,
   toolActivitySummary,
@@ -62,13 +63,15 @@ export default function AgentConversationScreen() {
   const [reloadToken, setReloadToken] = useState(0);
   const [sending, setSending] = useState(false);
   const listRef = useRef<FlatList<ConversationDisplayItem>>(null);
-  const hasFollowedInitialContent = useRef(false);
-  const followLatestOnLayout = useRef(true);
+  /**
+   * Newest first, because the transcript renders inverted. Offset zero is then
+   * the newest message, so opening a conversation lands at the bottom by
+   * construction rather than by scrolling there once the rows have measured.
+   */
   const displayItems = useMemo(
-    () => groupToolActivity(conversation?.items ?? []),
+    () => groupToolActivity(conversation?.items ?? []).reverse(),
     [conversation?.items],
   );
-  const latestItemMarker = displayItemMarker(displayItems[displayItems.length - 1]);
   const activeTool = useMemo(
     () =>
       [...(conversation?.items ?? [])]
@@ -128,20 +131,6 @@ export default function AgentConversationScreen() {
   ]);
 
   useEffect(() => {
-    if (!latestItemMarker) {
-      return;
-    }
-    followLatestOnLayout.current = true;
-    const timer = setTimeout(() => {
-      listRef.current?.scrollToEnd({
-        animated: hasFollowedInitialContent.current,
-      });
-      hasFollowedInitialContent.current = true;
-    }, 50);
-    return () => clearTimeout(timer);
-  }, [latestItemMarker]);
-
-  useEffect(() => {
     if (!id) {
       return;
     }
@@ -184,6 +173,12 @@ export default function AgentConversationScreen() {
         await herdrRepository.sendMessage(agent.id, text);
       }
       setDraft('');
+      // The one scroll left in this screen, and the only one that is asked
+      // for: sending is a statement that you want to watch the reply. On an
+      // inverted list offset zero is the newest message, so unlike
+      // `scrollToEnd` this cannot land halfway up a list still measuring
+      // itself.
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
       setTimeout(() => {
         void herdrRepository.loadConversation(agent.id).catch((error) => {
           console.warn('[CONVERSATION] Could not refresh after send', error);
@@ -225,43 +220,45 @@ export default function AgentConversationScreen() {
               <ThemedText type="small">Reconnecting</ThemedText>
             </GlassSurface>
           ) : null}
-          <ScrollEdgeFrame>
+          <ScrollEdgeFrame inverted>
             {(onScroll) => (
               <FlatList
                 ref={listRef}
+                inverted
                 data={displayItems}
                 keyExtractor={(item) => item.id}
-                renderItem={({ item }) => (
+                renderItem={({ item, index }) => (
                   <ConversationRow
                     item={item}
                     agent={agent}
                     onEdit={(text) => setDraft(text)}
-                    onTimelineInteraction={() => {
-                      followLatestOnLayout.current = false;
-                    }}
+                    streaming={index === 0 && showWorking}
                   />
                 )}
                 onScroll={onScroll}
                 scrollEventThrottle={16}
                 showsVerticalScrollIndicator={false}
                 initialNumToRender={20}
-                initialScrollIndex={0}
                 maxToRenderPerBatch={20}
                 windowSize={7}
                 contentContainerStyle={styles.messages}
-                onLayout={() => {
-                  if (followLatestOnLayout.current) {
-                    listRef.current?.scrollToEnd({ animated: false });
-                  }
+                /**
+                 * Holds the reader's place when a message grows or older
+                 * history arrives, instead of shifting the viewport under them.
+                 *
+                 * `autoscrollToTopThreshold` is what makes it follow again once
+                 * they are back at the newest message — "top" here means the
+                 * start of the content, which on an inverted list is the bottom
+                 * of the screen. Without it, a reply that grows while you are
+                 * watching it stays pinned by its first line and writes itself
+                 * off the bottom of the screen.
+                 */
+                maintainVisibleContentPosition={{
+                  minIndexForVisible: 0,
+                  autoscrollToTopThreshold: 24,
                 }}
-                onContentSizeChange={() => {
-                  if (followLatestOnLayout.current) {
-                    listRef.current?.scrollToEnd({ animated: false });
-                    followLatestOnLayout.current = false;
-                    hasFollowedInitialContent.current = true;
-                  }
-                }}
-                ListFooterComponent={
+                // Inverted, so this sits below the newest message.
+                ListHeaderComponent={
                   <View
                     style={[
                       styles.composerSpacer,
@@ -375,26 +372,41 @@ function AgentHeader({ agent }: { agent: RemoteAgent }) {
   );
 }
 
+/**
+ * Split out so the reveal hook only ever runs for a message, never for the
+ * tool rows and banners that share `ConversationRow`.
+ */
+function AssistantMessageRow({
+  markdown,
+  streaming,
+}: {
+  markdown: string;
+  streaming: boolean;
+}) {
+  const revealed = useRevealedText(markdown, streaming);
+  return (
+    <View style={styles.assistantMessage}>
+      <MarkdownMessage>{revealed}</MarkdownMessage>
+    </View>
+  );
+}
+
 function ConversationRow({
   item,
   agent,
   onEdit,
-  onTimelineInteraction,
+  streaming = false,
 }: {
   item: ConversationDisplayItem;
   agent: RemoteAgent;
   onEdit: (text: string) => void;
-  onTimelineInteraction: () => void;
+  /** Only the newest message, and only while the agent is still writing. */
+  streaming?: boolean;
 }) {
   const theme = useTheme();
 
   if (item.kind === 'tool_group') {
-    return (
-      <ToolActivityGroupRow
-        group={item}
-        onToggle={onTimelineInteraction}
-      />
-    );
+    return <ToolActivityGroupRow group={item} />;
   }
 
   if (item.kind === 'user_message') {
@@ -419,11 +431,7 @@ function ConversationRow({
   }
 
   if (item.kind === 'assistant_message') {
-    return (
-      <View style={styles.assistantMessage}>
-        <MarkdownMessage>{item.markdown}</MarkdownMessage>
-      </View>
-    );
+    return <AssistantMessageRow markdown={item.markdown} streaming={streaming} />;
   }
 
   if (item.kind === 'tool_activity') {
@@ -569,13 +577,7 @@ function ToolActivityRow({
   );
 }
 
-function ToolActivityGroupRow({
-  group,
-  onToggle,
-}: {
-  group: ToolActivityGroup;
-  onToggle: () => void;
-}) {
+function ToolActivityGroupRow({ group }: { group: ToolActivityGroup }) {
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);
   return (
@@ -587,10 +589,7 @@ function ToolActivityGroupRow({
       <ToolGroupToggle
         group={group}
         expanded={expanded}
-        onPress={() => {
-          onToggle();
-          setExpanded((current) => !current);
-        }}
+        onPress={() => setExpanded((current) => !current)}
       />
       {expanded ? (
         <View style={[styles.toolDetails, { borderTopColor: theme.border }]}>
@@ -661,26 +660,6 @@ function toolStateLabel(
     default:
       return '';
   }
-}
-
-function displayItemMarker(item?: ConversationDisplayItem): string {
-  if (!item) {
-    return '';
-  }
-  if (item.kind === 'assistant_message') {
-    return `${item.id}:${item.markdown.length}`;
-  }
-  if (item.kind === 'user_message' || item.kind === 'raw_output') {
-    return `${item.id}:${item.text.length}`;
-  }
-  if (item.kind === 'tool_group') {
-    const latest = item.items[item.items.length - 1];
-    return `${item.id}:${item.items.length}:${latest?.state ?? ''}`;
-  }
-  if (item.kind === 'tool_activity') {
-    return `${item.id}:${item.state}`;
-  }
-  return item.id;
 }
 
 function HumanRequestCard({ agentId, request }: { agentId: string; request: HumanRequest }) {
