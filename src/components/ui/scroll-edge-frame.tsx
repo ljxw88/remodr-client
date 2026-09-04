@@ -1,10 +1,11 @@
 import { BlurTargetView, BlurView } from 'expo-blur';
-import { useCallback, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Animated,
   Platform,
   StyleSheet,
   View,
+  type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
@@ -13,8 +14,20 @@ import { ScrollEdgeFade, Spacing, withAlpha } from '@/constants/theme';
 
 type ScrollHandler = (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
 
+/**
+ * Spread onto the scrollable inside the frame. It reports its position from
+ * three directions because a fade that only listened for scrolling stayed
+ * invisible until the first one — an opened screen showed none of its edges.
+ */
+export type ScrollEdgeProps = {
+  onScroll: ScrollHandler;
+  onContentSizeChange: (width: number, height: number) => void;
+  onLayout: (event: LayoutChangeEvent) => void;
+  scrollEventThrottle: number;
+};
+
 type Props = {
-  children: (onScroll: ScrollHandler) => ReactNode;
+  children: (edge: ScrollEdgeProps) => ReactNode;
   onScroll?: ScrollHandler;
   top?: boolean;
   bottom?: boolean;
@@ -44,6 +57,34 @@ export function ScrollEdgeFrame({
   const blurTarget = useRef<View | null>(null);
   const [topOpacity] = useState(() => new Animated.Value(0));
   const [bottomOpacity] = useState(() => new Animated.Value(0));
+  /**
+   * The geometry the fades need, which arrives without any scrolling: a list
+   * reports its content height as its rows measure and its own height on
+   * layout. Listening only for scroll events left every edge invisible until
+   * the first one, so an opened screen showed none of them.
+   */
+  const [frameHeight, setFrameHeight] = useState(0);
+  const [contentHeight, setContentHeight] = useState(0);
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    // Only until the reader takes over. After that every scroll carries the
+    // whole picture, and this one assumes the resting position.
+    if (scrolled || frameHeight <= 0 || contentHeight <= 0) {
+      return;
+    }
+    const remaining = contentHeight - frameHeight;
+    topOpacity.setValue(inverted ? Math.min(1, Math.max(0, remaining / 18)) : 0);
+    bottomOpacity.setValue(inverted ? 0 : Math.min(1, Math.max(0, remaining / 28)));
+  }, [
+    bottomOpacity,
+    contentHeight,
+    frameHeight,
+    inverted,
+    scrolled,
+    topOpacity,
+  ]);
+
   const handleScroll = useCallback<ScrollHandler>(
     (event) => {
       const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
@@ -53,11 +94,18 @@ export function ScrollEdgeFrame({
       const fromEnd = inverted ? contentOffset.y : remaining;
       topOpacity.setValue(Math.min(1, Math.max(0, fromStart / 18)));
       bottomOpacity.setValue(Math.min(1, Math.max(0, fromEnd / 28)));
+      setScrolled(true);
       onScroll?.(event);
     },
     [bottomOpacity, inverted, onScroll, topOpacity],
   );
-  const scrollContent = children(handleScroll);
+
+  const scrollContent = children({
+    onScroll: handleScroll,
+    onContentSizeChange: (_width, height) => setContentHeight(height),
+    onLayout: (event) => setFrameHeight(event.nativeEvent.layout.height),
+    scrollEventThrottle: 16,
+  });
   /**
    * Android gets the gradient dissolve only. The fade sits *over* the rows it
    * softens, so a nested blur target is the one shape Android cannot draw: it

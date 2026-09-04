@@ -125,10 +125,9 @@ export default function HostsScreen() {
         <EmptyState message="No matching servers" />
       ) : (
         <ScrollEdgeFrame onScroll={onDockScroll}>
-          {(onScroll) => (
+          {(edge) => (
             <FlatList
-              onScroll={onScroll}
-              scrollEventThrottle={16}
+              {...edge}
               data={visibleHosts}
               keyExtractor={(host) => host.id}
               showsVerticalScrollIndicator={false}

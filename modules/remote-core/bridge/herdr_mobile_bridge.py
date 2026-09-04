@@ -1355,11 +1355,30 @@ class Bridge:
             and terminal_title.strip()
             and terminal_title.strip().lower() not in generic_titles
         ):
-            return terminal_title.strip()
+            return self._without_provider_suffix(terminal_title.strip(), provider)
         for fallback in (name, tab_label):
             if isinstance(fallback, str) and fallback.strip():
                 return fallback.strip()
         return self._provider_label(provider)
+
+    @classmethod
+    def _without_provider_suffix(cls, title: str, provider: str) -> str:
+        """Drop the CLI's name from the end of a title it wrote.
+
+        Every Copilot terminal title ends "- GitHub Copilot", which is
+        seventeen characters of a narrow header spent saying what the icon
+        beside it already says, and enough to push the real title into an
+        ellipsis. Only stripped when something is left over: a title that is
+        nothing but the CLI's name still has to say something.
+        """
+        label = cls._provider_label(provider)
+        for separator in (" - ", " \u2013 ", " \u2014 ", " | "):
+            suffix = separator + label
+            if title.lower().endswith(suffix.lower()):
+                trimmed = title[: -len(suffix)].strip()
+                if trimmed:
+                    return trimmed
+        return title
 
     @staticmethod
     def _is_generic_agent_name(value: str, provider: str) -> bool:

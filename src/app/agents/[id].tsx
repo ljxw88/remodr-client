@@ -285,8 +285,9 @@ export default function AgentConversationScreen() {
             // The fade is what stops rows reading through the gaps between the
             // composer's stacked panels, so it has to reach as far as they do.
             bottomHeight={Math.max(ScrollEdgeFade.bottomHeight, composerHeight)}>
-            {(onScroll) => (
+            {(edge) => (
               <FlatList
+                {...edge}
                 ref={listRef}
                 inverted
                 data={displayItems}
@@ -299,8 +300,6 @@ export default function AgentConversationScreen() {
                     streaming={index === 0 && showWorking}
                   />
                 )}
-                onScroll={onScroll}
-                scrollEventThrottle={16}
                 showsVerticalScrollIndicator={false}
                 initialNumToRender={20}
                 maxToRenderPerBatch={20}

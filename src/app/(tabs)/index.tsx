@@ -311,10 +311,9 @@ export default function AgentsScreen() {
         <EmptyState message={activeSpaceId ? 'No agents in this space' : 'No agents'} />
       ) : (
         <ScrollEdgeFrame onScroll={onDockScroll}>
-          {(onScroll) => (
+          {(edge) => (
             <ScrollView
-              onScroll={onScroll}
-              scrollEventThrottle={16}
+              {...edge}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={[styles.list, { paddingBottom: dockContentInset }]}>
               <AgentWorkspaceList sections={sections} />

@@ -41,10 +41,9 @@ export default function SettingsScreen() {
   return (
     <Screen includeTopSafeArea>
       <ScrollEdgeFrame onScroll={onDockScroll}>
-        {(onScroll) => (
+        {(edge) => (
           <ScrollView
-            onScroll={onScroll}
-            scrollEventThrottle={16}
+            {...edge}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={[styles.content, { paddingBottom: dockContentInset }]}>
             {__DEV__ ? (

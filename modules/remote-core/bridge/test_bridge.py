@@ -1343,6 +1343,35 @@ class AgentTuningTest(unittest.TestCase):
                     {"model": None, "effort": None, "context": None},
                 )
 
+    def test_a_title_does_not_repeat_the_cli_that_wrote_it(self):
+        # Every Copilot terminal title ends with its own name, which is
+        # seventeen characters of a narrow header saying what the icon beside
+        # it already says — enough to push the real title into an ellipsis.
+        self.assertEqual(
+            Bridge._without_provider_suffix(
+                "Summarize Redline.yaml Changes - GitHub Copilot", "copilot"
+            ),
+            "Summarize Redline.yaml Changes",
+        )
+        self.assertEqual(
+            Bridge._without_provider_suffix("Review \u2013 GitHub Copilot", "copilot"),
+            "Review",
+        )
+
+    def test_a_title_that_is_only_the_cli_name_keeps_it(self):
+        # Stripping it would leave nothing to show.
+        self.assertEqual(
+            Bridge._without_provider_suffix("GitHub Copilot", "copilot"),
+            "GitHub Copilot",
+        )
+
+    def test_another_cli_name_is_left_where_it_is(self):
+        # It is part of the title, not this agent saying what it is.
+        self.assertEqual(
+            Bridge._without_provider_suffix("Port it - Claude Code", "copilot"),
+            "Port it - Claude Code",
+        )
+
     def test_every_tunable_cli_is_one_the_bridge_can_launch(self):
         # The app decides which models to offer; this decides how to send them.
         # A CLI listed here with no counterpart there is never asked for, and
