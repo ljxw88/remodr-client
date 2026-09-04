@@ -253,7 +253,11 @@ export function SheetPanel({
       */}
       <View
         pointerEvents="none"
-        style={[StyleSheet.absoluteFill, { backgroundColor: theme.glassStrong }]}
+        style={[
+          StyleSheet.absoluteFill,
+          styles.plate,
+          { backgroundColor: theme.glassStrong },
+        ]}
       />
       <View style={[styles.handle, { backgroundColor: theme.glassHighlight }]} />
       {onClose ? (
@@ -308,6 +312,16 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: -10 },
     shadowOpacity: 1,
     shadowRadius: 28,
+  },
+  /**
+   * The plate has to round with the panel it fills. Square, its corners paint
+   * over the two the panel rounded away, which shows as a pair of light
+   * blocks where the sheet should be curving into the canvas. The panel is not
+   * clipped instead because that would take the shadow with it.
+   */
+  plate: {
+    borderTopLeftRadius: Radius.glass,
+    borderTopRightRadius: Radius.glass,
   },
   handle: {
     width: 38,
