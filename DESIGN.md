@@ -192,12 +192,19 @@ plus a border; see [`COLOR.md`](COLOR.md) for the tokens.
   is the only thing hiding what scrolls beneath, and the panel fill is 7%
   white, so the fallback on its own left the transcript perfectly readable
   through the composer.
-- The fallback is opaque, and transparency is not an option worth retrying.
-  Measured on device: the pass-through needed before a surface looks like glass
-  leaves sharp text behind it at ~11 levels of contrast, which is readable.
-  Smearing it is exactly what the blur did, and there is no blur here —
-  `expo-blur` degrades to a plain translucent view without a `BlurTargetView`,
-  and a target may only live on a screen that is never dismissed.
+- That fallback is opaque, and the transparency has to come from a real blur or
+  not at all. Measured on device: the pass-through needed before a surface
+  looks like glass leaves sharp text behind it at ~11 levels of contrast, which
+  is readable. Smearing it is precisely what the blur does, and `expo-blur`
+  degrades to a plain translucent view without a `BlurTargetView` — so a
+  surface either gets a target or gets an opaque one. There is nothing in
+  between that both reads as glass and hides anything.
+- A scrollable offers itself as that target, never the screen. `ScrollEdgeFrame`
+  mounts one when its stack asks for it (`RouteStack blurBackdrop`), because it
+  is the one component that can hold the line the target has to hold: it
+  contains what gets blurred and excludes what does the blurring. It declines
+  when a target is already overhead — the tab screens have one for the dock,
+  and nesting targets is the same SIGSEGV as nesting a `BlurView` in its own.
 - A surface that resizes gets a flat fill and a real border, nothing that has
   to measure itself. The composer grows with the draft, and a rim traced by a
   canvas or a gradient sized to the box lands a frame behind the resize and
@@ -360,11 +367,14 @@ chromatic orb.
   header, so that band is one the route never covers — during a transition
   what shows through it is the screen being left, not the canvas. See
   `features/navigation/route-stack.tsx`.
-- Frosted chrome may only sample a blur target on a screen that is never
-  dismissed. A `BlurTargetView` draws nothing from the moment its screen starts
-  animating away, so its contents blink out while the screen is still visible;
-  chrome outside the target keeps drawing, and the screen reads as having
-  thrown its content away. The tab bar qualifies, a pushed route does not.
+- Frosted chrome may only sample a blur target on a screen whose arrival and
+  departure are cuts. A `BlurTargetView` draws nothing from the moment its
+  screen starts animating away, so its contents blink out while the screen is
+  still visible; chrome outside the target keeps drawing, and the screen reads
+  as having thrown its content away. A pushed route was disqualified outright
+  until pushes became cuts — with `animation: 'none'` the blank lasts one
+  frame, which is why the chat can carry a target again. Reintroducing a stack
+  animation brings the bug back with it.
 - Never set `zIndex` to order something that declaration order already orders.
   React Native maps `zIndex` onto Android's `translationZ`, which lifts a view
   in the *window* rather than among its siblings, so it sails over floating

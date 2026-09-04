@@ -3,6 +3,7 @@ import { useLayoutEffect, type ReactNode } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
 
 import { AppBackground } from '@/components/ui/app-background';
+import { BlurBackdropProvider } from '@/components/ui/blur-backdrop';
 import { Colors } from '@/constants/theme';
 import { useScreenEntrance } from '@/features/navigation/screen-entrance';
 import { useStackScreenOptions } from '@/features/navigation/stack-screen-options';
@@ -10,6 +11,16 @@ import { useStackScreenOptions } from '@/features/navigation/stack-screen-option
 type Props = {
   /** `Stack.Screen` entries, for stacks that need to name their routes. */
   children?: ReactNode;
+  /**
+   * Offers the stack's scrollable region as a backdrop for frosted chrome
+   * floating over it.
+   *
+   * Off unless a screen actually has such chrome. A blur target costs a
+   * RenderNode pass, and it blanks its contents for the frame a dismissal
+   * takes — harmless while pushes are cuts, but not worth carrying on a stack
+   * with nothing to blur.
+   */
+  blurBackdrop?: boolean;
 };
 
 /**
@@ -35,7 +46,7 @@ type Props = {
  * Any route pushed over another needs this. A route with no header does not,
  * having nothing it fails to cover.
  */
-export function RouteStack({ children }: Props) {
+export function RouteStack({ children, blurBackdrop = false }: Props) {
   const screenOptions = useStackScreenOptions();
   const entrance = useScreenEntrance();
 
@@ -45,19 +56,23 @@ export function RouteStack({ children }: Props) {
     entrance.play(1);
   }, [entrance]);
 
+  const stack = (
+    /*
+      The canvas stays outside this, so what the screen settles over is its
+      own background rather than the route it replaced. That is the whole
+      trick: the screen is already opaque and already in place when the
+      motion starts, so there is never a moment where two screens are legible
+      at once.
+    */
+    <Animated.View style={[styles.stack, entrance.style]}>
+      <Stack screenOptions={screenOptions}>{children}</Stack>
+    </Animated.View>
+  );
+
   return (
     <View style={styles.root}>
       <AppBackground />
-      {/*
-        The canvas stays outside this, so what the screen settles over is its
-        own background rather than the route it replaced. That is the whole
-        trick: the screen is already opaque and already in place when the
-        motion starts, so there is never a moment where two screens are legible
-        at once.
-      */}
-      <Animated.View style={[styles.stack, entrance.style]}>
-        <Stack screenOptions={screenOptions}>{children}</Stack>
-      </Animated.View>
+      {blurBackdrop ? <BlurBackdropProvider>{stack}</BlurBackdropProvider> : stack}
     </View>
   );
 }

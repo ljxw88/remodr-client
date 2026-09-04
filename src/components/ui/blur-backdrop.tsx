@@ -14,6 +14,9 @@ type BlurTarget = RefObject<View | null>;
 
 const BlurBackdropContext = createContext<BlurTarget | null>(null);
 
+/** Set by `BlurBackdropTarget`, so a nested one can decline to mount. */
+const InsideBlurTargetContext = createContext(false);
+
 /**
  * Shares one blur target between a screen's content and the frosted chrome
  * floating above it.
@@ -27,15 +30,20 @@ const BlurBackdropContext = createContext<BlurTarget | null>(null);
  * until the native stack overflows and the process dies with SIGSEGV — no JS
  * error, no red box, just a vanished app.
  *
- * **Only put this on a screen that is never dismissed.** A `BlurTargetView`
- * draws nothing at all from the moment its screen starts animating away, so
- * everything inside one blinks out while the screen is still on top and still
- * sliding. Chrome outside the target keeps drawing, which makes it look like
- * the screen threw its content away rather than left. This is not a property
- * of any one animation — the platform default does it too, it is just harder
- * to see through a cross-fade — and it survives `renderToHardwareTextureAndroid`.
- * The tab bar qualifies because its screen is the root; a pushed route does
- * not, and should let `GlassSurface` fall back to its translucent fill.
+ * **Only put this on a screen whose arrival and departure are cuts.** A
+ * `BlurTargetView` draws nothing at all from the moment its screen starts
+ * animating away, so everything inside one blinks out while the screen is
+ * still on top and still moving. Chrome outside the target keeps drawing,
+ * which makes it look like the screen threw its content away rather than left.
+ * This is not a property of any one animation — the platform default does it
+ * too, it is just harder to see through a cross-fade — and it survives
+ * `renderToHardwareTextureAndroid`.
+ *
+ * A pushed route used to be disqualified outright for that reason. It no
+ * longer is, but only because pushes are cuts now: with `animation: 'none'`
+ * the window between dismissal starting and the screen being gone is a single
+ * frame, so there is no sliding blank to see. That makes this a standing
+ * reason not to reintroduce a stack animation — see `stack-screen-options.ts`.
  */
 export function BlurBackdropProvider({ children }: { children: ReactNode }) {
   const target = useRef<View | null>(null);
@@ -64,11 +72,25 @@ export function BlurBackdropTarget({
   const target = useContext(BlurBackdropContext);
 
   return (
-    <BlurTargetView ref={target ?? undefined} style={[styles.fill, style]}>
-      <CanvasFill />
-      {children}
-    </BlurTargetView>
+    <InsideBlurTargetContext.Provider value>
+      <BlurTargetView ref={target ?? undefined} style={[styles.fill, style]}>
+        <CanvasFill />
+        {children}
+      </BlurTargetView>
+    </InsideBlurTargetContext.Provider>
   );
+}
+
+/**
+ * Whether a blur target is already overhead.
+ *
+ * A target inside a target is the same shape as a `BlurView` inside one: both
+ * put a RenderNode inside itself, and Android recurses until the stack
+ * overflows. Anything that mounts a target opportunistically — rather than
+ * because a screen deliberately placed it — has to ask this first.
+ */
+export function useInsideBlurTarget(): boolean {
+  return useContext(InsideBlurTargetContext);
 }
 
 /**

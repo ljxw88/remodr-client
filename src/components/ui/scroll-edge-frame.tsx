@@ -11,6 +11,11 @@ import {
 } from 'react-native';
 
 import { ScrollEdgeFade, Spacing, withAlpha } from '@/constants/theme';
+import {
+  BlurBackdropTarget,
+  useBlurBackdrop,
+  useInsideBlurTarget,
+} from '@/components/ui/blur-backdrop';
 
 type ScrollHandler = (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
 
@@ -115,15 +120,38 @@ export function ScrollEdgeFrame({
    */
   const supportsCroppedEdgeBlur = Platform.OS !== 'android';
 
+  /**
+   * The scrollable region doubles as the backdrop for chrome floating over it,
+   * when a screen has asked for one.
+   *
+   * This is the only place that can offer it. The target has to contain what
+   * gets blurred and exclude what does the blurring — a `BlurView` inside its
+   * own target takes the render thread down — and on a screen with a composer
+   * or a dock, the thing being floated over is exactly this scrollable and
+   * nothing else. Opting in from here rather than from the screen keeps the
+   * rule with the component that can enforce it.
+   *
+   * Declined when a target is already overhead, because nesting them is the
+   * same crash. The tab screens are that case: their layout wraps the whole
+   * tab in one for the dock, and this would put a second inside it.
+   */
+  const backdrop = useBlurBackdrop();
+  const insideTarget = useInsideBlurTarget();
+  const providesBackdrop = Boolean(backdrop) && !insideTarget && !supportsCroppedEdgeBlur;
+
+  const content = supportsCroppedEdgeBlur ? (
+    <BlurTargetView ref={blurTarget} style={styles.content}>
+      {scrollContent}
+    </BlurTargetView>
+  ) : providesBackdrop ? (
+    <BlurBackdropTarget style={styles.content}>{scrollContent}</BlurBackdropTarget>
+  ) : (
+    <View style={styles.content}>{scrollContent}</View>
+  );
+
   return (
     <View style={styles.frame}>
-      {supportsCroppedEdgeBlur ? (
-        <BlurTargetView ref={blurTarget} style={styles.content}>
-          {scrollContent}
-        </BlurTargetView>
-      ) : (
-        <View style={styles.content}>{scrollContent}</View>
-      )}
+      {content}
       {top ? (
         <Animated.View
           accessibilityElementsHidden
