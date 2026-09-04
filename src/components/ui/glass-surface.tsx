@@ -111,22 +111,24 @@ export function GlassSurface({
     /**
      * Chrome with no backdrop in scope.
      *
-     * `chrome` floats over scrolling content, and the blur is what hides that
-     * content — a 23px radius turns rows into a smear, and the dark tint sinks
-     * what is left. Falling back to the panel material loses all of it: the
-     * fill is 7% white, so the transcript scrolls under the composer and stays
-     * perfectly readable through it.
+     * A guard, not the usual path — every chrome surface in the app currently
+     * reaches a target, and this is what catches the next one that does not.
+     * Getting it wrong is expensive, because the obvious fallback is silently
+     * the broken one: `chrome` floats over scrolling content and the blur is
+     * the only thing hiding it, so dropping through to the panel material puts
+     * a 7% white fill over a live transcript and leaves every word of it
+     * readable through the composer. That was a shipped bug, twice.
      *
-     * There is no blur to fall back *to*, either. `expo-blur` needs a
-     * `BlurTargetView` on Android — without one every method degrades to a
-     * plain translucent view — and a target may only live on a screen that is
-     * never dismissed, which rules out every pushed route. See
-     * `blur-backdrop.tsx`.
+     * There is no cheaper blur to fall back to either. `expo-blur` needs a
+     * `BlurTargetView` on Android, and without one every blur method degrades
+     * in native to a plain translucent view — see `blur-backdrop.tsx` for how
+     * a screen offers one.
      *
      * So the surface brings the canvas with it: an opaque copy, aligned to the
      * window, under a translucent fill and the same rim the rest of the app
      * wears. It looks like the canvas because it *is* the canvas, and nothing
-     * underneath survives it.
+     * underneath survives it. What it loses against a real blur is depth —
+     * it hides, but it does not look like something is behind it.
      *
      * Deliberately just a fill. This surface wraps the composer, which grows
      * and shrinks as the draft does, and anything that has to measure itself to
