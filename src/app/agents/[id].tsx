@@ -88,6 +88,9 @@ export default function AgentConversationScreen() {
   );
   const working = agentStatus === 'working';
   const showWorking = sending || working || activeTool != null;
+  const workingLabel = activeTool?.title
+    ? `${activeTool.title}…`
+    : `${agent ? providerLabel(agent.provider) : 'The agent'} is working`;
   const hasOpenRequest = conversation?.activeHumanRequest != null;
 
   useEffect(() => {
@@ -221,6 +224,24 @@ export default function AgentConversationScreen() {
             fontFamily: Fonts.semibold,
             fontWeight: 600,
           },
+          /**
+           * The only sign that the agent is busy. It used to be a labelled row
+           * above the composer, which took a band of the transcript for a
+           * sentence that said what the spinner already says, and moved the
+           * composer every time the agent started or stopped.
+           *
+           * The label lives on for screen readers, which get nothing from a
+           * spinner on its own.
+           */
+          headerRight: () =>
+            showWorking ? (
+              <ActivityIndicator
+                size="small"
+                color={Colors.accent}
+                accessibilityLabel={workingLabel}
+                style={styles.headerBusy}
+              />
+            ) : null,
         }}
       />
       <BlurBackdropProvider>
@@ -321,12 +342,6 @@ export default function AgentConversationScreen() {
           agentId={agent.id}
           request={conversation?.activeHumanRequest ?? null}
           provider={providerLabel(agent.provider)}
-          working={showWorking}
-          workingLabel={
-            activeTool?.title
-              ? `${activeTool.title}…`
-              : `${providerLabel(agent.provider)} is working`
-          }
           agentTitle={agent.title}
           onHeightChange={setComposerHeight}
         />
@@ -721,8 +736,6 @@ function Composer({
   agentId,
   request,
   provider,
-  working,
-  workingLabel,
   agentTitle,
   onHeightChange,
 }: {
@@ -733,8 +746,6 @@ function Composer({
   agentId: string;
   request: HumanRequest | null;
   provider: string;
-  working: boolean;
-  workingLabel: string;
   agentTitle?: string;
   onHeightChange: (height: number) => void;
 }) {
@@ -745,18 +756,6 @@ function Composer({
     <View
       style={styles.composer}
       onLayout={(event) => onHeightChange(event.nativeEvent.layout.height)}>
-      {working ? (
-        <View
-          style={[
-            styles.working,
-            { backgroundColor: theme.glassStrong, borderColor: theme.glassBorder },
-          ]}>
-          <ActivityIndicator size="small" color={theme.accent} />
-          <ThemedText type="small" numberOfLines={1} style={styles.workingLabel}>
-            {workingLabel}
-          </ThemedText>
-        </View>
-      ) : null}
       {request ? (
         // Last before the card, because it tucks itself underneath it — any
         // sibling in between would be dragged under there too.
@@ -1039,6 +1038,9 @@ const styles = StyleSheet.create({
     padding: Spacing.two,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
+  headerBusy: {
+    marginRight: Spacing.one,
+  },
   composer: {
     position: 'absolute',
     left: 0,
@@ -1048,18 +1050,6 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.two,
     paddingBottom: Spacing.two,
     gap: Spacing.one,
-  },
-  working: {
-    minHeight: 40,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
-    paddingHorizontal: Spacing.two,
-    borderWidth: 1,
-    borderRadius: Radius.pill,
-  },
-  workingLabel: {
-    flex: 1,
   },
   cardWrapper: {
     borderRadius: Radius.glass,
