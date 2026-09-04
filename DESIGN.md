@@ -45,9 +45,13 @@ the normal user flow.
 
 ## Visual principles
 
-- The canvas is one indigo-to-near-black vertical gradient, rendered once
-  behind the whole navigator. Screens, stacks and headers stay transparent so
-  it never restarts per route or seams between them.
+- The canvas is one indigo-to-near-black vertical gradient. Every screen paints
+  its own copy, aligned to the window rather than to the screen, so it still
+  reads as one surface the routes move across. Headers stay transparent so the
+  canvas shows through them.
+- A screen must be opaque. Left transparent, it shows whatever it is covering
+  in the navigator, which during a transition is the screen it is replacing —
+  the two read as a double exposure until the animation ends.
 - Keep the canvas otherwise clean. No glow blobs, decorative wallpaper, or
   noisy texture, and no second gradient competing with the canvas.
 - Scrims and edge fades must stay low in alpha. A scrim tuned against the old
@@ -196,10 +200,12 @@ The blur can only see inside its target, so `BlurBackdropTarget` renders its
 own copy of the canvas gradient. With the gradient outside, frosted chrome
 blurs transparent pixels and reads as a dead grey slab.
 
-That copy is shifted up by however far the target sits below the window top,
-so it *continues* the canvas rather than restarting it. A target mounted under
-a navigation header would otherwise jump back to the gradient's brightest
-colour at the header's lower edge, leaving a band across the top of the screen.
+Any copy is shifted up by however far it sits below the window top, so it
+*continues* the canvas rather than restarting it. A copy mounted under a
+navigation header would otherwise jump back to the gradient's brightest colour
+at the header's lower edge, leaving a band across the top of the screen.
+`CanvasFill` does this measuring itself, and is what both `Screen` and
+`BlurBackdropTarget` use.
 
 Never give a `BlurTargetView` an `onLayout` prop. Its descendants then stop
 receiving layout events entirely, which silently starves anything that sizes
@@ -316,6 +322,10 @@ chromatic orb.
 ## Motion, feedback, and accessibility
 
 - Use subtle press-scale and opacity feedback; avoid decorative animation.
+- A push slides in from the right rather than dissolving. A cross-fade needs
+  one screen to be hiding the other to read as a change of place; ours share a
+  canvas and sit at the same brightness, so a dissolve looks like the screen
+  being left refusing to go.
 - Press-scale belongs to controls that stand alone on the canvas. A row that
   fills its card edge to edge must not scale: shrinking it pulls the pressed
   highlight inwards and leaves the card showing down both sides.

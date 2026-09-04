@@ -1,16 +1,14 @@
 import { BlurTargetView } from 'expo-blur';
 import {
   createContext,
-  useCallback,
   useContext,
   useRef,
-  useState,
   type ReactNode,
   type RefObject,
 } from 'react';
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
-import { AppBackground } from '@/components/ui/app-background';
+import { CanvasFill } from '@/components/ui/app-background';
 
 type BlurTarget = RefObject<View | null>;
 
@@ -44,8 +42,7 @@ export function BlurBackdropProvider({ children }: { children: ReactNode }) {
  *
  * It carries its own copy of the canvas gradient because the blur can only see
  * this subtree: with the gradient left outside, chrome blurs transparent
- * pixels and reads as a dead grey slab. Drawing the gradient twice costs one
- * more fully-covered `LinearGradient`, which is cheaper than the alternatives.
+ * pixels and reads as a dead grey slab.
  */
 export function BlurBackdropTarget({
   children,
@@ -55,33 +52,10 @@ export function BlurBackdropTarget({
   style?: StyleProp<ViewStyle>;
 }) {
   const target = useContext(BlurBackdropContext);
-  const probe = useRef<View | null>(null);
-  const [topOffset, setTopOffset] = useState(0);
-
-  // Where this backdrop sits in the window, so its copy of the canvas can be
-  // shifted up to continue the one behind the navigator instead of restarting.
-  const onProbeLayout = useCallback(() => {
-    probe.current?.measureInWindow((_x, y) => {
-      setTopOffset((current) => (Math.abs(current - y) < 1 ? current : y));
-    });
-  }, []);
 
   return (
     <BlurTargetView ref={target ?? undefined} style={[styles.fill, style]}>
-      {/*
-        Measured from a child, for two reasons. Giving the BlurTargetView an
-        `onLayout` prop stops its descendants receiving layout events at all,
-        which silently starves anything that sizes itself that way — a Skia
-        canvas measured that way simply renders nothing. And its ref is a
-        native component instance that has no `measureInWindow`.
-      */}
-      <View
-        ref={probe}
-        onLayout={onProbeLayout}
-        pointerEvents="none"
-        style={StyleSheet.absoluteFill}
-      />
-      <AppBackground topOffset={topOffset} />
+      <CanvasFill />
       {children}
     </BlurTargetView>
   );

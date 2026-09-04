@@ -15,6 +15,7 @@ import { Colors } from '@/constants/theme';
 import { autoConnectSavedHosts } from '@/features/connection/saved-host-connector';
 import { connectAgentRuntime } from '@/features/agents/connect-runtime';
 import { AppBackground } from '@/components/ui/app-background';
+import { useStackScreenOptions } from '@/features/navigation/stack-screen-options';
 SplashScreen.preventAutoHideAsync();
 SplashScreen.setOptions({ duration: 300, fade: true });
 
@@ -23,7 +24,9 @@ const AbyssTheme = {
   colors: {
     ...DarkTheme.colors,
     primary: Colors.accent,
-    // Transparent so the gradient behind the navigator shows through.
+    // Transparent: each route paints the canvas itself, so a colour here would
+    // only ever be seen through one, and a route that is see-through is what
+    // made transitions read as a double exposure.
     background: 'transparent',
     card: Colors.backgroundElement,
     text: Colors.text,
@@ -33,6 +36,7 @@ const AbyssTheme = {
 };
 
 export default function RootLayout() {
+  const stackOptions = useStackScreenOptions();
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -63,11 +67,17 @@ export default function RootLayout() {
     <ThemeProvider value={AbyssTheme}>
       <StatusBar style="light" />
       <View style={styles.root}>
+        {/*
+          What shows behind the navigator's own furniture. A stack header is
+          transparent so a route's canvas reads through it, but a header is not
+          part of the route and nothing else paints that band — without this it
+          is a black bar above every pushed screen.
+        */}
         <AppBackground />
         <Stack
           screenOptions={{
+            ...stackOptions,
             headerShown: false,
-            contentStyle: { backgroundColor: 'transparent' },
           }}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="hosts" />
@@ -87,6 +97,9 @@ export default function RootLayout() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
+    // The foot of the canvas gradient. Nothing should ever see this — a route
+    // covers it from the first frame — but it means an unpainted moment is the
+    // colour the app is about to be.
     backgroundColor: Colors.background,
   },
 });
