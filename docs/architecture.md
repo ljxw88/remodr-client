@@ -34,3 +34,7 @@ Every frosted surface goes through one component, `GlassSurface`. See
 
 Bottom sheets are hand-rolled on React Native's `Modal` rather than taken from
 a library. See [ADR 013](adr/013-hand-rolled-bottom-sheets.md).
+
+When an agent asks the user to choose between options, the options are pinned
+above the composer rather than left inline in the scrolling transcript. See
+[ADR 014](adr/014-answering-agent-questions.md).

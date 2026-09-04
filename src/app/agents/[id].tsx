@@ -13,12 +13,12 @@ import {
 } from 'react-native';
 
 import { MarkdownMessage } from '@/components/markdown/markdown-message';
-import { AppButton } from '@/components/ui/app-button';
 import { AppIcon } from '@/components/ui/app-icon';
 import {
   BlurBackdropProvider,
   BlurBackdropTarget,
 } from '@/components/ui/blur-backdrop';
+import { BorderBeam } from '@/components/ui/border-beam';
 import { GlassSurface } from '@/components/ui/glass-surface';
 import { Screen } from '@/components/ui/screen';
 import { ScrollEdgeFrame } from '@/components/ui/scroll-edge-frame';
@@ -31,6 +31,7 @@ import {
   type HumanRequest,
   type RemoteAgent,
 } from '@/domain/herdr';
+import { HumanRequestBar } from '@/features/agents/human-request-bar';
 import { useAgentConversation, useHerdr } from '@/features/agents/use-herdr';
 import { useRevealedText } from '@/features/agents/use-revealed-text';
 import {
@@ -62,6 +63,7 @@ export default function AgentConversationScreen() {
   const [conversationError, setConversationError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [sending, setSending] = useState(false);
+  const [composerHeight, setComposerHeight] = useState(0);
   const listRef = useRef<FlatList<ConversationDisplayItem>>(null);
   /**
    * Newest first, because the transcript renders inverted. Offset zero is then
@@ -86,6 +88,7 @@ export default function AgentConversationScreen() {
   );
   const working = agentStatus === 'working';
   const showWorking = sending || working || activeTool != null;
+  const hasOpenRequest = conversation?.activeHumanRequest != null;
 
   useEffect(() => {
     if (!id) {
@@ -117,7 +120,20 @@ export default function AgentConversationScreen() {
         });
     };
     refresh();
-    if (agentStatus === 'working') {
+    /**
+     * Blocked is polled as well as working, but only until the question turns
+     * up. Blocked is Herdr noticing the pane is waiting on someone, which is
+     * when a question is being written into the session log — and it arrives a
+     * moment after the status does, so the single refresh on the status change
+     * usually lands too early and the question never appears until the screen
+     * is left and reopened.
+     *
+     * Once it has arrived there is nothing left to wait for: blocked means
+     * waiting on a person, so it can last hours, and polling a phone put down
+     * on an open question would never stop.
+     */
+    const awaitingQuestion = agentStatus === 'blocked' && !hasOpenRequest;
+    if (agentStatus === 'working' || awaitingQuestion) {
       const interval = agent?.capabilities.streamingConversation ? 1_000 : 2_000;
       const timer = setInterval(refresh, interval);
       return () => clearInterval(timer);
@@ -126,6 +142,7 @@ export default function AgentConversationScreen() {
     agent?.capabilities.streamingConversation,
     agentId,
     agentStatus,
+    hasOpenRequest,
     ownerConnection,
     reloadToken,
   ]);
@@ -208,9 +225,9 @@ export default function AgentConversationScreen() {
       />
       <BlurBackdropProvider>
         <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={88}>
+          style={styles.flex}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}>
         {/* The composer is a sibling of the target, never a child: a BlurView
             nested inside the target it samples crashes the render thread. */}
         <BlurBackdropTarget>
@@ -257,15 +274,12 @@ export default function AgentConversationScreen() {
                   minIndexForVisible: 0,
                   autoscrollToTopThreshold: 24,
                 }}
-                // Inverted, so this sits below the newest message.
-                ListHeaderComponent={
-                  <View
-                    style={[
-                      styles.composerSpacer,
-                      showWorking && styles.composerSpacerWorking,
-                    ]}
-                  />
-                }
+                // Inverted, so this sits below the newest message. It is
+                // measured rather than guessed because the composer grows: a
+                // pending question, the working row and a wrapped draft all
+                // change its height, and a fixed spacer lets it cover the
+                // newest message.
+                ListHeaderComponent={<View style={{ height: composerHeight }} />}
                 ListEmptyComponent={
                   <View style={styles.empty}>
                     {conversationError ? (
@@ -300,6 +314,7 @@ export default function AgentConversationScreen() {
           onChangeText={setDraft}
           onSend={() => void send()}
           sending={sending}
+          agentId={agent.id}
           request={conversation?.activeHumanRequest ?? null}
           provider={providerLabel(agent.provider)}
           working={showWorking}
@@ -308,6 +323,8 @@ export default function AgentConversationScreen() {
               ? `${activeTool.title}…`
               : `${providerLabel(agent.provider)} is working`
           }
+          agentTitle={agent.title}
+          onHeightChange={setComposerHeight}
         />
         </KeyboardAvoidingView>
       </BlurBackdropProvider>
@@ -439,9 +456,11 @@ function ConversationRow({
   }
 
   if (item.kind === 'human_request') {
-    return item.resolved ? null : (
-      <HumanRequestCard agentId={agent.id} request={item.request} />
-    );
+    // Pinned above the composer while it is open, so the transcript carries
+    // only the record of one already answered — otherwise the same question
+    // would be on screen twice, and the copy that scrolls away is the one
+    // without any buttons.
+    return item.resolved ? <AskedQuestionRow request={item.request} /> : null;
   }
 
   if (item.kind === 'todo_update') {
@@ -662,101 +681,71 @@ function toolStateLabel(
   }
 }
 
-function HumanRequestCard({ agentId, request }: { agentId: string; request: HumanRequest }) {
+/**
+ * A question the agent asked, as a record in the transcript.
+ *
+ * The answering happens in the bar above the composer, so this carries no
+ * controls: two sets of buttons for one question invite the user to tap the
+ * pair that has scrolled out of sight. The answer follows as the next user
+ * message, which leaves the exchange readable in order.
+ */
+function AskedQuestionRow({ request }: { request: HumanRequest }) {
   const theme = useTheme();
-  const [selected, setSelected] = useState<string[]>([]);
-
-  async function answer(optionId?: string) {
-    try {
-      const selectedOptionIds = optionId ? [optionId] : selected;
-      await herdrRepository.answerHumanRequest(agentId, request.id, { selectedOptionIds });
-      await herdrRepository.loadConversation(agentId);
-    } catch (error) {
-      Alert.alert(
-        'Could not answer',
-        error instanceof Error ? error.message : 'The answer could not be sent.',
-      );
-    }
-  }
 
   return (
-    <View style={[styles.request, { backgroundColor: theme.glassStrong, borderColor: theme.glassBorder }]}>
+    <View
+      style={[
+        styles.request,
+        { backgroundColor: theme.glassStrong, borderColor: theme.glassBorder },
+      ]}>
       <ThemedText type="label" themeColor="textMuted">
-        NEEDS YOUR INPUT
+        ASKED YOU
       </ThemedText>
       <ThemedText type="section">{request.question}</ThemedText>
-      {request.options.map((option) => {
-        const isSelected = selected.includes(option.id);
-        return (
-          <Pressable
-            key={option.id}
-            accessibilityRole="button"
-            accessibilityState={{ selected: isSelected }}
-            onPress={() => {
-              if (!request.multiSelect) {
-                void answer(option.id);
-                return;
-              }
-              setSelected((current) =>
-                isSelected
-                  ? current.filter((item) => item !== option.id)
-                  : [...current, option.id],
-              );
-            }}
-            style={({ pressed }) => [
-              styles.option,
-              {
-                backgroundColor: isSelected ? theme.accentSoft : theme.backgroundElement,
-                borderColor: isSelected ? theme.accent : theme.border,
-                opacity: pressed ? 0.72 : 1,
-              },
-            ]}>
-            <ThemedText
-              type="smallBold"
-              style={{ color: isSelected ? theme.accent : theme.text }}>
-              {option.label}
-            </ThemedText>
-            {option.description ? (
-              <ThemedText type="caption" themeColor="textSecondary">
-                {option.description}
-              </ThemedText>
-            ) : null}
-          </Pressable>
-        );
-      })}
-      {request.multiSelect ? (
-        <AppButton
-          label="Submit"
-          onPress={() => void answer()}
-          disabled={selected.length === 0}
-        />
-      ) : null}
     </View>
   );
 }
+
+const MIN_INPUT_HEIGHT = 38;
+const MAX_INPUT_HEIGHT = 120;
 
 function Composer({
   value,
   onChangeText,
   onSend,
   sending,
+  agentId,
   request,
   provider,
   working,
   workingLabel,
+  agentTitle,
+  onHeightChange,
 }: {
   value: string;
   onChangeText: (text: string) => void;
   onSend: () => void;
   sending: boolean;
+  agentId: string;
   request: HumanRequest | null;
   provider: string;
   working: boolean;
   workingLabel: string;
+  agentTitle?: string;
+  onHeightChange: (height: number) => void;
 }) {
   const theme = useTheme();
+  const [toolMode, setToolMode] = useState<'Auto' | 'Ask'>('Auto');
+
   return (
-    <View style={styles.composer}>
+    <View
+      style={styles.composer}
+      onLayout={(event) => onHeightChange(event.nativeEvent.layout.height)}>
+      {request ? (
+        // Keyed so a new question starts with a clean slate rather than
+        // inheriting the last one's half-made selection.
+        <HumanRequestBar key={request.id} agentId={agentId} request={request} />
+      ) : null}
       {working ? (
         <View
           style={[
@@ -769,37 +758,123 @@ function Composer({
           </ThemedText>
         </View>
       ) : null}
-      <GlassSurface tone="chrome" strength="strong" style={styles.inputFrame}>
-        <TextInput
-          accessibilityLabel={request ? 'Write an answer' : `Message ${provider}`}
-          multiline
-          maxLength={20_000}
-          value={value}
-          onChangeText={onChangeText}
-          placeholder={request ? 'Write another answer…' : `Message ${provider}…`}
-          placeholderTextColor={theme.placeholder}
-          style={[styles.input, { color: theme.text }]}
-        />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Send"
-          disabled={!value.trim() || sending}
-          onPress={onSend}
-          style={({ pressed }) => [
-            styles.send,
-            {
-              backgroundColor: theme.accent,
-              opacity: !value.trim() || sending ? 0.4 : pressed ? 0.75 : 1,
-            },
-          ]}>
-          <AppIcon
-            name={{ ios: 'arrow.up', android: 'arrow_upward', web: 'arrow_upward' }}
-            size={18}
-            tintColor={theme.onAccent}
-            fallback="↑"
-          />
-        </Pressable>
-      </GlassSurface>
+      <View style={styles.cardWrapper}>
+        <GlassSurface
+          tone="chrome"
+          strength="strong"
+          highlight
+          style={styles.cardSurface}>
+          <View style={styles.cardContent}>
+            <View style={styles.cardTop}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Add context"
+                onPress={() => {
+                  onChangeText(value ? (value.endsWith(' ') ? `${value}@` : `${value} @`) : '@');
+                }}
+                style={({ pressed }) => [
+                  styles.atButton,
+                  {
+                    backgroundColor: pressed ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.06)',
+                    borderColor: theme.glassBorder,
+                  },
+                ]}>
+                <ThemedText style={styles.atText}>@</ThemedText>
+              </Pressable>
+            </View>
+
+            <TextInput
+              accessibilityLabel={request ? 'Write an answer' : 'Build anything'}
+              multiline
+              blurOnSubmit={false}
+              textAlignVertical="top"
+              maxLength={20_000}
+              value={value}
+              onChangeText={onChangeText}
+              placeholder={request ? 'Write another answer…' : 'Build anything…'}
+              placeholderTextColor={theme.placeholder}
+              style={[styles.input, { color: theme.text }]}
+            />
+
+            <View style={styles.cardBottom}>
+              <View style={styles.pillsRow}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Agent: ${provider}`}
+                  onPress={() => {
+                    Alert.alert('Agent Provider', `${provider}${agentTitle ? ` • ${agentTitle}` : ''}`);
+                  }}
+                  style={({ pressed }) => [
+                    styles.pill,
+                    {
+                      backgroundColor: pressed ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.06)',
+                      borderColor: theme.glassBorder,
+                    },
+                  ]}>
+                  <ThemedText type="smallBold" style={{ color: theme.text, fontSize: 13 }}>
+                    Agent
+                  </ThemedText>
+                  <AppIcon
+                    name={{ ios: 'chevron.down', android: 'expand_more', web: 'expand_more' }}
+                    size={14}
+                    tintColor={theme.textSecondary}
+                    fallback="⌄"
+                  />
+                </Pressable>
+
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Execution mode: ${toolMode}`}
+                  onPress={() => {
+                    Alert.alert('Execution mode', 'Choose how tool calls are approved:', [
+                      { text: 'Auto (Approve automatically)', onPress: () => setToolMode('Auto') },
+                      { text: 'Ask (Ask for approval)', onPress: () => setToolMode('Ask') },
+                      { text: 'Cancel', style: 'cancel' },
+                    ]);
+                  }}
+                  style={({ pressed }) => [
+                    styles.pill,
+                    {
+                      backgroundColor: pressed ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.06)',
+                      borderColor: theme.glassBorder,
+                    },
+                  ]}>
+                  <ThemedText type="smallBold" style={{ color: theme.text, fontSize: 13 }}>
+                    {toolMode}
+                  </ThemedText>
+                  <AppIcon
+                    name={{ ios: 'chevron.down', android: 'expand_more', web: 'expand_more' }}
+                    size={14}
+                    tintColor={theme.textSecondary}
+                    fallback="⌄"
+                  />
+                </Pressable>
+              </View>
+
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Send"
+                disabled={!value.trim() || sending}
+                onPress={onSend}
+                style={({ pressed }) => [
+                  styles.send,
+                  {
+                    backgroundColor: value.trim() && !sending ? theme.accent : 'rgba(255, 255, 255, 0.08)',
+                    opacity: pressed ? 0.75 : 1,
+                  },
+                ]}>
+                <BorderBeam radius={18} active={!sending} />
+                <AppIcon
+                  name={{ ios: 'arrow.up', android: 'arrow_upward', web: 'arrow_upward' }}
+                  size={18}
+                  tintColor={value.trim() && !sending ? theme.onAccent : theme.textMuted}
+                  fallback="↑"
+                />
+              </Pressable>
+            </View>
+          </View>
+        </GlassSurface>
+      </View>
     </View>
   );
 }
@@ -937,12 +1012,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: Radius.control,
   },
-  option: {
-    gap: 3,
-    padding: Spacing.two,
-    borderWidth: 1,
-    borderRadius: Radius.control,
-  },
   raw: {
     borderWidth: 1,
     borderRadius: Radius.control,
@@ -970,14 +1039,8 @@ const styles = StyleSheet.create({
     bottom: 0,
     paddingHorizontal: Spacing.two,
     paddingTop: Spacing.two,
-    paddingBottom: Spacing.one,
+    paddingBottom: Spacing.two,
     gap: Spacing.one,
-  },
-  composerSpacer: {
-    height: 104,
-  },
-  composerSpacerWorking: {
-    height: 148,
   },
   working: {
     minHeight: 40,
@@ -991,32 +1054,79 @@ const styles = StyleSheet.create({
   workingLabel: {
     flex: 1,
   },
-  inputFrame: {
-    minHeight: 56,
-    maxHeight: 160,
+  cardWrapper: {
+    borderRadius: Radius.glass,
+    overflow: 'hidden',
+  },
+  cardSurface: {
+    borderRadius: Radius.glass,
+    overflow: 'hidden',
+    padding: 0,
+  },
+  cardContent: {
+    paddingHorizontal: Spacing.two,
+    paddingTop: Spacing.one + Spacing.half,
+    paddingBottom: Spacing.one + Spacing.half,
+  },
+  cardTop: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: Spacing.one,
-    paddingLeft: Spacing.two,
-    paddingRight: 6,
-    paddingVertical: 6,
+    alignItems: 'center',
+    marginBottom: 4,
   },
-  input: {
-    flex: 1,
-    minHeight: 38,
-    maxHeight: 140,
-    paddingTop: 8,
-    paddingBottom: 8,
-    fontFamily: Fonts.regular,
-    fontSize: 16,
-    lineHeight: 22,
-  },
-  send: {
-    width: 42,
-    height: 42,
+  atButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  atText: {
+    fontSize: 14,
+    fontFamily: Fonts.medium,
+    fontWeight: '500',
+    color: Colors.textSecondary,
+    marginTop: -1,
+  },
+  input: {
+    paddingHorizontal: 0,
+    paddingTop: 4,
+    paddingBottom: 4,
+    minHeight: MIN_INPUT_HEIGHT,
+    maxHeight: MAX_INPUT_HEIGHT,
+    fontFamily: Fonts.regular,
+    fontSize: 16,
+    textAlignVertical: 'top',
+    includeFontPadding: false,
+  },
+  cardBottom: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: Spacing.one,
+    minHeight: 36,
+  },
+  pillsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+  },
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
     borderRadius: Radius.pill,
+    borderWidth: 1,
+  },
+  send: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 18,
+    overflow: 'hidden',
   },
   retry: {
     color: Colors.accent,

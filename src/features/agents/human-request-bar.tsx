@@ -1,0 +1,219 @@
+import { useRef, useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
+
+import { ThemedText } from '@/components/themed-text';
+import { AppIcon } from '@/components/ui/app-icon';
+import { glassRim } from '@/components/ui/glass-surface';
+import { Radius, Spacing } from '@/constants/theme';
+import type { HumanRequest } from '@/domain/herdr';
+import { answerBodyFor, answerOptions } from '@/features/agents/human-request';
+import { useTheme } from '@/hooks/use-theme';
+import { herdrRepository } from '@/services/herdr-repository';
+import { toUserMessage } from '@/utils/user-error';
+
+type Props = {
+  agentId: string;
+  request: HumanRequest;
+};
+
+/**
+ * The agent's open question, pinned above the composer.
+ *
+ * It sits here rather than only in the transcript because an unanswered
+ * question blocks the agent: scrolling away from it should not hide the thing
+ * the agent is waiting on. The transcript keeps the record; this is the
+ * control.
+ *
+ * The composer stays usable throughout. Every option is a shortcut for typing
+ * an answer — the bridge resolves a chosen option back to its label and sends
+ * that as the prompt — so a question the options do not cover can always be
+ * answered in words instead.
+ */
+export function HumanRequestBar({ agentId, request }: Props) {
+  const theme = useTheme();
+  const [selected, setSelected] = useState<string[]>([]);
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  /**
+   * `sending` only shuts the buttons once React has re-rendered, which leaves
+   * a frame in which a second tap still sees the old value. Answering twice
+   * sends the agent a second prompt it never asked for.
+   */
+  const inFlight = useRef(false);
+
+  const options = answerOptions(request);
+  // The bar goes on standing until the bridge marks the request resolved,
+  // which is the agent's schedule and not ours — a poll interval at best.
+  // Without this latch the buttons are live again for that whole window, and
+  // a second tap either injects a duplicate prompt or is refused as an empty
+  // answer, depending on whether a re-parse landed in between.
+  const locked = sending || sent;
+
+  async function answer(optionIds: string[]) {
+    if (inFlight.current || optionIds.length === 0) {
+      return;
+    }
+    inFlight.current = true;
+    setSending(true);
+    setError(null);
+    try {
+      await herdrRepository.answerHumanRequest(
+        agentId,
+        request.id,
+        answerBodyFor(request, optionIds),
+      );
+      setSent(true);
+    } catch (cause) {
+      setError(toUserMessage(cause));
+      inFlight.current = false;
+      setSending(false);
+      return;
+    }
+    // The answer is away. A refresh that fails after that is the poll's
+    // problem to retry, and reporting it here would read as the answer
+    // having failed when it did not.
+    try {
+      await herdrRepository.loadConversation(agentId);
+    } catch (cause) {
+      console.warn('[CONVERSATION] Could not refresh after answering', cause);
+    }
+    setSending(false);
+  }
+
+  function choose(optionId: string) {
+    if (request.multiSelect) {
+      setSelected((current) =>
+        current.includes(optionId)
+          ? current.filter((item) => item !== optionId)
+          : [...current, optionId],
+      );
+      return;
+    }
+    void answer([optionId]);
+  }
+
+  if (options.length === 0) {
+    return null;
+  }
+
+  return (
+    <View style={styles.bar}>
+      <View style={styles.heading}>
+        <AppIcon
+          name={{ ios: 'questionmark.circle', android: 'help', web: 'help' }}
+          size={14}
+          tintColor={theme.accent}
+          fallback="?"
+        />
+        <ThemedText type="label" style={{ color: theme.accent }}>
+          {sent ? 'ANSWER SENT' : request.multiSelect ? 'CHOOSE ANY' : 'NEEDS YOUR INPUT'}
+        </ThemedText>
+      </View>
+
+      {/* Tappable to expand, because while the question is open this is its
+          only rendering — the transcript keeps one only once it is answered —
+          and the bridge falls back to a field's description, which is prose. */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={request.question}
+        accessibilityState={{ expanded }}
+        onPress={() => setExpanded((current) => !current)}>
+        <ThemedText type="small" numberOfLines={expanded ? undefined : 3}>
+          {request.question}
+        </ThemedText>
+      </Pressable>
+
+      <View style={styles.options}>
+        {options.map((option) => {
+          const isSelected = selected.includes(option.id);
+          return (
+            <Pressable
+              key={option.id}
+              accessibilityRole={request.multiSelect ? 'checkbox' : 'button'}
+              accessibilityLabel={option.label}
+              accessibilityHint={option.description ?? undefined}
+              accessibilityState={{ selected: isSelected, disabled: locked }}
+              disabled={locked}
+              onPress={() => choose(option.id)}
+              style={({ pressed }) => [
+                styles.option,
+                glassRim(isSelected ? theme.accent : undefined),
+                {
+                  backgroundColor: isSelected ? theme.accentSoft : theme.backgroundElement,
+                  opacity: locked ? 0.5 : pressed ? 0.72 : 1,
+                },
+              ]}>
+              <ThemedText
+                type="smallBold"
+                style={{ color: isSelected ? theme.accent : theme.text }}>
+                {option.label}
+              </ThemedText>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {request.multiSelect ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Send selected answers"
+          accessibilityState={{ disabled: locked || selected.length === 0 }}
+          disabled={locked || selected.length === 0}
+          onPress={() => void answer(selected)}
+          style={({ pressed }) => [
+            styles.confirm,
+            {
+              backgroundColor: theme.accent,
+              opacity: locked || selected.length === 0 ? 0.4 : pressed ? 0.8 : 1,
+            },
+          ]}>
+          <ThemedText type="smallBold" style={{ color: theme.onAccent }}>
+            {sent
+              ? 'Answer sent'
+              : selected.length > 0
+                ? `Send ${selected.length} selected`
+                : 'Select an answer'}
+          </ThemedText>
+        </Pressable>
+      ) : null}
+
+      {error ? (
+        <ThemedText type="caption" themeColor="danger">
+          {error}
+        </ThemedText>
+      ) : null}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  bar: {
+    gap: Spacing.one,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.one + Spacing.half,
+  },
+  heading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.half,
+  },
+  options: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.one,
+  },
+  option: {
+    minHeight: 40,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.one + Spacing.half,
+    borderRadius: Radius.pill,
+  },
+  confirm: {
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radius.pill,
+  },
+});
