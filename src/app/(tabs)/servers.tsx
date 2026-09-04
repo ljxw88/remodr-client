@@ -120,19 +120,9 @@ export default function HostsScreen() {
           </Pressable>
         </GlassSurface>
       ) : hosts.length === 0 ? (
-        <EmptyState
-          title="Add your first server"
-          body="Connect a server to use remote agents and server tools."
-          actionLabel="Add server"
-          onAction={() => router.push('/hosts/new')}
-        />
+        <EmptyState message="No servers" />
       ) : visibleHosts.length === 0 ? (
-        <View style={styles.centerState}>
-          <ThemedText type="section">No matching servers</ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
-            Try another name, hostname, or username.
-          </ThemedText>
-        </View>
+        <EmptyState message="No matching servers" />
       ) : (
         <ScrollEdgeFrame onScroll={onDockScroll}>
           {(onScroll) => (

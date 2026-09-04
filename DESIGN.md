@@ -79,8 +79,8 @@ a colour lives and which value to tune.
 | Border | `#252830` |
 | Primary text | `#F5F6F8` |
 | Secondary text | `#B2B6C0` |
-| Muted text | `#7F8591` |
-| Placeholder | `#6C727D` |
+| Muted text | `#A2A8B6` |
+| Placeholder | `#8E95A5` |
 | Primary accent | `#6C7CFF` |
 | Success | `#5BE49B` |
 | Warning | `#FFC65C` |

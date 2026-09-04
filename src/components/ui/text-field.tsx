@@ -37,7 +37,7 @@ export function TextField({
 
   return (
     <View style={styles.wrap}>
-      <ThemedText type="label" themeColor="textMuted">
+      <ThemedText type="label" themeColor="textSecondary">
         {label}
       </ThemedText>
       <View

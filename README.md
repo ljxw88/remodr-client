@@ -49,6 +49,65 @@ Expo Go. Rebuild and reinstall the development app after native module changes.
 For physical-device testing with Tailscale, see
 [`docs/physical-android-development.md`](docs/physical-android-development.md).
 
+## Build & Packaging (Standalone APK)
+
+Because this app includes the custom native `RemoteCore` Android module, it cannot run in the generic Expo Go app. Use one of the following methods to build a standalone APK or install directly to a device.
+
+### 1. Direct USB Installation (Development)
+
+Builds and installs directly to an ADB-connected Android device:
+
+```bash
+npx expo run:android --device
+```
+
+### 2. Local Gradle Build (Fastest, zero queue)
+
+Generate native project files and compile a standalone APK locally using Gradle:
+
+```bash
+# 1. Generate the native android directory (if not already present)
+npx expo prebuild --platform android
+
+# 2. Build Debug APK (no keystore signing required)
+cd android && ./gradlew assembleDebug
+```
+
+- **Output APK**: `android/app/build/outputs/apk/debug/app-debug.apk`
+- **Install to device via ADB**:
+  ```bash
+  adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+  ```
+
+To build a Release APK:
+
+```bash
+cd android && ./gradlew assembleRelease
+```
+
+- **Output APK**: `android/app/build/outputs/apk/release/app-release.apk` *(requires signing configuration)*
+
+### 3. Local EAS Build (Zero queue via EAS CLI <- currently only this works)
+
+Build an APK locally using EAS CLI and local Android SDK / JDK:
+
+```bash
+npx eas-cli build --platform android --profile preview --local
+```
+
+### 4. Cloud EAS Build
+
+Build an APK via Expo Application Services in the cloud:
+
+```bash
+# Install EAS CLI and login
+npm install -g eas-cli
+eas login
+
+# Trigger cloud preview build (configured for APK in eas.json)
+eas build --platform android --profile preview
+```
+
 ## Checks
 
 ```bash

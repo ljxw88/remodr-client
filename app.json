@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Remote Workspace",
-    "slug": "remote-workspace",
+    "slug": "sparminal",
     "version": "1.0.0",
     "backgroundColor": "#08090B",
     "orientation": "portrait",
@@ -39,6 +39,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "f52b5f81-315c-4d1c-98f6-b3bb5e7ec67b"
+      }
+    },
+    "owner": "sparkernel"
   }
 }

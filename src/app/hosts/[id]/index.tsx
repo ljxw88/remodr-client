@@ -2,7 +2,7 @@ import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { AppIcon } from '@/components/ui/app-icon';
+import { AppIcon, type AppIconName } from '@/components/ui/app-icon';
 import { AppButton } from '@/components/ui/app-button';
 import { GlassSurface } from '@/components/ui/glass-surface';
 import { Screen } from '@/components/ui/screen';
@@ -18,7 +18,7 @@ import { hostRepository } from '@/services/host-repository';
 import { remoteClient } from '@/services/native-remote-client';
 import { toUserMessage } from '@/utils/user-error';
 
-export default function EditHostScreen() {
+export default function HostDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const theme = useTheme();
   const [host, setHost] = useState<HostProfile | null | undefined>(undefined);
@@ -135,39 +135,40 @@ export default function EditHostScreen() {
             <View style={[styles.serverIcon, { backgroundColor: theme.accentSoft }]}>
               <AppIcon
                 name={{ ios: 'server.rack', android: 'dns', web: 'dns' }}
-                size={26}
-                tintColor={theme.text}
+                size={22}
+                tintColor={theme.accent}
                 fallback="□"
               />
             </View>
             <View style={styles.serverCopy}>
-              <ThemedText type="heading">{host.name}</ThemedText>
-              <ThemedText
-                type="caption"
-                themeColor="textSecondary"
-                style={styles.endpoint}>
-                {host.username}@{host.hostname}:{host.port}
+              <ThemedText type="heading" numberOfLines={1} style={styles.serverName}>
+                {host.name}
               </ThemedText>
-            </View>
-            <View
-              style={[
-                styles.status,
-                {
-                  backgroundColor: session ? theme.successSoft : theme.glass,
-                  borderColor: session ? theme.success : theme.border,
-                },
-              ]}>
-              <View
-                style={[
-                  styles.statusDot,
-                  { backgroundColor: session ? theme.success : theme.textMuted },
-                ]}
-              />
-              <ThemedText
-                type="caption"
-                style={{ color: session ? theme.success : theme.textMuted }}>
-                {session ? 'Connected' : 'Offline'}
-              </ThemedText>
+              <View style={styles.serverMeta}>
+                <ThemedText
+                  type="caption"
+                  themeColor="textSecondary"
+                  numberOfLines={1}
+                  style={styles.endpoint}>
+                  {host.username}@{host.hostname}:{host.port}
+                </ThemedText>
+                <View
+                  accessible
+                  accessibilityLabel={session ? 'Connected' : 'Offline'}
+                  style={styles.status}>
+                  <View
+                    style={[
+                      styles.statusDot,
+                      { backgroundColor: session ? theme.success : theme.textMuted },
+                    ]}
+                  />
+                  <ThemedText
+                    type="caption"
+                    style={{ color: session ? theme.success : theme.textMuted }}>
+                    {session ? 'Connected' : 'Offline'}
+                  </ThemedText>
+                </View>
+              </View>
             </View>
           </View>
           <View style={styles.primaryAction}>
@@ -243,23 +244,35 @@ export default function EditHostScreen() {
           </GlassSurface>
         </View>
 
-        <View style={styles.manage}>
-          {session ? (
-            <AppButton
-              label="Disconnect"
-              variant="secondary"
-              onPress={() => {
-                void remoteClient.disconnectHost(host.id).then(refreshSessions);
-              }}
-            />
-          ) : null}
-          <AppButton
-            label="Edit server"
-            variant="secondary"
-            onPress={() =>
-              router.push({ pathname: '/hosts/[id]/edit', params: { id: host.id } })
-            }
-          />
+        <View style={styles.section}>
+          <ThemedText type="section">Manage</ThemedText>
+          <View style={styles.manageActions}>
+            {session ? (
+              <View style={styles.manageButton}>
+                <AppButton
+                  label="Disconnect"
+                  variant="secondary"
+                  onPress={() => {
+                    void remoteClient
+                      .disconnectHost(host.id)
+                      .then(refreshSessions)
+                      .catch((error) => {
+                        Alert.alert('Could not disconnect', toUserMessage(error));
+                      });
+                  }}
+                />
+              </View>
+            ) : null}
+            <View style={styles.manageButton}>
+              <AppButton
+                label="Edit server"
+                variant="secondary"
+                onPress={() =>
+                  router.push({ pathname: '/hosts/[id]/edit', params: { id: host.id } })
+                }
+              />
+            </View>
+          </View>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Delete server"
@@ -278,11 +291,7 @@ export default function EditHostScreen() {
 
 type ActionTileProps = {
   label: string;
-  icon: {
-    ios: 'folder' | 'waveform.path.ecg' | 'shippingbox' | 'arrow.left.arrow.right';
-    android: 'folder' | 'monitor_heart' | 'deployed_code' | 'lan';
-    web: 'folder' | 'monitor_heart' | 'deployed_code' | 'lan';
-  };
+  icon: AppIconName;
   disabled?: boolean;
   onPress: () => void;
 };
@@ -307,9 +316,9 @@ function ActionTile({ label, icon, disabled, onPress }: ActionTileProps) {
       <View
         style={[
           styles.toolIcon,
-          { backgroundColor: theme.backgroundElement, borderColor: theme.border },
+          { backgroundColor: theme.accentSoft, borderColor: theme.glassBorder },
         ]}>
-        <AppIcon name={icon} size={23} tintColor={theme.text} fallback="□" />
+        <AppIcon name={icon} size={21} tintColor={theme.accent} fallback="□" />
       </View>
       <ThemedText type="caption" numberOfLines={1}>
         {label}
@@ -338,12 +347,12 @@ function Divider() {
 
 const styles = StyleSheet.create({
   content: {
-    gap: Spacing.four,
+    gap: Spacing.three,
     paddingBottom: Spacing.four,
   },
   overview: {
-    gap: Spacing.two,
-    padding: Spacing.two,
+    gap: Spacing.one + Spacing.half,
+    padding: Spacing.one + Spacing.half,
   },
   serverSummary: {
     flexDirection: 'row',
@@ -352,23 +361,31 @@ const styles = StyleSheet.create({
   },
   serverCopy: {
     flex: 1,
+    minWidth: 0,
     gap: 2,
   },
+  serverName: {
+    fontSize: 20,
+    lineHeight: 26,
+    letterSpacing: -0.2,
+  },
+  serverMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+  },
   serverIcon: {
-    width: 52,
-    height: 52,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: Radius.control,
+    borderRadius: 14,
   },
   status: {
+    flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.half,
-    borderWidth: 1,
-    borderRadius: Radius.tag,
-    paddingHorizontal: Spacing.one,
-    paddingVertical: 3,
   },
   statusDot: {
     width: 5,
@@ -376,13 +393,14 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   endpoint: {
+    flex: 1,
     fontFamily: Fonts.mono,
   },
   primaryAction: {
     alignSelf: 'stretch',
   },
   section: {
-    gap: Spacing.two,
+    gap: Spacing.one + Spacing.half,
   },
   toolGrid: {
     flexDirection: 'row',
@@ -390,15 +408,15 @@ const styles = StyleSheet.create({
     gap: Spacing.one,
   },
   tool: {
-    width: '23%',
-    minHeight: 86,
+    flex: 1,
+    minHeight: 72,
     alignItems: 'center',
     justifyContent: 'center',
     gap: Spacing.one,
   },
   toolIcon: {
-    width: 58,
-    height: 58,
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
@@ -408,7 +426,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   infoRow: {
-    minHeight: 52,
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -423,8 +441,12 @@ const styles = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     marginLeft: Spacing.two,
   },
-  manage: {
+  manageActions: {
+    flexDirection: 'row',
     gap: Spacing.one,
+  },
+  manageButton: {
+    flex: 1,
   },
   deleteAction: {
     minHeight: 44,

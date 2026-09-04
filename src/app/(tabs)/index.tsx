@@ -115,7 +115,7 @@ export default function AgentsScreen() {
       : theme.warningSoft;
   const canCreateAgent = connected && spaces.length > 0;
   const canCreateSpace = connected && selectedHost != null;
-  const compactHeader = width < 360;
+  const compactHeader = width < 375;
 
   /** Selection is local state; the device's bridge is already live. */
   function selectDevice(deviceId: string) {
@@ -197,34 +197,13 @@ export default function AgentsScreen() {
       <View style={styles.header}>
         <View style={styles.headerActions}>
           <LiquidGlassButton
-            label={compactHeader ? 'Agent' : 'New agent'}
-            disabled={!canCreateAgent}
-            onPress={() => setShowNewAgent(true)}
+            agentLabel={compactHeader ? 'Agent' : 'New Agent'}
+            canCreateAgent={canCreateAgent}
+            onPressAgent={() => setShowNewAgent(true)}
+            spaceLabel={compactHeader ? 'Space' : 'New Space'}
+            canCreateSpace={canCreateSpace}
+            onPressSpace={() => setShowNewSpace(true)}
           />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="New space"
-            accessibilityState={{ disabled: !canCreateSpace }}
-            disabled={!canCreateSpace}
-            onPress={() => setShowNewSpace(true)}
-            style={({ pressed }) => [
-              styles.newSpace,
-              glassRim(),
-              {
-                backgroundColor: theme.glassStrong,
-                opacity: canCreateSpace ? (pressed ? 0.72 : 1) : 0.42,
-              },
-            ]}>
-            <AppIcon
-              name={{ ios: 'plus', android: 'add', web: 'add' }}
-              size={17}
-              tintColor={canCreateSpace ? theme.textSecondary : theme.textMuted}
-              fallback="+"
-            />
-            <ThemedText type="smallBold" themeColor="textSecondary">
-              {compactHeader ? 'Space' : 'New space'}
-            </ThemedText>
-          </Pressable>
         </View>
         <View
           style={[
@@ -323,39 +302,13 @@ export default function AgentsScreen() {
           </ThemedText>
         </View>
       ) : !selectedHost ? (
-        <EmptyState
-          title="Choose a device"
-          body="Add a server, then select it here to browse its spaces and agents."
-          actionLabel="Open servers"
-          onAction={() => router.push('/servers')}
-        />
+        <EmptyState message={hosts.length === 0 ? 'No devices' : 'Select a device'} />
       ) : !connected && !busy ? (
-        <EmptyState
-          title={`${selectedHost.name} is offline`}
-          body="Connect this device to load its Herdr spaces and agents."
-          actionLabel="Connect device"
-          onAction={() =>
-            router.push({ pathname: '/connect/[id]', params: { id: selectedHost.id } })
-          }
-        />
+        <EmptyState message={`${selectedHost.name} is offline`} />
       ) : spaces.length === 0 ? (
-        <EmptyState
-          title="No spaces available"
-          body="Create a workspace in Herdr, then it will appear here automatically."
-          actionLabel="Refresh"
-          onAction={() => {
-            void herdrRepository.refreshRuntime().catch((error) => {
-              Alert.alert('Could not refresh spaces', toUserMessage(error));
-            });
-          }}
-        />
+        <EmptyState message="No spaces" />
       ) : sections.length === 0 ? (
-        <EmptyState
-          title={activeSpaceId ? 'No agents in this space' : 'No agents available'}
-          body="Start an agent and it will appear here as soon as Herdr detects it."
-          actionLabel="New agent"
-          onAction={() => setShowNewAgent(true)}
-        />
+        <EmptyState message={activeSpaceId ? 'No agents in this space' : 'No agents'} />
       ) : (
         <ScrollEdgeFrame onScroll={onDockScroll}>
           {(onScroll) => (
@@ -519,7 +472,7 @@ function FilterChip({
         <ThemedText
           type="caption"
           numberOfLines={1}
-          style={{ color: selected ? theme.accent : theme.textSecondary }}>
+          style={{ color: selected ? theme.onAccent : theme.textSecondary }}>
           {label}
         </ThemedText>
       </View>
@@ -540,22 +493,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.one,
-  },
-  newAgent: {
-    minHeight: 44,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
-    paddingHorizontal: Spacing.one + Spacing.half,
-    borderRadius: Radius.pill,
-  },
-  newSpace: {
-    minHeight: 44,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.half,
-    paddingHorizontal: Spacing.one + Spacing.half,
-    borderRadius: Radius.pill,
   },
   connection: {
     flexShrink: 0,

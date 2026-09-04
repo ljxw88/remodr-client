@@ -1,5 +1,6 @@
 import { Stack } from 'expo-router';
 
+import { Fonts } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 export default function AgentsLayout() {
@@ -9,7 +10,7 @@ export default function AgentsLayout() {
       screenOptions={{
         headerStyle: { backgroundColor: 'transparent' },
         headerTintColor: theme.text,
-        headerTitleStyle: { fontWeight: 600, fontFamily: 'Inter_600SemiBold' },
+        headerTitleStyle: { fontSize: 15, fontWeight: 600, fontFamily: Fonts.semibold },
         headerShadowVisible: false,
         contentStyle: { backgroundColor: 'transparent' },
       }}

@@ -1,0 +1,30 @@
+{
+  "cli": {
+    "version": ">= 23.2.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EAS_BUILD_DISABLE_NPM_CACHE": "1"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EAS_BUILD_DISABLE_NPM_CACHE": "1"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

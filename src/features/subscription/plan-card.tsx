@@ -99,38 +99,36 @@ export function PlanCard() {
           />
         </View>
 
-        {__DEV__ ? (
-          <View style={[styles.testRow, { backgroundColor: theme.backgroundElement }]}>
-            <ThemedText type="caption" themeColor="textMuted">
-              Development tier:
-            </ThemedText>
-            {isPro ? (
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => void downgradeToFree()}
-                style={({ pressed }) => [
-                  styles.tierSwitchBtn,
-                  { borderColor: theme.warning, opacity: pressed ? 0.7 : 1 },
-                ]}>
-                <ThemedText type="caption" style={{ color: theme.warning, fontWeight: 600 }}>
-                  Use Free
-                </ThemedText>
-              </Pressable>
-            ) : (
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => void upgradeToPro()}
-                style={({ pressed }) => [
-                  styles.tierSwitchBtn,
-                  { borderColor: theme.accent, opacity: pressed ? 0.7 : 1 },
-                ]}>
-                <ThemedText type="caption" style={{ color: theme.accent, fontWeight: 600 }}>
-                  Preview Pro
-                </ThemedText>
-              </Pressable>
-            )}
-          </View>
-        ) : null}
+        <View style={[styles.testRow, { backgroundColor: theme.backgroundElement }]}>
+          <ThemedText type="caption" themeColor="textMuted">
+            Testing tier:
+          </ThemedText>
+          {isPro ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => void downgradeToFree()}
+              style={({ pressed }) => [
+                styles.tierSwitchBtn,
+                { borderColor: theme.warning, opacity: pressed ? 0.7 : 1 },
+              ]}>
+              <ThemedText type="caption" style={{ color: theme.warning, fontWeight: 600 }}>
+                Use Free
+              </ThemedText>
+            </Pressable>
+          ) : (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => void upgradeToPro()}
+              style={({ pressed }) => [
+                styles.tierSwitchBtn,
+                { borderColor: theme.accent, opacity: pressed ? 0.7 : 1 },
+              ]}>
+              <ThemedText type="caption" style={{ color: theme.accent, fontWeight: 600 }}>
+                Preview Pro
+              </ThemedText>
+            </Pressable>
+          )}
+        </View>
       </View>
 
       <UpgradeSheet
