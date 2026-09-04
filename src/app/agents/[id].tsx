@@ -1,4 +1,4 @@
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -31,6 +31,7 @@ import {
   type HumanRequest,
   type RemoteAgent,
 } from '@/domain/herdr';
+import { AgentActionsSheet } from '@/features/agents/agent-actions-sheet';
 import { HumanRequestBar } from '@/features/agents/human-request-bar';
 import { useAgentConversation, useHerdr } from '@/features/agents/use-herdr';
 import { useRevealedText } from '@/features/agents/use-revealed-text';
@@ -64,6 +65,7 @@ export default function AgentConversationScreen() {
   const [reloadToken, setReloadToken] = useState(0);
   const [sending, setSending] = useState(false);
   const [composerHeight, setComposerHeight] = useState(0);
+  const [showActions, setShowActions] = useState(false);
   const listRef = useRef<FlatList<ConversationDisplayItem>>(null);
   /**
    * Newest first, because the transcript renders inverted. Offset zero is then
@@ -233,15 +235,30 @@ export default function AgentConversationScreen() {
            * The label lives on for screen readers, which get nothing from a
            * spinner on its own.
            */
-          headerRight: () =>
-            showWorking ? (
-              <ActivityIndicator
-                size="small"
-                color={Colors.accent}
-                accessibilityLabel={workingLabel}
-                style={styles.headerBusy}
-              />
-            ) : null,
+          headerRight: () => (
+            <View style={styles.headerActions}>
+              {showWorking ? (
+                <ActivityIndicator
+                  size="small"
+                  color={Colors.accent}
+                  accessibilityLabel={workingLabel}
+                />
+              ) : null}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Agent options"
+                onPress={() => setShowActions(true)}
+                hitSlop={Spacing.one}
+                style={({ pressed }) => pressed && styles.pressed}>
+                <AppIcon
+                  name={{ ios: 'ellipsis', android: 'more_horiz', web: 'more_horiz' }}
+                  size={20}
+                  tintColor={Colors.text}
+                  fallback="⋯"
+                />
+              </Pressable>
+            </View>
+          ),
         }}
       />
       <BlurBackdropProvider>
@@ -347,6 +364,17 @@ export default function AgentConversationScreen() {
         />
         </KeyboardAvoidingView>
       </BlurBackdropProvider>
+      {showActions ? (
+        <AgentActionsSheet
+          agent={agent}
+          onClose={() => setShowActions(false)}
+          onClosed={() => {
+            setShowActions(false);
+            // Nothing left to show once the agent is gone.
+            router.back();
+          }}
+        />
+      ) : null}
     </Screen>
   );
 }
@@ -1038,7 +1066,10 @@ const styles = StyleSheet.create({
     padding: Spacing.two,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  headerBusy: {
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
     marginRight: Spacing.one,
   },
   composer: {

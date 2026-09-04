@@ -104,10 +104,25 @@ export function totalDeviceAgentCount(counts: DeviceAgentCounts): number {
   return Object.values(counts).reduce((total, count) => total + count, 0);
 }
 
+export const reasoningEffortSchema = z.enum([
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+]);
+
 export const createAgentInputSchema = z.object({
   provider: launchableAgentProviderSchema,
   workspaceId: z.string().min(1),
   bypassPermissions: z.boolean().default(true),
+  /** Becomes the agent's title, so it can be picked out of a list. */
+  name: z.string().trim().max(60).optional(),
+  /** Left off to let the CLI choose, which is the only always-available one. */
+  model: z.string().trim().optional(),
+  effort: reasoningEffortSchema.optional(),
 });
 export type CreateAgentInput = z.infer<typeof createAgentInputSchema>;
 
@@ -118,6 +133,18 @@ export const createAgentResultSchema = z.object({
   runtime: runtimeStateSchema,
 });
 export type CreateAgentResult = z.infer<typeof createAgentResultSchema>;
+
+export const renameAgentInputSchema = z.object({
+  agentId: z.string().min(1),
+  name: z.string().trim().min(1, 'A name is required').max(60),
+});
+export type RenameAgentInput = z.infer<typeof renameAgentInputSchema>;
+
+export const agentMutationResultSchema = z.object({
+  agentId: z.string(),
+  runtime: runtimeStateSchema,
+});
+export type AgentMutationResult = z.infer<typeof agentMutationResultSchema>;
 
 export const createSpaceInputSchema = z.object({
   cwd: z.string().trim().min(1, 'Root folder is required'),

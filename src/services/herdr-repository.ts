@@ -4,8 +4,10 @@ import {
   closeSpaceInputSchema,
   closeSpaceResultSchema,
   conversationSchema,
+  agentMutationResultSchema,
   createAgentInputSchema,
   createAgentResultSchema,
+  renameAgentInputSchema,
   createSpaceInputSchema,
   createSpaceResultSchema,
   EMPTY_RUNTIME,
@@ -16,6 +18,7 @@ import {
   type BridgeEvent,
   type BridgeHello,
   type CloseSpaceResult,
+  type AgentMutationResult,
   type CreateAgentInput,
   type CreateAgentResult,
   type CreateSpaceInput,
@@ -261,6 +264,32 @@ export class HerdrRepository {
     const deviceId = this.requireSelectedDeviceId();
     const result = createAgentResultSchema.parse(
       await this.deviceConnection(deviceId).transport.request('agent.create', request),
+    );
+    await this.installRuntime(deviceId, result.runtime);
+    return result;
+  }
+
+  async renameAgent(agentId: string, name: string): Promise<AgentMutationResult> {
+    const request = renameAgentInputSchema.parse({ agentId, name });
+    return this.mutateAgent(agentId, 'agent.rename', request);
+  }
+
+  async closeAgent(agentId: string): Promise<AgentMutationResult> {
+    return this.mutateAgent(agentId, 'agent.close', { agentId });
+  }
+
+  /** Both replies carry a fresh runtime, since both change what is in the list. */
+  private async mutateAgent(
+    agentId: string,
+    action: string,
+    request: Record<string, unknown>,
+  ): Promise<AgentMutationResult> {
+    const deviceId = this.deviceIdForAgent(agentId);
+    if (!deviceId) {
+      throw new Error('That agent is not available on a connected device.');
+    }
+    const result = agentMutationResultSchema.parse(
+      await this.transportForAgent(agentId).request(action, request),
     );
     await this.installRuntime(deviceId, result.runtime);
     return result;
