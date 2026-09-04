@@ -74,6 +74,35 @@ export const GlassMaterial = {
     blurReductionFactorStrong: 2.2,
     tintStrong: 'systemThinMaterialDark',
     fillStrong: 'rgba(255,255,255,0.04)',
+    /**
+     * Standing in for the blur when there is no target to sample.
+     *
+     * A blur does two things at once: it hides what is behind and it breaks up
+     * the surface, and it is the second one that makes the thing read as glass.
+     * Backing the surface with the canvas covers the first. Left flat, though,
+     * it reads as a hole cut in the screen — the same colour as its
+     * surroundings, only interrupted.
+     *
+     * Transparency cannot stand in for it. Measured on device: the pass-through
+     * needed before a surface looks like glass leaves sharp text behind it at
+     * around 11 levels of contrast, which is comfortably readable, and the
+     * blur is exactly what used to stop that. Nothing between reads as glass
+     * and hides anything.
+     *
+     * So the plate is lit instead. A sheen from the top edge is what a real one
+     * catches, and it gives the surface a shape of its own rather than the
+     * shape of whatever it covers.
+     */
+    sheen: [
+      'linear-gradient(180deg, rgba(255,255,255,0.125) 0%',
+      'rgba(255,255,255,0.072) 46%',
+      'rgba(255,255,255,0.05) 100%)',
+    ].join(', '),
+    sheenStrong: [
+      'linear-gradient(180deg, rgba(255,255,255,0.165) 0%',
+      'rgba(255,255,255,0.098) 46%',
+      'rgba(255,255,255,0.066) 100%)',
+    ].join(', '),
   },
 } as const;
 

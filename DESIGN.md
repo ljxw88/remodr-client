@@ -186,12 +186,18 @@ plus a border; see [`COLOR.md`](COLOR.md) for the tokens.
   - **Panel** — sits on the canvas. Fill and rim only, no blur, because there
     is nothing behind it but the gradient.
   - **Chrome** — floats over scrolling content. Real backdrop blur.
-- Chrome with no blur target in scope backs itself with the canvas instead of
-  falling through to the panel material. The blur is not decoration: it is the
-  only thing hiding what scrolls beneath, and the panel fill is 7% white, so
-  the fallback leaves the transcript perfectly readable through the composer.
-  A copy of the gradient, aligned to the window, looks identical at rest and
-  hides everything.
+- Chrome with no blur target in scope backs itself with the canvas and lights
+  the plate, instead of falling through to the panel material. The blur is not
+  decoration: it is the only thing hiding what scrolls beneath, and the panel
+  fill is 7% white, so the fallback left the transcript perfectly readable
+  through the composer. A window-aligned copy of the gradient hides everything;
+  a sheen from the top edge is what stops an opaque plate reading as a hole.
+- The fallback is opaque, and transparency is not an option worth retrying.
+  Measured on device: the pass-through needed before a surface looks like glass
+  leaves sharp text behind it at ~11 levels of contrast, which is readable.
+  Smearing it is exactly what the blur did, and there is no blur here —
+  `expo-blur` degrades to a plain translucent view without a `BlurTargetView`,
+  and a target may only live on a screen that is never dismissed.
 - iOS may use native Liquid Glass where supported.
 - Avoid nesting multiple elevated surfaces unless hierarchy requires it.
 
@@ -333,12 +339,17 @@ chromatic orb.
   and ours share a canvas at the same brightness, so it reads as the screen
   being left refusing to go. A slide avoids that but costs 200-400ms that
   cannot be shortened from JavaScript.
-- The change of place is a cut; the arrival is not. Once the new screen is up
-  it settles into place over its own canvas — a 12dp step and a little short of
-  solid, gone in ~200ms. Because it plays *after* the swap there is only ever
-  one screen on show, so it costs nothing in legibility and the change still
-  reads as movement rather than a jump cut. One definition, shared by the dock
-  and by every pushed stack: `features/navigation/screen-entrance.ts`.
+- The change of place is a cut; the arrival is not. Once the new screen is up it
+  settles into place over its own canvas — a 24dp step, gone in 300ms. Because
+  it plays *after* the swap there is only ever one screen on show, so it costs
+  nothing in legibility and the change still reads as movement rather than a
+  jump cut. One definition, shared by the dock and by every pushed stack:
+  `features/navigation/screen-entrance.ts`.
+- Never animate a whole screen's opacity on Android. Alpha on a view group is
+  applied to each child in turn rather than to the finished picture, so a screen
+  at less than full opacity is one whose own layers show through each other —
+  fading the chat in put the transcript *inside* the composer. Animate geometry
+  instead, or pay for a hardware texture.
 - Any route that can be pushed over another paints the canvas behind its own
   header. Headers are transparent, and a route's content starts below its
   header, so that band is one the route never covers — during a transition

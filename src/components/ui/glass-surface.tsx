@@ -117,15 +117,25 @@ export function GlassSurface({
      * fill is 7% white, so the transcript scrolls under the composer and stays
      * perfectly readable through it.
      *
-     * So the surface brings the canvas with it. The gradient is opaque and
-     * `CanvasFill` lines it up with the window, so the surface reads exactly as
-     * it does at rest — it is the same picture already behind it — but nothing
-     * can come through from underneath any more. Where the blur showed a moving
-     * smear this shows still canvas, which at the foot of the gradient is very
-     * nearly the same thing.
+     * There is no blur to fall back *to*, either. `expo-blur` needs a
+     * `BlurTargetView` on Android — without one every method degrades to a
+     * plain translucent view — and a target may only live on a screen that is
+     * never dismissed, which rules out every pushed route. See
+     * `blur-backdrop.tsx`.
      *
-     * Both layers are absolute, and Yoga lays absolute children out against the
-     * padding box, so a chrome surface has to keep `padding: 0` and pad an
+     * So the surface stands in for it with its own copy of the canvas, lit from
+     * the top edge. The canvas covers what the blur used to hide; the sheen
+     * does what the blur used to do to the surface itself, which is give it a
+     * shape that is its own rather than the shape of whatever it covers.
+     *
+     * Opaque, and not for want of trying. Transparency is the obvious way to
+     * suggest glass and it cannot be made to work here: with nothing to smear
+     * what comes through, the pass-through needed before the surface looks like
+     * glass is also enough to leave the text behind it readable. See
+     * `GlassMaterial.chrome.sheen`.
+     *
+     * Every layer here is absolute, and Yoga lays absolute children out against
+     * the padding box, so a chrome surface has to keep `padding: 0` and pad an
      * inner view instead. Both of ours already do, for the same reason the rim
      * is a real border rather than an overlay.
      */
@@ -136,7 +146,11 @@ export function GlassSurface({
           pointerEvents="none"
           style={[
             StyleSheet.absoluteFill,
-            { backgroundColor: strong ? theme.glassStrong : theme.glass },
+            {
+              experimental_backgroundImage: strong
+                ? GlassMaterial.chrome.sheenStrong
+                : GlassMaterial.chrome.sheen,
+            },
           ]}
         />
         {children}
