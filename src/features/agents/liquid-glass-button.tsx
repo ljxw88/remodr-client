@@ -15,10 +15,10 @@ import { ChromaticMetal } from '@/components/ui/chromatic-metal';
 import { LiquidGlass } from '@/components/ui/liquid-glass';
 import { ThemedText } from '@/components/themed-text';
 import { AppIcon } from '@/components/ui/app-icon';
-import { Colors, Radius, Spacing } from '@/constants/theme';
+import { Colors, ControlHeight, Radius, Spacing } from '@/constants/theme';
 import { useShaderClock } from '@/hooks/use-shader-clock';
 
-const HEIGHT = 50;
+const HEIGHT = ControlHeight.header;
 const INSET = 5;
 const ORB = HEIGHT - INSET * 2;
 const BEZEL = 2.5;

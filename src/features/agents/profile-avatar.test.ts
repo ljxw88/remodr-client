@@ -1,6 +1,5 @@
-import { Colors } from '@/constants/theme';
+import { Colors, ControlHeight } from '@/constants/theme';
 import {
-  DEFAULT_AVATAR_BACKGROUND,
   PROFILE_AVATAR_SIZE,
   ProfileAvatar,
   getConnectionStatusColor,
@@ -12,13 +11,13 @@ describe('ProfileAvatar', () => {
     expect(typeof ProfileAvatar).toBe('function');
   });
 
-  it('matches New Agent button height (50px)', () => {
-    expect(PROFILE_AVATAR_SIZE).toBe(50);
+  it('is drawn at the height of the button it shares a line with', () => {
+    expect(PROFILE_AVATAR_SIZE).toBe(ControlHeight.header);
   });
 
-  it('exports a tunable DEFAULT_AVATAR_BACKGROUND color string', () => {
-    expect(typeof DEFAULT_AVATAR_BACKGROUND).toBe('string');
-    expect(DEFAULT_AVATAR_BACKGROUND.length).toBeGreaterThan(0);
+  it('has a fill in the theme rather than one of its own', () => {
+    expect(typeof Colors.avatarFill).toBe('string');
+    expect(Colors.avatarFill.length).toBeGreaterThan(0);
   });
 
   describe('getConnectionStatusColor', () => {

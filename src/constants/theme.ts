@@ -33,6 +33,10 @@ export const Colors = {
   accentSoft: 'rgba(108,124,255,0.22)',
   successSoft: 'rgba(91,228,155,0.16)',
   warningSoft: 'rgba(255,198,92,0.16)',
+  // The profile avatar. Alone among the header controls it is a well rather
+  // than a plate: a translucent indigo that darkens the canvas instead of
+  // lightening it, so the status ring around it has something to read against.
+  avatarFill: 'rgba(26,25,62,0.30)',
 } as const;
 
 /**
@@ -152,6 +156,15 @@ export const ControlHeight = {
   regular: 44,
   /** A row carrying an icon, or a name with a second line under it. */
   row: 56,
+  /**
+   * The home header's pair — the New Agent button and the profile beside it.
+   *
+   * Deliberately off the scale above, which is for controls sharing a panel
+   * with their neighbours. These two are the screen's opening move and stand
+   * alone, so they are drawn larger. They share a number because they sit on
+   * one line and would read as a mistake at different heights.
+   */
+  header: 50,
 } as const;
 
 export const MaxContentWidth = 1200;

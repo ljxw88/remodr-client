@@ -10,18 +10,13 @@ import {
 
 import { ThemedText } from '@/components/themed-text';
 import { AppIcon, type AppIconName } from '@/components/ui/app-icon';
-import { Colors } from '@/constants/theme';
+import { Colors, ControlHeight } from '@/constants/theme';
 import type { HerdrConnectionState } from '@/domain/herdr';
 import { useTheme } from '@/hooks/use-theme';
 
-export const PROFILE_AVATAR_SIZE = 50;
+/** Drawn at the height of the New Agent button it shares a line with. */
+export const PROFILE_AVATAR_SIZE = ControlHeight.header;
 const SIZE = PROFILE_AVATAR_SIZE;
-
-/**
- * Default background color for the profile avatar.
- * Tune this color directly (e.g. '#1E2338', '#141829', 'rgba(255,255,255,0.08)', etc.).
- */
-export const DEFAULT_AVATAR_BACKGROUND = 'rgba(26, 25, 62, 0.3)';
 
 export function getConnectionStatusColor(
   status: HerdrConnectionState | undefined,
@@ -56,7 +51,7 @@ export type ProfileAvatarProps = {
   status?: HerdrConnectionState;
   /** Explicit border color override for connection status */
   statusColor?: string;
-  /** Background pure color override (defaults to adapting to the interface: theme.backgroundElement) */
+  /** Background pure color override (defaults to `avatarFill` in the theme). */
   backgroundColor?: string;
   /** Icon/text tint color override (defaults to theme.text) */
   tintColor?: string;
@@ -92,7 +87,7 @@ export function ProfileAvatar({
 }: ProfileAvatarProps) {
   const theme = useTheme();
   const effectiveBorderColor = statusColor ?? getConnectionStatusColor(status, theme);
-  const effectiveBackgroundColor = backgroundColor ?? DEFAULT_AVATAR_BACKGROUND;
+  const effectiveBackgroundColor = backgroundColor ?? theme.avatarFill;
   const effectiveTintColor = tintColor ?? theme.text;
 
   const handlePress = useCallback(() => {
