@@ -9,7 +9,6 @@ import { Screen } from '@/components/ui/screen';
 import { ScrollEdgeFrame } from '@/components/ui/scroll-edge-frame';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
-import { PlanCard } from '@/features/subscription/plan-card';
 import {
   useDockContentInset,
   useDockScrollHandler,
@@ -46,15 +45,6 @@ export default function SettingsScreen() {
             {...edge}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={[styles.content, { paddingBottom: dockContentInset }]}>
-            {__DEV__ ? (
-              <View style={styles.group}>
-                <ThemedText type="label" themeColor="textMuted" style={styles.groupTitle}>
-                  PLAN PREVIEW
-                </ThemedText>
-                <PlanCard />
-              </View>
-            ) : null}
-
             <SettingsGroup title="Security">
               <SettingRow
                 icon={{ ios: 'key', android: 'key', web: 'key' }}
