@@ -1183,7 +1183,7 @@ class AgentTuningTest(unittest.TestCase):
                         {
                             "type": "session.start",
                             "data": {
-                                "model": None,
+                                "selectedModel": "gpt-5.4",
                                 "reasoningEffort": "medium",
                                 "contextTier": None,
                             },
@@ -1192,7 +1192,7 @@ class AgentTuningTest(unittest.TestCase):
                         {
                             "type": "session.model_change",
                             "data": {
-                                "model": "gpt-5.6-sol",
+                                "newModel": "gpt-5.6-sol",
                                 "reasoningEffort": "max",
                                 "contextTier": "long_context",
                             },
@@ -1220,7 +1220,7 @@ class AgentTuningTest(unittest.TestCase):
                     [
                         {
                             "type": "session.start",
-                            "data": {"model": "gpt-5.4", "reasoningEffort": "low"},
+                            "data": {"selectedModel": "gpt-5.4", "reasoningEffort": "low"},
                         }
                     ],
                 )
@@ -1235,7 +1235,7 @@ class AgentTuningTest(unittest.TestCase):
                         {
                             "type": "session.resume",
                             "data": {
-                                "model": "grok-4.6",
+                                "selectedModel": "grok-4.6",
                                 "reasoningEffort": "xhigh",
                                 "contextTier": "long_context",
                             },
@@ -1246,6 +1246,60 @@ class AgentTuningTest(unittest.TestCase):
                 self.assertEqual(second["model"], "grok-4.6")
                 self.assertEqual(second["context"], "long_context")
                 self.assertGreater(bridge.session_tuning_cache["s1"][0], offset)
+
+    def test_a_model_change_leaves_settings_it_does_not_mention_alone(self):
+        # A change reports only what it changed. Reading a missing effort as a
+        # reset would show the session running a default it never went back to
+        # — the next resume still names the one it kept.
+        with tempfile.TemporaryDirectory() as root:
+            with patch("herdr_mobile_bridge.Path.home", return_value=Path(root)):
+                bridge = Bridge()
+                self._write_session(
+                    root,
+                    "s1",
+                    [
+                        {
+                            "type": "session.resume",
+                            "data": {
+                                "selectedModel": "claude-opus-4.7",
+                                "reasoningEffort": "medium",
+                                "contextTier": "long_context",
+                            },
+                        },
+                        {
+                            "type": "session.model_change",
+                            "data": {"newModel": "claude-sonnet-5"},
+                        },
+                    ],
+                )
+                self.assertEqual(
+                    bridge._session_tuning("s1"),
+                    {
+                        "model": "claude-sonnet-5",
+                        "effort": "medium",
+                        "context": "long_context",
+                    },
+                )
+
+    def test_auto_is_read_as_no_model_pinned(self):
+        # The CLI writes it as the word rather than leaving the field out.
+        with tempfile.TemporaryDirectory() as root:
+            with patch("herdr_mobile_bridge.Path.home", return_value=Path(root)):
+                bridge = Bridge()
+                self._write_session(
+                    root,
+                    "s1",
+                    [
+                        {
+                            "type": "session.resume",
+                            "data": {"selectedModel": "gpt-5.4", "reasoningEffort": "low"},
+                        },
+                        {"type": "session.model_change", "data": {"newModel": "auto"}},
+                    ],
+                )
+                tuning = bridge._session_tuning("s1")
+                self.assertIsNone(tuning["model"])
+                self.assertEqual(tuning["effort"], "low")
 
     def test_a_log_with_nothing_to_say_reports_nothing(self):
         with tempfile.TemporaryDirectory() as root:

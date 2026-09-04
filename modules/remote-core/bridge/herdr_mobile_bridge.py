@@ -54,9 +54,17 @@ TUNING_ARGUMENTS = {
 
 CONTEXT_TIERS = ("default", "long_context")
 
-# The events that state a session's model, reasoning effort and context
-# window. Each reports all three, so the last one seen is the current state.
-SESSION_SETTING_EVENTS = ("session.start", "session.resume", "session.model_change")
+# The events that state a session's model, reasoning effort and context window,
+# and the key each one names the model under.
+#
+# Start and resume report the whole state. A model change reports only what it
+# changed, leaving the rest null — a change with no effort in it keeps the
+# effort the session already had, as the next resume goes on to confirm.
+SESSION_STATE_EVENTS = {"session.start": "selectedModel", "session.resume": "selectedModel"}
+SESSION_CHANGE_EVENTS = {"session.model_change": "newModel"}
+
+# How the CLI writes "no model pinned" in a log.
+NO_MODEL = "auto"
 
 ORDERED_TUNING = ("model", "effort", "context")
 
@@ -1046,18 +1054,25 @@ class Bridge:
                 event = json.loads(raw)
             except (json.JSONDecodeError, UnicodeDecodeError):
                 continue
-            if event.get("type") not in SESSION_SETTING_EVENTS:
-                continue
+            kind = event.get("type")
             data = event.get("data")
             if not isinstance(data, dict):
                 continue
-            # Each of these reports the whole set, and a null is meaningful:
-            # it is the CLI saying it will choose for itself.
-            tuning = {
-                "model": data.get("model") or None,
-                "effort": data.get("reasoningEffort") or None,
-                "context": data.get("contextTier") or None,
-            }
+            if kind in SESSION_STATE_EVENTS:
+                model = data.get(SESSION_STATE_EVENTS[kind])
+                tuning = {
+                    "model": None if model == NO_MODEL else (model or None),
+                    "effort": data.get("reasoningEffort") or None,
+                    "context": data.get("contextTier") or None,
+                }
+            elif kind in SESSION_CHANGE_EVENTS:
+                model = data.get(SESSION_CHANGE_EVENTS[kind])
+                if model:
+                    tuning["model"] = None if model == NO_MODEL else model
+                if data.get("reasoningEffort"):
+                    tuning["effort"] = data["reasoningEffort"]
+                if data.get("contextTier"):
+                    tuning["context"] = data["contextTier"]
 
         self.session_tuning_cache[provider_session_id] = (
             offset + consumed,
