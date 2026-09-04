@@ -837,5 +837,152 @@ class BridgeProtocolTest(unittest.TestCase):
             )
 
 
+class HumanQuestionTest(unittest.TestCase):
+    """The two shapes Copilot writes ask_user in, and how a question is answered."""
+
+    def test_reads_the_plain_question_and_choices_shape(self):
+        # By far the more common shape in real session logs. Reading only the
+        # JSON-Schema shape left most questions invisible to the app.
+        bridge = Bridge()
+        request = bridge._normalize_copilot_question(
+            "call-1",
+            {
+                "question": "Which decomposition should I create?",
+                "choices": ["Three branches (Recommended)", "Four branches"],
+            },
+        )
+        self.assertEqual(request["kind"], "choice")
+        self.assertEqual(request["question"], "Which decomposition should I create?")
+        self.assertEqual(
+            request["options"],
+            [
+                {
+                    "id": "Three branches (Recommended)",
+                    "label": "Three branches (Recommended)",
+                },
+                {"id": "Four branches", "label": "Four branches"},
+            ],
+        )
+
+    def test_a_plain_question_without_choices_is_a_text_question(self):
+        bridge = Bridge()
+        request = bridge._normalize_copilot_question("call-1", {"question": "Which host?"})
+        self.assertEqual(request["kind"], "text")
+        self.assertEqual(request["options"], [])
+
+    def test_reads_the_json_schema_shape(self):
+        bridge = Bridge()
+        request = bridge._normalize_copilot_question(
+            "call-1",
+            {
+                "message": "Pick a transport.",
+                "requestedSchema": {
+                    "properties": {
+                        "protocol": {
+                            "type": "string",
+                            "title": "Transport protocol",
+                            "oneOf": [
+                                {"const": "TCP", "title": "TCP"},
+                                {"const": "UDP", "title": "UDP"},
+                            ],
+                        }
+                    }
+                },
+            },
+        )
+        self.assertEqual(request["question"], "Transport protocol")
+        self.assertEqual(
+            [option["label"] for option in request["options"]], ["TCP", "UDP"]
+        )
+
+    def test_selecting_an_offered_answer_anchors_before_stepping_to_it(self):
+        # The dialog opens on the schema default rather than the top, and both
+        # ends clamp, so over-travelling to the first row is what makes the
+        # position certain without reading the screen back.
+        bridge = Bridge()
+        sent = []
+        bridge._herdr_request = lambda method, params: sent.append((method, params))
+        request = {
+            "options": [
+                {"id": "debug", "label": "debug"},
+                {"id": "info", "label": "info"},
+                {"id": "warn", "label": "warn"},
+            ]
+        }
+        bridge._answer_blocked_dialog({"paneId": "p1"}, request, ["warn"], "warn")
+        self.assertEqual(
+            sent,
+            [("agent.send_keys", {"target": "p1", "keys": ["up"] * 5 + ["down"] * 2 + ["enter"]})],
+        )
+
+    def test_the_first_answer_needs_no_steps_after_anchoring(self):
+        bridge = Bridge()
+        sent = []
+        bridge._herdr_request = lambda method, params: sent.append((method, params))
+        request = {"options": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}]}
+        bridge._answer_blocked_dialog({"paneId": "p1"}, request, ["a"], "A")
+        self.assertEqual(sent[0][1]["keys"], ["up"] * 4 + ["enter"])
+
+    def test_a_typed_answer_goes_through_the_freeform_row(self):
+        # A synthesised yes/no has no row of its own, and neither does anything
+        # the offered answers do not cover.
+        bridge = Bridge()
+        bridge.dialog_settle_seconds = 0
+        sent = []
+        bridge._herdr_request = lambda method, params: sent.append((method, params))
+        bridge._answer_blocked_dialog({"paneId": "p1"}, {"options": []}, [], "Yes")
+        self.assertEqual([method for method, _ in sent], ["agent.send_keys"] * 3)
+        self.assertEqual(sent[0][1]["keys"], ["down"] * 2)
+        self.assertEqual(sent[1][1]["keys"], ["Y", "e", "s"])
+        self.assertEqual(sent[2][1]["keys"], ["enter"])
+
+    def test_a_space_is_sent_by_name_because_herdr_rejects_a_literal_one(self):
+        self.assertEqual(
+            Bridge._text_keys("a b"),
+            ["a", "space", "b"],
+        )
+
+    def test_answering_drives_the_dialog_rather_than_prompting_when_blocked(self):
+        # Herdr refuses agent.prompt while a question dialog is up, so an
+        # answer sent that way never reached the agent at all.
+        bridge = Bridge()
+        sent = []
+        bridge._herdr_request = lambda method, params: sent.append((method, params))
+        bridge.raw_agents = {
+            "agent-1": {"id": "agent-1", "paneId": "p1", "agent_status": "blocked"}
+        }
+        bridge.pending_human_requests = {
+            "req-1": {"options": [{"id": "TCP", "label": "TCP"}]}
+        }
+        bridge._answer_human_request(
+            {"agentId": "agent-1", "requestId": "req-1", "answer": {"selectedOptionIds": ["TCP"]}}
+        )
+        self.assertEqual([method for method, _ in sent], ["agent.send_keys"])
+
+    def test_a_late_refusal_still_reaches_the_dialog(self):
+        # The cached status can lag the agent by a moment.
+        bridge = Bridge()
+        sent = []
+
+        def request(method, params):
+            sent.append((method, params))
+            if method == "agent.prompt":
+                raise BridgeError("agent_blocked", "agent is blocked")
+
+        bridge._herdr_request = request
+        bridge.dialog_settle_seconds = 0
+        bridge.raw_agents = {
+            "agent-1": {"id": "agent-1", "paneId": "p1", "agent_status": "idle"}
+        }
+        bridge.pending_human_requests = {"req-1": {"options": []}}
+        bridge._answer_human_request(
+            {"agentId": "agent-1", "requestId": "req-1", "answer": {"customText": "hi"}}
+        )
+        self.assertEqual(
+            [method for method, _ in sent],
+            ["agent.prompt", "agent.send_keys", "agent.send_keys", "agent.send_keys"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

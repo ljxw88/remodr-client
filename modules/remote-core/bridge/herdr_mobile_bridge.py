@@ -72,6 +72,9 @@ class Bridge:
         )
         self.session_name = os.environ.get("HERDR_SESSION", "default")
         self.device_id = os.environ.get("REMOTE_WORKSPACE_DEVICE_ID", "device")
+        # How long the agent's question dialog is given to redraw between
+        # keystroke batches. An attribute so tests can drive it at zero.
+        self.dialog_settle_seconds = 0.25
         self.output_lock = threading.Lock()
         self.state_lock = threading.Lock()
         self.refresh_lock = threading.Lock()
@@ -240,12 +243,86 @@ class Bridge:
             )
         if not text:
             raise BridgeError("INVALID_ANSWER", "An answer is required.")
-        self._herdr_request(
-            "agent.prompt",
-            {"target": agent["paneId"], "text": text},
-        )
+        # A question puts the agent's own selection UI on screen, and Herdr
+        # refuses `agent.prompt` while that is up — it answers with
+        # `agent_blocked` before sending anything. The dialog has to be driven
+        # the way a person would drive it. The status can be a moment stale, so
+        # a refusal is also taken as proof the dialog is up.
+        if self._agent_is_blocked(agent):
+            self._answer_blocked_dialog(agent, request, selected_ids, text)
+        else:
+            try:
+                self._herdr_request(
+                    "agent.prompt",
+                    {"target": agent["paneId"], "text": text},
+                )
+            except BridgeError as error:
+                if error.code != "agent_blocked":
+                    raise
+                self._answer_blocked_dialog(agent, request, selected_ids, text)
         self.pending_human_requests.pop(request_id, None)
         return {"accepted": True}
+
+    @staticmethod
+    def _agent_is_blocked(agent: dict[str, Any]) -> bool:
+        return Bridge._status(agent.get("agent_status")) == "blocked"
+
+    def _send_keys(self, agent: dict[str, Any], keys: list[str]) -> None:
+        if keys:
+            self._herdr_request(
+                "agent.send_keys", {"target": agent["paneId"], "keys": keys}
+            )
+
+    def _answer_blocked_dialog(
+        self,
+        agent: dict[str, Any],
+        request: dict[str, Any] | None,
+        selected_ids: list[Any],
+        text: str,
+    ) -> None:
+        """Drive the agent's own question dialog.
+
+        The dialog is a list of the offered answers followed by a synthesised
+        "Other (type your answer)" row, and the cursor opens on the schema's
+        default rather than the top. Both ends of the list clamp, so moving
+        further than the list is long is what makes a position certain without
+        having to read the screen back.
+        """
+        options = list(request.get("options", [])) if request else []
+        span = len(options) + 2
+
+        index = None
+        if len(selected_ids) == 1:
+            index = next(
+                (
+                    position
+                    for position, option in enumerate(options)
+                    if isinstance(option, dict) and option.get("id") == selected_ids[0]
+                ),
+                None,
+            )
+
+        if index is not None:
+            # Anchor on the first row, then step down to the wanted one.
+            self._send_keys(agent, ["up"] * span + ["down"] * index + ["enter"])
+            return
+
+        # Anything the offered answers do not cover — a typed reply, a
+        # synthesised yes/no, or several answers at once — goes through the
+        # freeform row at the bottom. Reaching that row swaps the list for a
+        # text field, and characters sent before it has drawn are dropped, so
+        # each stage is given a moment to settle. Herdr's own prompt does the
+        # same thing, sending Enter after a short delay.
+        self._send_keys(agent, ["down"] * span)
+        time.sleep(self.dialog_settle_seconds)
+        self._send_keys(agent, self._text_keys(text))
+        time.sleep(self.dialog_settle_seconds)
+        self._send_keys(agent, ["enter"])
+
+    @staticmethod
+    def _text_keys(text: str) -> list[str]:
+        # Herdr takes one key per character and rejects a literal space.
+        return ["space" if character == " " else character for character in text]
 
     def _require_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
         agent_id = payload.get("agentId")
@@ -1106,6 +1183,27 @@ class Bridge:
         self, request_id: str, arguments: dict[str, Any]
     ) -> dict[str, Any] | None:
         message = arguments.get("message")
+        # Copilot writes ask_user two ways depending on the model behind it:
+        # a plain {question, choices} pair, or a JSON-Schema {message,
+        # requestedSchema}. Both appear in real session logs and the plain one
+        # is by far the more common, so reading only the schema left most
+        # questions invisible to the app.
+        plain_question = arguments.get("question")
+        plain_choices = arguments.get("choices")
+        if isinstance(plain_question, str) and plain_question.strip():
+            options = [
+                {"id": str(choice), "label": str(choice)}
+                for choice in plain_choices
+                if isinstance(choice, (str, int, float))
+            ] if isinstance(plain_choices, list) else []
+            return {
+                "id": request_id,
+                "kind": "choice" if options else "text",
+                "question": plain_question,
+                "options": options,
+                "allowCustomAnswer": True,
+                "multiSelect": False,
+            }
         schema = arguments.get("requestedSchema")
         properties = (
             schema.get("properties")
