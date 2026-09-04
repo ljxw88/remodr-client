@@ -201,9 +201,27 @@ export function HumanRequestBar({ agentId, request }: Props) {
   );
 }
 
+/**
+ * Rounded at the head, square at the foot.
+ *
+ * The foot is overlapped by the input card, and two curves meeting there
+ * pinched the join into an hourglass — the card's own corners plus a set of
+ * ours showing just above them. Square, there is nothing left to see: the
+ * sides run straight down behind the card, and the only corners on show are
+ * the card's.
+ */
+const OPTION_HEIGHT = 40;
+
+const SQUARE_FOOT = {
+  borderTopLeftRadius: Radius.glass,
+  borderTopRightRadius: Radius.glass,
+  borderBottomLeftRadius: 0,
+  borderBottomRightRadius: 0,
+} as const;
+
 const styles = StyleSheet.create({
   wrapper: {
-    borderRadius: Radius.glass,
+    ...SQUARE_FOOT,
     overflow: 'hidden',
     // Runs on behind the input card rather than stopping short of it. The
     // composer's gap would otherwise be a band of clear space with the
@@ -211,7 +229,7 @@ const styles = StyleSheet.create({
     marginBottom: -Spacing.two,
   },
   surface: {
-    borderRadius: Radius.glass,
+    ...SQUARE_FOOT,
     overflow: 'hidden',
     padding: 0,
   },
@@ -241,10 +259,20 @@ const styles = StyleSheet.create({
     marginTop: Spacing.half,
   },
   option: {
-    minHeight: 40,
+    minHeight: OPTION_HEIGHT,
     justifyContent: 'center',
     paddingHorizontal: Spacing.two,
-    borderRadius: Radius.pill,
+    paddingVertical: Spacing.one,
+    // An answer can be a sentence rather than a word, and one wider than the
+    // bar used to run out past its own edge.
+    flexShrink: 1,
+    maxWidth: '100%',
+    /**
+     * Half the height it can never go under, so a one-line answer is a true
+     * pill. `Radius.pill` is 999, which on an answer that wraps to four lines
+     * curves the ends so far in that they cut through the text.
+     */
+    borderRadius: OPTION_HEIGHT / 2,
   },
   confirm: {
     minHeight: 40,
