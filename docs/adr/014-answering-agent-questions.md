@@ -39,7 +39,7 @@ and input conversion live in the bridge and
 [`human-request.ts`](../../src/features/agents/human-request.ts).
 
 The current Claude/Codex adapters do not produce structured questions, and
-OpenCode uses raw fallback output. Do not infer controls from unstructured
+Cursor Agent uses raw fallback output (replacing the former OpenCode support). Do not infer controls from unstructured
 terminal text.
 
 ## Durable queue behavior

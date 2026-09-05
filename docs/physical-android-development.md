@@ -28,7 +28,7 @@ npx expo start --dev-client --localhost
 ```
 
 Replace `YOUR_DEVICE_SERIAL` with the identifier reported by `adb devices`.
-Open **remodr** and select the development server at
+Open **Remodr** and select the development server at
 `http://127.0.0.1:8081` in its launcher.
 
 Check the forwarding rule with:
@@ -58,7 +58,7 @@ adb -s "$ANDROID_SERIAL" install -r \
   android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-The application ID remains `com.anonymous.remoteworkspace` after the remodr
+The application ID remains `com.anonymous.remoteworkspace` after the Remodr
 rename. Display branding, deep-link scheme, and installation identity are
 different settings; see [app identity](development.md#app-identity).
 

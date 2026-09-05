@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from herdr_mobile_bridge import (
     BYPASS_ARGUMENTS,
+    CODEX_STATUS_CONFIG,
     Bridge,
     BridgeError,
     SUBSCRIPTIONS,
@@ -15,6 +16,20 @@ from herdr_mobile_bridge import (
 
 
 class BridgeProtocolTest(unittest.TestCase):
+    def test_shipped_model_catalogues_only_offer_executable_tuning(self):
+        catalogues = Path(__file__).resolve().parents[3] / "src" / "domain" / "model-catalogues"
+        for provider in SUPPORTED_PROVIDERS:
+            catalogue = json.loads((catalogues / f"{provider}.json").read_text())
+            self.assertEqual(catalogue["provider"], provider)
+            for model in catalogue["models"]:
+                for effort in [None, *model["efforts"]]:
+                    for context in [None, *(option["tier"] for option in model["contexts"])]:
+                        with self.subTest(provider=provider, model=model["id"], effort=effort, context=context):
+                            arguments = Bridge._tuning_arguments(
+                                provider, {"model": model["id"], "effort": effort, "context": context}
+                            )
+                            self.assertEqual(arguments[:2], ["--model", model["id"]])
+
     def test_supported_providers_have_herdrm_compatible_bypass_arguments(self):
         self.assertEqual(
             BYPASS_ARGUMENTS,
@@ -22,9 +37,101 @@ class BridgeProtocolTest(unittest.TestCase):
                 "claude": ["--dangerously-skip-permissions"],
                 "codex": ["--dangerously-bypass-approvals-and-sandbox"],
                 "copilot": ["--allow-all-tools"],
-                "opencode": ["--auto"],
+                "cursor": ["--force"],
             },
         )
+
+    def test_cursor_aliases_are_normalized_without_claiming_generic_agents(self):
+        for alias in ("cursor", "cursor-agent", "Cursor_Agent"):
+            with self.subTest(alias=alias):
+                self.assertEqual(Bridge._provider(alias), "cursor")
+        for name in ("agent", "opencode", "OpenCode", "some-cursor-tool"):
+            with self.subTest(name=name):
+                self.assertEqual(Bridge._provider(name), "unknown")
+        self.assertEqual(Bridge._provider_label("cursor"), "Cursor Agent")
+
+    def test_manifest_catalog_contains_only_supported_providers(self):
+        bridge = Bridge()
+        with patch.object(
+            bridge,
+            "_herdr_request",
+            return_value={
+                "manifests": [
+                    {"agent": "copilot"},
+                    {"agent": "claude-code"},
+                    {"agent": "codex"},
+                    {"agent": "cursor-agent", "aliases": ["cursor", "agent"]},
+                    {"agent": "opencode"},
+                    {"agent": "agent"},
+                ]
+            },
+        ):
+            catalog = bridge._agent_catalog_snapshot()
+        self.assertEqual(
+            [item["provider"] for item in catalog], list(SUPPORTED_PROVIDERS)
+        )
+        self.assertTrue(all(item["available"] for item in catalog))
+        self.assertEqual(catalog[-1]["aliases"], ["cursor", "agent"])
+        self.assertEqual(
+            [item["provider"] for item in bridge._fallback_agent_catalog()],
+            list(SUPPORTED_PROVIDERS),
+        )
+
+    def test_generic_agent_manifest_does_not_advertise_cursor(self):
+        bridge = Bridge()
+        with patch.object(
+            bridge,
+            "_herdr_request",
+            return_value={"manifests": [{"agent": "agent", "aliases": ["cursor"]}]},
+        ):
+            catalog = bridge._agent_catalog_snapshot()
+        self.assertFalse(any(item["available"] for item in catalog))
+
+    def test_retuning_is_advertised_only_for_copilot(self):
+        bridge = Bridge()
+        capabilities = bridge._capabilities(check_store=False)
+        self.assertEqual(capabilities["providers"], list(SUPPORTED_PROVIDERS))
+        self.assertEqual(
+            set(capabilities["providerCapabilities"]), set(SUPPORTED_PROVIDERS)
+        )
+        for provider in SUPPORTED_PROVIDERS:
+            with self.subTest(provider=provider):
+                self.assertEqual(
+                    capabilities["providerCapabilities"][provider]["supportsRetuning"],
+                    provider == "copilot",
+                )
+                self.assertEqual(
+                    bridge._agent_capabilities(provider, None)["supportsRetuning"],
+                    provider == "copilot",
+                )
+        self.assertFalse(bridge._agent_capabilities("unknown", None)["supportsRetuning"])
+        self.assertFalse(
+            capabilities["providerCapabilities"]["cursor"]["structuredConversation"]
+        )
+
+    def test_legacy_opencode_panes_become_unknown_with_terminal_fallback(self):
+        bridge = Bridge()
+        snapshot = bridge._normalize_snapshot(
+            {
+                "agents": [
+                    {"pane_id": "p1", "agent": "opencode", "workspace_id": "w1"}
+                ],
+                "panes": [{"pane_id": "p1"}],
+            }
+        )
+        agent = snapshot["agents"][0]
+        self.assertEqual(agent["provider"], "unknown")
+        self.assertTrue(agent["capabilities"]["fallback"])
+        with patch.object(bridge, "_load_fallback", return_value={"items": []}) as fallback:
+            self.assertEqual(bridge._load_conversation(agent), {"items": []})
+        fallback.assert_called_once_with(agent)
+
+    def test_cursor_conversation_uses_terminal_fallback(self):
+        bridge = Bridge()
+        agent = {"id": "a1", "paneId": "p1", "provider": "cursor"}
+        with patch.object(bridge, "_load_fallback", return_value={"items": []}) as fallback:
+            self.assertEqual(bridge._load_conversation(agent), {"items": []})
+        fallback.assert_called_once_with(agent)
 
     def test_global_subscriptions_do_not_require_pane_parameters(self):
         self.assertNotIn("pane.agent_status_changed", SUBSCRIPTIONS)
@@ -223,7 +330,11 @@ class BridgeProtocolTest(unittest.TestCase):
             "codex",
             "codex",
             "p2",
-            ["--dangerously-bypass-approvals-and-sandbox"],
+            [
+                "--dangerously-bypass-approvals-and-sandbox",
+                "-c",
+                'tui.status_line=["session-id","model-with-reasoning","current-dir"]',
+            ],
         )
         self.assertEqual(result["agentId"], agent_id)
 
@@ -578,7 +689,7 @@ class BridgeProtocolTest(unittest.TestCase):
                 {"event": {"type": "pane.closed"}, "data": {}}
             )
 
-        refresh.assert_called_once_with()
+        refresh.assert_called_once_with(inspect_copilot=False)
         write_event.assert_called_once_with("runtime.snapshot", bridge.runtime)
 
     def test_working_agent_fallback_reads_visible_output_without_scrollback(self):
@@ -1040,12 +1151,120 @@ class AgentManagementTest(unittest.TestCase):
             Bridge._tuning_arguments("copilot", {"model": "", "effort": None}), []
         )
 
-    def test_other_providers_are_left_alone(self):
-        # They take a model differently, or not from the command line at all,
-        # and a guessed flag would fail at startup.
-        self.assertEqual(
-            Bridge._tuning_arguments("claude", {"model": "gpt-5.4", "effort": "high"}), []
-        )
+    def test_creation_tuning_uses_each_providers_flags(self):
+        cases = [
+            ("claude", {"model": "sonnet", "effort": "high"},
+             ["--model", "sonnet", "--effort", "high"]),
+            ("codex", {"model": "gpt-5.4", "effort": "xhigh"},
+             ["--model", "gpt-5.4", "-c", 'model_reasoning_effort="xhigh"']),
+            ("codex", {"model": "gpt-5.6-sol", "effort": "ultra"},
+             ["--model", "gpt-5.6-sol", "-c", 'model_reasoning_effort="ultra"']),
+            ("codex", {"model": "gpt-5.6-sol", "effort": "max"},
+             ["--model", "gpt-5.6-sol", "-c", 'model_reasoning_effort="max"']),
+            ("cursor", {"model": "sonnet-4.6-thinking"},
+             ["--model", "sonnet-4.6-thinking"]),
+        ]
+        for provider, payload, expected in cases:
+            with self.subTest(provider=provider):
+                self.assertEqual(Bridge._tuning_arguments(provider, payload), expected)
+                self.assertEqual(Bridge._tuning_arguments(provider, {}), [])
+
+    def test_unsupported_tuning_is_not_silently_discarded(self):
+        cases = [
+            ("cursor", {"effort": "high"}, "UNSUPPORTED_TUNING"),
+            ("cursor", {"context": "long_context"}, "UNSUPPORTED_TUNING"),
+            ("claude", {"context": "long_context"}, "UNSUPPORTED_TUNING"),
+            ("codex", {"context": "default"}, "UNSUPPORTED_TUNING"),
+            ("claude", {"effort": "minimal"}, "INVALID_EFFORT"),
+            ("claude", {"effort": "ultra"}, "INVALID_EFFORT"),
+            ("claude", {"effort": "ultracode"}, "INVALID_EFFORT"),
+            ("copilot", {"effort": "ultra"}, "INVALID_EFFORT"),
+            ("cursor", {"effort": "ultra"}, "UNSUPPORTED_TUNING"),
+            ("codex", {"effort": "ludicrous"}, "INVALID_EFFORT"),
+            ("copilot", {"effort": "ludicrous"}, "INVALID_EFFORT"),
+            ("opencode", {"model": "a-model"}, "INVALID_PROVIDER"),
+            ("unknown", {}, "INVALID_PROVIDER"),
+        ]
+        for provider, payload, code in cases:
+            with self.subTest(provider=provider, payload=payload):
+                with self.assertRaises(BridgeError) as caught:
+                    Bridge._tuning_arguments(provider, payload)
+                self.assertEqual(caught.exception.code, code)
+
+    def test_invalid_tuning_types_are_rejected(self):
+        for key in ("model", "effort", "context"):
+            for value in (True, 1, [], {}):
+                with self.subTest(key=key, value=value):
+                    with self.assertRaises(BridgeError) as caught:
+                        Bridge._tuning_arguments("copilot", {key: value})
+                    self.assertEqual(caught.exception.code, f"INVALID_{key.upper()}")
+        with self.assertRaises(BridgeError) as caught:
+            Bridge._tuning_arguments("copilot", {"model": "model\n/exit"})
+        self.assertEqual(caught.exception.code, "INVALID_MODEL")
+
+    def test_all_creation_providers_pass_tuning_and_optional_bypass_to_herdr(self):
+        cases = [
+            ("copilot", "copilot", {"model": "gpt-5.4", "effort": "high"},
+             ["--model", "gpt-5.4", "--effort", "high"]),
+            ("claude", "claude", {"model": "sonnet", "effort": "high"},
+             ["--model", "sonnet", "--effort", "high"]),
+            ("codex", "codex", {"model": "gpt-5.4", "effort": "high"},
+             ["--model", "gpt-5.4", "-c", 'model_reasoning_effort="high"']),
+            ("cursor", "cursor", {"model": "auto"}, ["--model", "auto"]),
+            ("cursor-agent", "cursor", {"model": "auto"}, ["--model", "auto"]),
+        ]
+        for requested, provider, tuning, expected in cases:
+            for bypass in (True, False):
+                with self.subTest(provider=requested, bypass=bypass):
+                    bridge = Bridge()
+                    bridge.runtime = {
+                        "workspaces": [{"id": "w1"}],
+                        "agents": [{"paneId": "p1"}],
+                    }
+                    with (
+                        patch.object(bridge, "_refresh_runtime"),
+                        patch.object(
+                            bridge, "_agent_catalog_snapshot",
+                            return_value=[{"provider": provider, "available": True}],
+                        ),
+                        patch.object(
+                            bridge, "_herdr_request",
+                            return_value={"root_pane": {"pane_id": "p1"}},
+                        ) as request,
+                    ):
+                        bridge._create_agent({
+                            "provider": requested, "workspaceId": "w1",
+                            "bypassPermissions": bypass, **tuning,
+                        })
+                    start = next(
+                        call.args[1] for call in request.call_args_list
+                        if call.args[0] == "agent.start"
+                    )
+                    args = list(BYPASS_ARGUMENTS[provider]) if bypass else []
+                    args.extend(expected)
+                    if provider == "copilot":
+                        args.extend(["--session-id", bridge.started_sessions["p1"]])
+                    else:
+                        self.assertEqual(bridge.started_sessions, {})
+                    if provider == "codex":
+                        args.extend(["-c", CODEX_STATUS_CONFIG])
+                    self.assertEqual(start["kind"], provider)
+                    self.assertEqual(start["args"], args)
+                    self.assertEqual(bridge.agent_tuning["p1"]["model"], tuning["model"])
+
+    def test_bad_creation_tuning_fails_before_creating_a_pane(self):
+        for payload, code in [
+            ({"provider": "cursor", "effort": "high"}, "UNSUPPORTED_TUNING"),
+            ({"provider": "opencode"}, "INVALID_PROVIDER"),
+            ({"provider": "codex", "context": "long_context"}, "UNSUPPORTED_TUNING"),
+        ]:
+            with self.subTest(payload=payload):
+                bridge = Bridge()
+                with patch.object(bridge, "_herdr_request") as request:
+                    with self.assertRaises(BridgeError) as caught:
+                        bridge._create_agent({"workspaceId": "w1", **payload})
+                self.assertEqual(caught.exception.code, code)
+                request.assert_not_called()
 
     def test_an_unknown_effort_is_refused_rather_than_passed_on(self):
         with self.assertRaises(BridgeError) as caught:
@@ -1070,9 +1289,11 @@ class AgentManagementTest(unittest.TestCase):
         self.assertEqual(args, ["--session-id", session_id])
 
     def test_only_copilot_is_told_which_session_to_open(self):
-        args = []
-        self.assertIsNone(Bridge._new_session_arguments("claude", "Name", args))
-        self.assertEqual(args, [])
+        for provider in ("claude", "cursor"):
+            with self.subTest(provider=provider):
+                args = []
+                self.assertIsNone(Bridge._new_session_arguments(provider, "Name", args))
+                self.assertEqual(args, [])
 
     def test_a_started_session_is_known_before_herdr_reports_it(self):
         # Herdr only learns the id once the agent writes its state out. Until
@@ -1391,7 +1612,7 @@ class AgentTuningTest(unittest.TestCase):
             "context": None,
         }
         self.assertEqual(
-            bridge._reported_tuning("p1", "sess-1")["model"], "claude-haiku-4.5"
+            bridge._reported_tuning("p1", "sess-1", "copilot")["model"], "claude-haiku-4.5"
         )
 
     def test_an_agent_started_elsewhere_is_read_from_its_log(self):
@@ -1406,7 +1627,7 @@ class AgentTuningTest(unittest.TestCase):
             "context": "long_context",
         }
         self.assertEqual(
-            bridge._reported_tuning("p1", "sess-1"),
+            bridge._reported_tuning("p1", "sess-1", "copilot"),
             {"model": "gpt-5.6-luna", "effort": "xhigh", "context": "long_context"},
         )
 
@@ -1420,7 +1641,7 @@ class AgentTuningTest(unittest.TestCase):
             "context": "long_context",
         }
         self.assertEqual(
-            bridge._reported_tuning("p1", "sess-1"),
+            bridge._reported_tuning("p1", "sess-1", "copilot"),
             {"model": "gpt-5.4", "effort": "high", "context": "long_context"},
         )
 
@@ -1570,14 +1791,60 @@ class AgentTuningTest(unittest.TestCase):
             bridge._retune_agent({"agentId": "a1", "effort": "high"})
         self.assertEqual(caught.exception.code, "SESSION_UNKNOWN")
 
-    def test_a_provider_that_takes_no_flags_is_refused(self):
-        bridge = self._bridge(
-            {"model": None, "effort": None, "context": None}, provider="claude"
-        )
-        bridge._herdr_request = lambda method, params: {}
-        with self.assertRaises(BridgeError) as caught:
-            bridge._retune_agent({"agentId": "a1", "model": "gpt-5.4"})
-        self.assertEqual(caught.exception.code, "PROVIDER_NOT_TUNABLE")
+    def test_non_copilot_retuning_is_refused_without_any_cli_mutation(self):
+        for provider in ("claude", "codex", "cursor", "unknown"):
+            with self.subTest(provider=provider):
+                bridge = self._bridge({}, provider=provider)
+                with patch.object(bridge, "_herdr_request") as request:
+                    with self.assertRaises(BridgeError) as caught:
+                        bridge._retune_agent({"agentId": "a1", "model": "gpt-5.4"})
+                self.assertEqual(caught.exception.code, "PROVIDER_NOT_TUNABLE")
+                request.assert_not_called()
+
+    def test_retuning_does_not_normalize_invalid_types_into_defaults(self):
+        bridge = self._bridge({"model": "gpt-5.4"})
+        with patch.object(bridge, "_herdr_request") as request:
+            with self.assertRaises(BridgeError) as caught:
+                bridge._retune_agent({"agentId": "a1", "model": {"bad": "value"}})
+        self.assertEqual(caught.exception.code, "INVALID_MODEL")
+        request.assert_not_called()
+
+    def test_other_providers_never_read_copilot_session_tuning(self):
+        for provider in ("claude", "codex", "cursor", "unknown"):
+            with self.subTest(provider=provider):
+                bridge = Bridge()
+                bridge.agent_tuning = {"p1": {"model": "provider-model"}}
+                with patch.object(bridge, "_session_tuning") as session_tuning:
+                    snapshot = bridge._normalize_snapshot({
+                        "agents": [{
+                            "pane_id": "p1", "agent": provider,
+                            "agent_session": {"value": "shared-session-id"},
+                        }],
+                        "panes": [{"pane_id": "p1"}],
+                    })
+                self.assertEqual(
+                    snapshot["agents"][0]["tuning"],
+                    {"model": "provider-model", "effort": None, "context": None},
+                )
+                session_tuning.assert_not_called()
+
+    def test_non_copilot_pane_cannot_inherit_a_copilot_session_id(self):
+        bridge = Bridge()
+        bridge.started_sessions = {"p1": "previous-copilot-session"}
+        snapshot = bridge._normalize_snapshot({
+            "agents": [{"pane_id": "p1", "agent": "cursor"}],
+            "panes": [{"pane_id": "p1"}],
+        })
+        self.assertIsNone(snapshot["agents"][0]["providerSessionId"])
+
+    def test_pending_cursor_agent_reports_creation_tuning_and_no_retuning(self):
+        bridge = Bridge()
+        bridge.agent_tuning = {"p1": {"model": "auto", "effort": None, "context": None}}
+        bridge._install_pending_agent("a1", "cursor", "cursor", "w1", "p1")
+        agent = bridge.runtime["agents"][0]
+        self.assertEqual(agent["tuning"], bridge.agent_tuning["p1"])
+        self.assertEqual(agent["provider"], "cursor")
+        self.assertFalse(agent["capabilities"]["supportsRetuning"])
 
     def test_a_context_window_becomes_a_command_line_argument(self):
         self.assertEqual(

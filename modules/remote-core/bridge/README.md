@@ -12,6 +12,180 @@ An unavailable journal produces a hello with `durableCommands: false`,
 example `COMMAND_STORE_UNAVAILABLE`); the bridge then exits without dispatching.
 Availability can change after hello: later storage failures still fail closed.
 
+## Providers and model settings
+
+The bridge supports **GitHub Copilot, Claude Code, Codex, and Cursor Agent**.
+Availability comes only from Herdr's `server.agent_manifests`, never the bridge
+host's `PATH`. Herdr must advertise the provider and launch its interactive CLI.
+The mobile provider ID and Herdr launch kind for Cursor are `cursor`; detection
+also recognizes `cursor-agent` / `cursor_agent`. The generic executable name
+`agent` alone is not sufficient evidence of Cursor. OpenCode is not advertised
+or launchable; existing OpenCode panes become `unknown` and retain terminal
+fallback instead of breaking the mobile provider schema.
+
+`agent.create` accepts optional `model`, `effort`, and `context` fields:
+
+| Provider | Model | Effort | Context | Permission bypass |
+| --- | --- | --- | --- | --- |
+| Copilot | `--model <id>` | `--effort <value>` | `--context <value>` | `--allow-all-tools` |
+| Claude Code | `--model <id-or-alias>` | `--effort <value>` | Unsupported | `--dangerously-skip-permissions` |
+| Codex | `--model <id>` | `-c 'model_reasoning_effort="<value>"'` | Unsupported | `--dangerously-bypass-approvals-and-sandbox` |
+| Cursor Agent (`agent`) | `--model <id>` | Unsupported | Unsupported | `--force` |
+
+Codex's config assignment is a single argument containing a quoted TOML string;
+the table's surrounding single quotes are shell notation, not part of the
+argument. `bypassPermissions: false` omits the bypass flag for every provider;
+an absent setting retains the existing default of `true`. Cursor's `--force`
+allows commands unless explicitly denied; it does not disable its sandbox.
+
+Omitted, null, or blank tuning values retain CLI defaults. Non-string values
+fail with `INVALID_MODEL`, `INVALID_EFFORT`, or `INVALID_CONTEXT`; populated
+settings unsupported by that provider fail with `UNSUPPORTED_TUNING` before a
+pane is created. Unknown effort/context values are also rejected, not dropped.
+Copilot accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`;
+Claude accepts `low`, `medium`, `high`, `xhigh`, `max`;
+Codex accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`.
+The Codex-only `ultra` setting is available on models advertising it through
+Codex's `model/list` API.
+Claude's `ultracode` orchestration mode is not a reasoning-effort value in this
+contract.
+Actual model availability and model-specific effort support depend on the
+installed CLI/account. The bridge passes nonempty model IDs through; the app's
+JSON catalogs decide which choices to offer. Only Copilot accepts `default`
+and `long_context` as a separate context setting. Claude/Cursor context or
+thinking variants must be represented by the CLI's model ID, not invented flags.
+
+**Live retuning remains Copilot-only.** Both hello
+`capabilities.providerCapabilities[provider].supportsRetuning` and each
+agent's `capabilities.supportsRetuning` report this explicitly. Clients must
+not equate creation tuning with live-retuning support. `agent.retune` rejects
+every other provider with `PROVIDER_NOT_TUNABLE` before issuing CLI input.
+Copilot retains its existing `/model` and session-restart behavior; its
+`--session-id`, `/exit`, and session-log parsing never apply to other providers.
+Non-Copilot tuning reports only settings remembered from bridge-created agents;
+externally started sessions have unknown settings. Cursor conversations use
+terminal fallback, not an unverified structured-session adapter.
+
+Flag references:
+[Claude CLI](https://code.claude.com/docs/en/cli-reference),
+[Codex CLI](https://developers.openai.com/codex/cli/reference/) and
+[configuration](https://developers.openai.com/codex/config-reference/),
+[Cursor parameters](https://cursor.com/docs/cli/reference/parameters).
+
+## Session identity and `/clear`
+
+Codex creation configures a live thread UUID in its status line because current
+Codex defers session hooks until the first turn. Only the exact pane's live footer
+is identity evidence; old `/status` text and UUIDs in messages are not. The
+`session-id` status item is a compatibility alias of `thread-id`.
+
+The live UUID overrides stale hook metadata after `/new`. Missing footer evidence
+reports `SESSION_IDENTITY_UNRESOLVED` on reads; commands fail with
+`COMMAND_PRECONDITION_FAILED` before input, rather than offering a retry of a
+permanent failed receipt. A prior display binding can be retained while a dialog
+hides the footer, but it is not authorization to dispatch. See the
+[Codex integration guide](../../../docs/herdr-mobile-architecture.md#codex-startup-and-thread-identity).
+
+Every `agent.conversation` request refreshes Herdr's `session.snapshot`
+**before** resolving the agent and reading its transcript. For Copilot, native
+session references are reconciled against the foreground CLI's open session
+database as described below; the native reference is not the sole authority.
+This also detects `/clear` session rotations that produce no status event.
+When the normalized runtime changes, the bridge emits `runtime.snapshot`
+before returning the conversation; unchanged polls do not emit redundant
+snapshots merely because the poll timestamp changed.
+
+All conversation responses, including empty semantic transcripts and terminal
+fallback, include:
+
+```json
+{
+  "agentId": "agent-id-from-snapshot",
+  "provider": "copilot",
+  "providerSessionId": "the-session-used-for-this-read"
+}
+```
+
+`providerSessionId` is explicitly `null` when unknown. A transcript is selected
+by that identity, never by the newest session under a working directory.
+Valid empty semantic transcripts return `items: []`; they are not replaced
+with old terminal scrollback. A missing/unsupported transcript may still use
+terminal fallback. Snapshot failures return an error rather than cached
+conversation success, and transcript read errors return
+`CONVERSATION_UNAVAILABLE` instead of silently switching to terminal output.
+
+On a reported identity change, the bridge reconciles remembered launch IDs,
+invalidates that agent's transcript/question state and old tuning, and reads
+the new session's settings. A known launch ID is used only before Herdr has
+first reported a session for the pane. Once a reported identity disappears,
+the old launch ID is not reused. `agent.retune` independently refreshes the
+authoritative identity, so it cannot restart the original pre-clear session
+just because no conversation poll ran first. Transcript caches include the
+agent ID as well as the provider session, preventing two panes sharing a
+session from returning one another's response identity.
+Copilot events tagged with a child `agentId` are excluded from the parent
+transcript and tuning: internal delegation prompts, replies, and questions
+must not be presented as the user's main conversation.
+
+### Copilot foreground-process session authority
+
+Some Herdr versions retain Copilot's original session reference even after
+accepting a native clear/session report. The bridge therefore requests
+`pane.process_info` and verifies the **foreground process-group leader** is the
+exact `copilot` executable in that pane. A child Copilot process, background
+SDK process, or another pane's process metadata is not sufficient.
+
+Only that PID's open descriptors are inspected: Linux uses `/proc/<pid>/fd`;
+macOS uses `lsof -nP -a -p <pid> -F0pun`. The process must belong to the bridge
+user. Only the exact path
+`~/.copilot/session-state/<session-id>/session.db` qualifies, not other homes,
+sidecars, transcript modification times, directory order, or cwd. A unique
+open session database overrides a stale native session reference throughout
+runtime normalization, conversations, retuning, and durable precondition checks.
+The pane's process-group/shell binding is checked again after inspection.
+
+Inspection is targeted and bounded: two seconds, 512 KiB of descriptor output,
+and at most 4,096 Linux descriptors. No system-wide process/file scan is used.
+Session results are not cached by PID across refreshes: `/clear` can change the
+open database without changing PID, and a restart can reuse a PID. Changed
+descriptor evidence goes through the same session-cache invalidation as a
+native identity rotation.
+
+High-volume status events are hints: they retain the last process-bound identity
+for the same terminal without repeating descriptor scans. This prevents event
+backlogs from starving request handling. Explicit runtime/conversation requests
+and mutation preconditions always inspect afresh, so hints never authorize a
+send or choose the transcript to read.
+
+Multiple candidates or a process change during inspection fail closed:
+runtime identity becomes `null`, and conversation/retune requests return
+`SESSION_IDENTITY_UNRESOLVED`, rather than selecting an old transcript. If
+process metadata or inspection is unavailable, or an idle/new CLI has not opened
+its optional session database, on an installation that has not
+established process-bound identity, the bridge retains native/launch-ID behavior
+and emits an explicit `COPILOT_SESSION_IDENTITY` diagnostic identifying it as
+unverified. Repeated identical diagnostics are suppressed. Once a pane has
+established process-bound identity in this bridge process, transient inspection
+failure cannot restore a stale native ID: it also fails closed until inspection
+recovers.
+
+When both descriptor inspection and accurate native reporting are unavailable,
+the bridge cannot reliably detect `/clear`. That compatibility fallback remains
+limited; it never guesses from the newest session file or working directory.
+
+Runtime reconciliation, conversation reads, and subscription refreshes are
+serialized inside the bridge. Herdr/provider changes outside the bridge are
+not atomic with a read: a response can still arrive after a newer identity
+event. Clients must compare its explicit `providerSessionId` with their current
+agent identity and discard stale responses. For terminal fallback, this field
+identifies the refreshed target binding; terminal output itself is not a
+session-scoped transcript and may contain scrollback.
+
+Session reconciliation does **not** change durable command bindings or
+journaled payloads. A queued command for the pre-clear session fails with
+`COMMAND_PRECONDITION_FAILED`; rewriting its session while retaining its
+command ID fails with `COMMAND_ID_CONFLICT`, rather than rebinding the command.
+
 ## Wire contract
 
 Legacy requests without `commandId` retain their existing behavior, including

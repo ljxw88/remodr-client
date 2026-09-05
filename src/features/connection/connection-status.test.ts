@@ -275,6 +275,23 @@ describe('connection overlay and server details', () => {
 });
 
 describe('command controls', () => {
+  it.each(['sent', 'failed'] as const)('allows discarding a previous-session %s entry without offering retry', async (delivery) => {
+    jest.mocked(herdrRepository.discardCommand).mockClear();
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await TestRenderer.act(async () => {
+      renderer = TestRenderer.create(createElement(CommandDelivery, {
+        commandId: 'previous-command', delivery, previousSession: true,
+      }));
+    });
+    expect(renderer.root.findAll((node) => node.props.accessibilityLabel === 'Retry the same message')).toHaveLength(0);
+    const discard = renderer.root.findAll((node) => node.props.accessibilityRole === 'button')
+      .find((node) => node.props.onPress);
+    expect(discard).toBeDefined();
+    await TestRenderer.act(async () => discard!.props.onPress());
+    expect(herdrRepository.discardCommand).toHaveBeenCalledWith('previous-command');
+    TestRenderer.act(() => renderer.unmount());
+  });
+
   it('guards duplicate retries synchronously and reuses the existing command ID', async () => {
     let finish!: () => void;
     jest.mocked(herdrRepository.retryCommand).mockImplementationOnce(
@@ -314,13 +331,14 @@ describe('command controls', () => {
 });
 
 describe('queued human answers', () => {
+  const session = { provider: 'copilot', paneId: 'pane-a', providerSessionId: 'session-a' };
   const request: HumanRequest = {
     id: 'question-a', kind: 'choice', question: 'Continue?',
     options: [{ id: 'yes', label: 'Yes' }], allowCustomAnswer: true, multiSelect: false,
   };
   const queued = {
     id: 'answer-a', agentId: 'agent-a', action: 'human_request.answer',
-    payload: { requestId: 'question-a' }, state: 'queued',
+    payload: { requestId: 'question-a', precondition: session }, state: 'queued',
   } as ReturnType<typeof herdrRepository.getPendingCommands>[number];
 
   beforeEach(() => {
@@ -338,7 +356,7 @@ describe('queued human answers', () => {
     let renderer!: TestRenderer.ReactTestRenderer;
     await TestRenderer.act(async () => {
       renderer = TestRenderer.create(createElement(HumanRequestBar, {
-        agentId: 'agent-a', request, enqueueGuard,
+        agentId: 'agent-a', session, request, enqueueGuard,
       }));
     });
     const option = renderer.root.findAll((node) => node.props.accessibilityLabel === 'Yes')[0];
@@ -367,7 +385,7 @@ describe('queued human answers', () => {
     ]);
     let renderer!: TestRenderer.ReactTestRenderer;
     await TestRenderer.act(async () => {
-      renderer = TestRenderer.create(createElement(HumanRequestBar, { agentId: 'agent-a', request }));
+      renderer = TestRenderer.create(createElement(HumanRequestBar, { agentId: 'agent-a', session, request }));
     });
     const option = renderer.root.findAll((node) => node.props.accessibilityLabel === 'Yes')[0];
     expect(option.props.disabled).toBe(true);
@@ -377,6 +395,19 @@ describe('queued human answers', () => {
     expect(herdrRepository.answerHumanRequest).not.toHaveBeenCalled();
     TestRenderer.act(() => renderer.unmount());
   });
+
+    it('does not lock a reused question ID because a previous session has a queued answer', async () => {
+      jest.mocked(herdrRepository.getPendingCommands).mockReturnValue([
+        { ...queued, state: 'sent', payload: { ...queued.payload, precondition: { ...session, providerSessionId: 'old-session' } } },
+      ]);
+      let renderer!: TestRenderer.ReactTestRenderer;
+      await TestRenderer.act(async () => {
+        renderer = TestRenderer.create(createElement(HumanRequestBar, { agentId: 'agent-a', session, request }));
+      });
+      expect(renderer.root.findAll((node) => node.props.accessibilityLabel === 'Yes')[0].props.disabled).toBe(false);
+      expect(JSON.stringify(renderer.toJSON())).not.toContain('ANSWER SENT');
+      TestRenderer.act(() => renderer.unmount());
+    });
 });
 
 describe('connection lifecycle', () => {

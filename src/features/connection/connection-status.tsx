@@ -203,12 +203,14 @@ export function CommandDelivery({
   commandId,
   delivery,
   deliveryError,
+  previousSession = false,
   discardLabel = 'Discard',
   onDiscard,
 }: {
   commandId?: string;
   delivery?: DeliveryState;
   deliveryError?: string | null;
+  previousSession?: boolean;
   discardLabel?: string;
   onDiscard?: () => void;
 }) {
@@ -249,9 +251,10 @@ export function CommandDelivery({
       {deliveryError ? (
         <ThemedText type="caption" themeColor="danger">{deliveryError}</ThemedText>
       ) : null}
-      {commandId && (delivery === 'queued' || delivery === 'failed' || delivery === 'uncertain') ? (
+      {commandId && (delivery === 'queued' || delivery === 'failed' || delivery === 'uncertain'
+        || (previousSession && delivery === 'sent')) ? (
         <View style={styles.actions}>
-          {delivery === 'failed' ? (
+          {delivery === 'failed' && !previousSession ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Retry the same message"

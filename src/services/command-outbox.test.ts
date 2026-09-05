@@ -14,7 +14,9 @@ function store() {
 const message = {
   deviceId: 'device-1', agentId: 'agent-1',
   action: 'agent.send_message' as const,
-  payload: { text: 'hello', agentId: 'agent-1' }, text: 'hello', baselineIds: [],
+  payload: { text: 'hello', agentId: 'agent-1', precondition: {
+    provider: 'copilot', paneId: 'pane-1', providerSessionId: 'session-1',
+  } }, text: 'hello', baselineIds: [],
 };
 
 describe('durable command outbox', () => {
@@ -66,7 +68,7 @@ describe('durable command outbox', () => {
   it('deduplicates answers across controls before either enqueue completes', async () => {
     const outbox = new CommandOutbox(store());
     const answer = { ...message, action: 'human_request.answer' as const,
-      payload: { requestId: 'question-1', answer: { customText: 'Yes' } } };
+      payload: { ...message.payload, requestId: 'question-1', answer: { customText: 'Yes' } } };
     const results = await Promise.allSettled([outbox.enqueue(answer), outbox.enqueue(answer)]);
     expect(results.map((result) => result.status)).toEqual(['fulfilled', 'rejected']);
     expect(outbox.getSnapshot()).toHaveLength(1);
@@ -101,6 +103,34 @@ describe('durable command outbox', () => {
     await restarted.hydrate();
     expect(restarted.getSnapshot()).toEqual([
       expect.objectContaining({ id: second.id, baselineIds: ['remote-message-1'] }),
+    ]);
+  });
+
+  it('does not carry reconciliation baselines into a replacement session', async () => {
+    const outbox = new CommandOutbox(store());
+    const old = await outbox.enqueue(message);
+    const current = await outbox.enqueue({
+      ...message,
+      payload: { ...message.payload, precondition: { ...message.payload.precondition, providerSessionId: 'session-2' } },
+    });
+    await outbox.reconcile(old.id, 'reused-message-id');
+    expect(outbox.getSnapshot()).toEqual([
+      expect.objectContaining({ id: current.id, baselineIds: [] }),
+    ]);
+  });
+
+  it('allows a new session to reuse a question ID without rebinding the old answer', async () => {
+    const outbox = new CommandOutbox(store());
+    const answer = { ...message, action: 'human_request.answer' as const,
+      payload: { ...message.payload, requestId: 'question-1' } };
+    await outbox.enqueue(answer);
+    await outbox.enqueue({
+      ...answer,
+      payload: { ...answer.payload, precondition: { ...message.payload.precondition, providerSessionId: 'session-2' } },
+    });
+    expect(outbox.getSnapshot().map((entry) => entry.payload.precondition)).toEqual([
+      message.payload.precondition,
+      { ...message.payload.precondition, providerSessionId: 'session-2' },
     ]);
   });
 });

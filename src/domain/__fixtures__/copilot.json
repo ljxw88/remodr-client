@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "provider": "copilot",
+  "updatedAt": null,
+  "sources": [{ "kind": "manual", "location": "Copilot CLI model picker (original app catalogue)" }],
+  "notes": ["Frozen picker fixture for behavior tests; not the shipped catalog.", "Unknown single-window limits remain null; no context choice is implied."],
+  "models": [
+    { "id": "claude-opus-5", "label": "Claude Opus 5", "efforts": ["low", "medium", "high", "xhigh", "max"], "contexts": [{ "tier": "default", "size": "264K" }, { "tier": "long_context", "size": "1M" }], "limits": { "contextTokens": 264000, "outputTokens": null }, "defaultEffort": null, "details": {} },
+    { "id": "claude-opus-4.8", "label": "Claude Opus 4.8", "efforts": ["low", "medium", "high", "xhigh", "max"], "contexts": [{ "tier": "default", "size": "264K" }, { "tier": "long_context", "size": "1M" }], "limits": { "contextTokens": 264000, "outputTokens": null }, "defaultEffort": null, "details": {} },
+    { "id": "claude-opus-4.7", "label": "Claude Opus 4.7", "efforts": ["low", "medium", "high", "xhigh", "max"], "contexts": [{ "tier": "default", "size": "264K" }, { "tier": "long_context", "size": "1M" }], "limits": { "contextTokens": 264000, "outputTokens": null }, "defaultEffort": null, "details": {} },
+    { "id": "claude-sonnet-5", "label": "Claude Sonnet 5", "efforts": ["low", "medium", "high", "xhigh", "max"], "contexts": [{ "tier": "default", "size": "264K" }, { "tier": "long_context", "size": "1M" }], "limits": { "contextTokens": 264000, "outputTokens": null }, "defaultEffort": null, "details": {} },
+    { "id": "claude-haiku-4.5", "label": "Claude Haiku 4.5", "efforts": [], "contexts": [], "limits": { "contextTokens": null, "outputTokens": null }, "defaultEffort": null, "details": {} },
+    { "id": "gpt-5.6-sol", "label": "GPT-5.6 Sol", "efforts": ["none", "low", "medium", "high", "xhigh", "max"], "contexts": [{ "tier": "default", "size": "400K" }, { "tier": "long_context", "size": "1.1M" }], "limits": { "contextTokens": 400000, "outputTokens": null }, "defaultEffort": null, "details": {} },
+    { "id": "gpt-5.6-terra", "label": "GPT-5.6 Terra", "efforts": ["none", "low", "medium", "high", "xhigh", "max"], "contexts": [{ "tier": "default", "size": "400K" }, { "tier": "long_context", "size": "1.1M" }], "limits": { "contextTokens": 400000, "outputTokens": null }, "defaultEffort": null, "details": {} },
+    { "id": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "efforts": ["none", "low", "medium", "high", "xhigh", "max"], "contexts": [{ "tier": "default", "size": "328K" }, { "tier": "long_context", "size": "1.1M" }], "limits": { "contextTokens": 328000, "outputTokens": null }, "defaultEffort": null, "details": {} },
+    { "id": "gpt-5.5", "label": "GPT-5.5", "efforts": ["none", "low", "medium", "high", "xhigh"], "contexts": [{ "tier": "default", "size": "400K" }, { "tier": "long_context", "size": "1.1M" }], "limits": { "contextTokens": 400000, "outputTokens": null }, "defaultEffort": null, "details": {} },
+    { "id": "gpt-5.4", "label": "GPT-5.4", "efforts": ["none", "low", "medium", "high", "xhigh"], "contexts": [{ "tier": "default", "size": "400K" }, { "tier": "long_context", "size": "1.1M" }], "limits": { "contextTokens": 400000, "outputTokens": null }, "defaultEffort": null, "details": {} },
+    { "id": "gpt-5.4-mini", "label": "GPT-5.4 mini", "efforts": ["none", "low", "medium", "high", "xhigh"], "contexts": [], "limits": { "contextTokens": null, "outputTokens": null }, "defaultEffort": null, "details": {} },
+    { "id": "gpt-5.3-codex", "label": "GPT-5.3-Codex", "efforts": ["low", "medium", "high", "xhigh"], "contexts": [], "limits": { "contextTokens": null, "outputTokens": null }, "defaultEffort": null, "details": {} },
+    { "id": "gpt-5-mini", "label": "GPT-5 mini", "efforts": ["low", "medium", "high"], "contexts": [], "limits": { "contextTokens": null, "outputTokens": null }, "defaultEffort": null, "details": {} },
+    { "id": "gemini-3.8-flash", "label": "Gemini 3.8 Flash", "efforts": ["low", "medium", "high"], "contexts": [{ "tier": "default", "size": "266K" }, { "tier": "long_context", "size": "1.0M" }], "limits": { "contextTokens": 266000, "outputTokens": null }, "defaultEffort": null, "details": {} },
+    { "id": "gemini-3.7-flash", "label": "Gemini 3.7 Flash", "efforts": ["low", "medium", "high"], "contexts": [{ "tier": "default", "size": "264K" }, { "tier": "long_context", "size": "1M" }], "limits": { "contextTokens": 264000, "outputTokens": null }, "defaultEffort": null, "details": {} },
+    { "id": "gemini-3.6-flash", "label": "Gemini 3.6 Flash", "efforts": ["minimal", "low", "medium", "high"], "contexts": [{ "tier": "default", "size": "264K" }, { "tier": "long_context", "size": "1M" }], "limits": { "contextTokens": 264000, "outputTokens": null }, "defaultEffort": null, "details": {} },
+    { "id": "gemini-3.5-flash", "label": "Gemini 3.5 Flash", "efforts": ["minimal", "low", "medium", "high"], "contexts": [{ "tier": "default", "size": "264K" }, { "tier": "long_context", "size": "1M" }], "limits": { "contextTokens": 264000, "outputTokens": null }, "defaultEffort": null, "details": {} },
+    { "id": "grok-4.6", "label": "Grok 4.6", "efforts": ["low", "medium", "high", "xhigh"], "contexts": [{ "tier": "default", "size": "328K" }, { "tier": "long_context", "size": "628K" }], "limits": { "contextTokens": 328000, "outputTokens": null }, "defaultEffort": null, "details": {} },
+    { "id": "grok-4.5", "label": "Grok 4.5", "efforts": ["low", "medium", "high"], "contexts": [{ "tier": "default", "size": "328K" }, { "tier": "long_context", "size": "628K" }], "limits": { "contextTokens": 328000, "outputTokens": null }, "defaultEffort": null, "details": {} },
+    { "id": "mai-code-1.1-flash", "label": "MAI-Code-1.1-Flash", "efforts": ["low", "medium", "high"], "contexts": [], "limits": { "contextTokens": null, "outputTokens": null }, "defaultEffort": null, "details": {} },
+    { "id": "mai-code-1-flash", "label": "MAI-Code-1-Flash", "efforts": ["low", "medium", "high"], "contexts": [], "limits": { "contextTokens": null, "outputTokens": null }, "defaultEffort": null, "details": {} }
+  ]
+}

@@ -1,4 +1,4 @@
-import Svg, { Circle, Path } from 'react-native-svg';
+import Svg, { Path } from 'react-native-svg';
 
 import type { AgentProvider } from '@/domain/herdr';
 
@@ -21,8 +21,8 @@ export function providerBrandColor(provider: AgentProvider): string {
       return '#D97757';
     case 'codex':
       return '#10A37F';
-    case 'opencode':
-      return '#06B6D4';
+    case 'cursor':
+      return '#737373';
     default:
       return '#94A3B8';
   }
@@ -36,8 +36,8 @@ export function AgentProviderIcon({ provider, size = 22, tintColor }: Props) {
       return <ClaudeIcon size={size} color={tintColor} />;
     case 'codex':
       return <CodexIcon size={size} color={tintColor} />;
-    case 'opencode':
-      return <OpenCodeIcon size={size} color={tintColor} />;
+    case 'cursor':
+      return <CursorIcon size={size} color={tintColor} />;
     default:
       return <UnknownAgentIcon size={size} color={tintColor} />;
   }
@@ -61,8 +61,9 @@ function CopilotIcon({ size, color }: IconProps) {
 }
 
 function ClaudeIcon({ size, color }: IconProps) {
+  // The glyph extends beyond 24 units and is centered near (16, 13.25).
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Svg width={size} height={size} viewBox="2 -0.75 28 28" fill="none">
       <Path
         d="M4.773 14.022c-.527 0-.987-.35-.987-.878 0-.496.425-.877.947-.877h3.364c.28 0 .52-.163.63-.404l1.173-2.673a.873.873 0 0 0-.156-.99l-2.39-2.39a.885.885 0 0 1 0-1.248.885.885 0 0 1 1.248 0l2.39 2.39c.264.264.675.318.99.156l2.673-1.173a.68.68 0 0 0 .404-.63V1.94c0-.522.38-.947.877-.947.528 0 .878.46.878.987v3.364c0 .28.163.52.404.63l2.673 1.173c.315.162.726.108.99-.156l2.39-2.39a.885.885 0 0 1 1.248 0 .885.885 0 0 1 0 1.248l-2.39 2.39a.873.873 0 0 0-.156.99l1.173 2.673c.11.241.35.404.63.404h3.364c.522 0 .987.38.987.877 0 .528-.46.878-.987.878h-3.364a.68.68 0 0 0-.404.63l-1.173 2.673a.873.873 0 0 0 .156.99l2.39 2.39a.885.885 0 0 1 0 1.248.885.885 0 0 1-1.248 0l-2.39-2.39a.873.873 0 0 0-.99-.156l-2.673 1.173a.68.68 0 0 0-.404.63v3.364c0 .522-.35.987-.878.987-.496 0-.877-.425-.877-.947v-3.364a.68.68 0 0 0-.404-.63l-2.673-1.173a.873.873 0 0 0-.99.156l-2.39 2.39a.885.885 0 0 1-1.248 0 .885.885 0 0 1 0-1.248l2.39-2.39a.873.873 0 0 0 .156-.99l-1.173-2.673a.68.68 0 0 0-.63-.404H4.773Z"
         fill={color}
@@ -82,16 +83,12 @@ function CodexIcon({ size, color }: IconProps) {
   );
 }
 
-function OpenCodeIcon({ size, color }: IconProps) {
+function CursorIcon({ size, color }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
-        d="M8.7 5.3a1 1 0 0 0-1.4 0l-5 5a1 1 0 0 0 0 1.4l5 5a1 1 0 0 0 1.4-1.4L4.4 11l4.3-4.3a1 1 0 0 0 0-1.4Zm6.6 0a1 1 0 0 1 1.4 0l5 5a1 1 0 0 1 0 1.4l-5 5a1 1 0 0 1-1.4-1.4L19.6 11l-4.3-4.3a1 1 0 0 1 0-1.4Z"
-        fill={color}
-      />
-      <Circle cx="12" cy="11" r="2" fill={color} />
-      <Path
-        d="M12 2.5a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 12 2.5Zm0 14a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5a.75.75 0 0 1 .75-.75Z"
+        d="M4 2 21 12l-8 2-4 8L4 2Zm3 5 3 10 2-5 5-1L7 7Z"
+        fillRule="evenodd"
         fill={color}
       />
     </Svg>

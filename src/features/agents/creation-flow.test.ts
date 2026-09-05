@@ -31,6 +31,8 @@ import { flowDrafts, type NewAgentDraft, type NewSpaceDraft } from '@/features/f
 import { herdrRepository, type DeviceRuntimeState, type HerdrRepositoryState } from '@/services/herdr-repository';
 import { remoteClient } from '@/services/native-remote-client';
 
+jest.mock('@/domain/model-catalogues/copilot.json', () => require('../../domain/__fixtures__/copilot.json'));
+
 jest.mock('expo-crypto', () => ({
   randomUUID: () => jest.requireActual<typeof import('node:crypto')>('node:crypto').randomUUID(),
 }));
@@ -176,6 +178,13 @@ describe('creation drafts', () => {
       name: undefined, model: undefined, effort: undefined, context: undefined,
     });
     expect(agentCreationInput({ ...newAgentDraft(device()), name: '  Plan  ' }).name).toBe('Plan');
+  });
+
+  it.each(['claude', 'codex', 'cursor'] as const)('sends explicit launch models for %s', (provider) => {
+    expect(agentCreationInput({
+      ...newAgentDraft(device()), provider,
+      tuning: { model: 'account-model', effort: null, context: null },
+    })).toMatchObject({ provider, model: 'account-model', effort: undefined, context: undefined });
   });
 });
 

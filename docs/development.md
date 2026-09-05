@@ -2,7 +2,7 @@
 
 [Documentation index](README.md)
 
-remodr is an Android app built with Expo SDK 57 and a local Kotlin module.
+Remodr is an Android app built with Expo SDK 57 and a local Kotlin module.
 Use a development build, not Expo Go: Expo Go cannot load
 [`RemoteCore`](../modules/remote-core/).
 
@@ -71,12 +71,13 @@ app configuration belongs in [`app.json`](../app.json).
 When the generated project is absent or native configuration needs refreshing:
 
 ```bash
-npx expo prebuild --platform android --no-install
+npx expo prebuild --platform android --no-install --no-clean
 ```
 
-Prebuild can recreate native files. Preserve any intentional local native edits
-before running it; do not use `--clean` as a routine troubleshooting step.
-Reusing an existing generated project also preserves incremental Gradle output.
+Expo SDK 57 prebuild recreates native folders by default. Use `--no-clean` to
+update a valid existing project and retain incremental Gradle output. Preserve
+intentional local native edits before generation; omit `--no-clean` only when a
+fresh native project is intended.
 
 ## Self-contained preview builds
 
@@ -104,8 +105,9 @@ the output; an existing debug keystore is not a production signing setup.
 
 ## App identity
 
-The display name and package metadata use `remodr`. Compatibility identifiers
-remain unchanged:
+The display name is **Remodr**; the npm package name remains lowercase `remodr`.
+Icon sources and regeneration are covered in [App branding](app-branding.md).
+Compatibility identifiers remain unchanged:
 
 - Android application ID: `com.anonymous.remoteworkspace`
 - Deep-link scheme: `remoteworkspace`

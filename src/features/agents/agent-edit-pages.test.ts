@@ -6,6 +6,7 @@ import { FlatList } from 'react-native';
 import AgentSettingsPage from '@/app/flows/agent-settings';
 import ModelsPage from '@/app/flows/models';
 import RenameAgentPage from '@/app/flows/rename-agent';
+import { ThemedText } from '@/components/themed-text';
 import { AppButton } from '@/components/ui/app-button';
 import { FormError, FormPage, FormSection, MissingFlow, SelectionRow } from '@/components/ui/form-page';
 import { TextField } from '@/components/ui/text-field';
@@ -14,6 +15,13 @@ import { flowDrafts, type AgentSettingsDraft } from '@/features/forms/flow-draft
 import { herdrRepository } from '@/services/herdr-repository';
 import { beginAgentSettingsFlow, beginRenameAgentFlow } from './agent-edit-flow';
 import { TuningFields } from './tuning-fields';
+
+jest.mock('@/domain/model-catalogues/copilot.json', () => require('../../domain/__fixtures__/copilot.json'));
+jest.mock('@/domain/model-catalogues/cursor.json', () => ({
+  schemaVersion: 1, provider: 'cursor', updatedAt: null,
+  sources: [{ kind: 'manual', location: 'test fixture' }],
+  notes: [], unavailableReason: 'CLI not installed', models: [],
+}));
 
 jest.mock('expo-router', () => ({
   router: { back: jest.fn(), push: jest.fn() },
@@ -209,6 +217,30 @@ describe('agent settings and model pages', () => {
     TestRenderer.act(() => renderer.update(createElement(Page)));
     expect(renderer.root.findByType(MissingFlow)).toBeDefined();
     flowDrafts.discard(incompatible);
+  });
+
+  it('does not expose Copilot-only live retuning for Cursor', () => {
+    flowDrafts.update(flowId, (draft) =>
+      draft.kind === 'agent-settings' ? { ...draft, provider: 'cursor' } : draft);
+    TestRenderer.act(() => { renderer = TestRenderer.create(createElement(AgentSettingsPage)); });
+    expect(renderer.root.findByType(MissingFlow)).toBeDefined();
+    expect(herdrRepository.retuneAgent).not.toHaveBeenCalled();
+  });
+
+  it('explains unavailable discovery while allowing Cursor creation with Auto', () => {
+    flowDrafts.discard(flowId);
+    flowId = flowDrafts.create({
+      kind: 'new-agent', deviceId: 'device-a', name: '', workspaceId: 'space-a',
+      provider: 'cursor', bypassPermissions: true,
+      tuning: { model: null, effort: null, context: null },
+    });
+    jest.mocked(useLocalSearchParams).mockReturnValue({ flowId });
+    TestRenderer.act(() => { renderer = TestRenderer.create(createElement(ModelsPage)); });
+    expect(renderer.root.findByType(FlatList).props.data).toEqual([
+      { model: null, label: 'Auto', description: 'Let the agent choose its model.' },
+    ]);
+    expect(renderer.root.findAllByType(ThemedText).flatMap((node) => node.props.children).join(''))
+      .toContain('Auto uses the remote CLI defaults');
   });
 
   it('uses one guarded rename for keyboard and footer, with blank and unchanged names disabled', async () => {

@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { z } from 'zod';
 import { randomUUID } from 'expo-crypto';
+import { commandSession, sameAgentSession } from '@/domain/agent-session';
 
 const KEY = 'remote-workspace.commands.v1';
 const MAX_PENDING = 200;
@@ -64,7 +65,8 @@ export class CommandOutbox {
     await this.hydrate();
     return this.exclusive(async () => {
       if (input.action === 'human_request.answer' && this.commands.some((entry) =>
-        entry.agentId === input.agentId && entry.action === input.action &&
+        entry.deviceId === input.deviceId && entry.agentId === input.agentId && entry.action === input.action &&
+        sameAgentSession(commandSession(entry.payload), commandSession(input.payload)) &&
         entry.payload.requestId === input.payload.requestId,
       )) {
         throw new Error('An answer to this question is already queued. Review it before submitting another.');
@@ -125,7 +127,9 @@ export class CommandOutbox {
       const matched = this.commands.find((entry) => entry.id === id);
       if (!matched) return;
       await this.commit(this.commands.filter((entry) => entry.id !== id).map((entry) =>
-        entry.agentId === matched.agentId && !entry.baselineIds.includes(remoteId)
+        entry.deviceId === matched.deviceId && entry.agentId === matched.agentId &&
+        sameAgentSession(commandSession(entry.payload), commandSession(matched.payload)) &&
+        !entry.baselineIds.includes(remoteId)
           ? { ...entry, baselineIds: [...entry.baselineIds, remoteId] } : entry,
       ));
     });

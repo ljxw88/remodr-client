@@ -1,4 +1,4 @@
-# remodr documentation
+# Remodr documentation
 
 These guides describe the checked-in implementation. Architecture decision
 records (ADRs) explain why it has that shape; their context is historical, not
@@ -12,11 +12,13 @@ a list of unfinished milestones.
 | Connect a physical phone to Metro while using SSH over a VPN | [Physical Android development](physical-android-development.md) |
 | Understand component ownership and the data flow | [Architecture](architecture.md) |
 | Understand bridge deployment, provider support, and protocol boundaries | [Herdr integration](herdr-mobile-architecture.md) |
+| Refresh provider model lists, context limits, and reasoning settings | [Model catalogues](model-catalogues.md) |
 | Change reconnect, outbox, or background behavior | [Connection resilience](connection-resilience.md) |
 | Handle credentials, host trust, or persisted conversation data | [Security](security.md) |
 | Change message formatting or snapshot rendering | [Markdown rendering](markdown-rendering.md) |
 | Work on shader effects | [Skia effects](skia-effects.md) |
 | Change creation, selection, settings, or keyboard behavior | [Page workflows](form-workflows.md) |
+| Change the app icon or display branding | [App branding](app-branding.md) |
 | Make a code change with an agent | [Contributor rules](agent-rules.md) |
 | Find the rationale for an architectural choice | [ADR index](adr/README.md) |
 

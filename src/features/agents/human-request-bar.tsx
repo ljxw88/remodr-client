@@ -6,6 +6,7 @@ import { AppIcon } from '@/components/ui/app-icon';
 import { GlassSurface, glassRim } from '@/components/ui/glass-surface';
 import { Radius, Spacing } from '@/constants/theme';
 import type { HumanRequest } from '@/domain/herdr';
+import { commandSession, sameAgentSession, type AgentSession } from '@/domain/agent-session';
 import { answerBodyFor, answerOptions } from '@/features/agents/human-request';
 import { CommandDelivery } from '@/features/connection/connection-status';
 import { usePendingCommands } from '@/features/connection/use-connection';
@@ -15,6 +16,7 @@ import { toUserMessage } from '@/utils/user-error';
 
 type Props = {
   agentId: string;
+  session: AgentSession;
   request: HumanRequest;
   enqueueing?: boolean;
   enqueueGuard?: { current: boolean };
@@ -33,7 +35,7 @@ type Props = {
  * that as the prompt — so a question the options do not cover can always be
  * answered in words instead.
  */
-export function HumanRequestBar({ agentId, request, enqueueing = false, enqueueGuard }: Props) {
+export function HumanRequestBar({ agentId, session, request, enqueueing = false, enqueueGuard }: Props) {
   const theme = useTheme();
   const [selected, setSelected] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
@@ -50,6 +52,7 @@ export function HumanRequestBar({ agentId, request, enqueueing = false, enqueueG
   const commands = usePendingCommands();
   const command = commands.find((entry) =>
     entry.agentId === agentId && entry.action === 'human_request.answer' &&
+    sameAgentSession(commandSession(entry.payload), session) &&
     entry.payload.requestId === request.id,
   );
   const sent = acknowledged || command?.state === 'sent';
@@ -61,17 +64,19 @@ export function HumanRequestBar({ agentId, request, enqueueing = false, enqueueG
     const observe = () => {
       if (herdrRepository.getPendingCommands().some((entry) =>
         entry.agentId === agentId && entry.action === 'human_request.answer' &&
+        sameAgentSession(commandSession(entry.payload), session) &&
         entry.payload.requestId === request.id && entry.state === 'sent',
       )) setAcknowledged(true);
     };
     observe();
     return herdrRepository.subscribeCommands(observe);
-  }, [agentId, request.id]);
+  }, [agentId, request.id, session]);
 
   async function answer(optionIds: string[]) {
     if (inFlight.current || locked || optionIds.length === 0 ||
       herdrRepository.getPendingCommands().some((entry) =>
         entry.agentId === agentId && entry.action === 'human_request.answer' &&
+        sameAgentSession(commandSession(entry.payload), session) &&
         entry.payload.requestId === request.id,
       )) {
       return;

@@ -7,11 +7,14 @@ import {
   modelLabel,
   modelsFor,
   supportsTuning,
+  supportsRetuning,
   tuningForModel,
   CONTEXT_TIERS,
   REASONING_EFFORTS,
 } from '@/domain/agent-catalogue';
 import { launchableAgentProviderSchema } from '@/domain/herdr';
+
+jest.mock('@/domain/model-catalogues/copilot.json', () => require('./__fixtures__/copilot.json'));
 
 describe('what a model can be asked for', () => {
   it('offers the efforts that model has and no others', () => {
@@ -108,10 +111,17 @@ describe('the catalogue itself', () => {
     expect(modelsFor('unknown')).toEqual([]);
   });
 
-  it('only claims a CLI is tunable when it has models to offer', () => {
-    expect(supportsTuning('copilot')).toBe(true);
-    for (const provider of ['claude', 'codex', 'opencode', 'unknown'] as const) {
-      expect(supportsTuning(provider)).toBe(false);
+  it('offers launch configuration for supported CLIs, including defaults before discovery', () => {
+    for (const provider of launchableAgentProviderSchema.options) {
+      expect(supportsTuning(provider)).toBe(true);
+    }
+    expect(supportsTuning('unknown')).toBe(false);
+  });
+
+  it('does not confuse launch configuration with live retuning support', () => {
+    expect(supportsRetuning('copilot')).toBe(true);
+    for (const provider of ['claude', 'codex', 'cursor', 'unknown'] as const) {
+      expect(supportsRetuning(provider)).toBe(false);
     }
   });
 
