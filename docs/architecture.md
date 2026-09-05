@@ -57,7 +57,8 @@ window-aligned copies where a surface needs to cover a previous route.
 
 Shared UI lives in [`src/components/ui/`](../src/components/ui/).
 `GlassSurface` and `glassRim` own ordinary frosted surfaces; selected fixed-size
-controls use Skia effects. `SheetModal`/`SheetPanel` own modal presentation.
+controls use Skia effects. `FormPage` owns keyboard-safe workflow pages and
+`ActionMenu` owns small anchored action menus. See [page workflows](form-workflows.md).
 
 Conversation items remain semantic models until they reach the UI. Markdown
 renders as native views, and the latest received text appears immediately.

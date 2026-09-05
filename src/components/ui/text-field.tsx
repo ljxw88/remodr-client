@@ -1,9 +1,10 @@
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { StyleSheet, TextInput, View, type KeyboardTypeOptions, type TextInputProps } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { Fonts, ControlHeight, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useFormFieldFocus } from '@/components/ui/form-keyboard-context';
 
 type Props = {
   label: string;
@@ -17,6 +18,13 @@ type Props = {
   autoComplete?: TextInputProps['autoComplete'];
   secureTextEntry?: boolean;
   rightAccessory?: ReactNode;
+  editable?: boolean;
+  autoFocus?: boolean;
+  returnKeyType?: TextInputProps['returnKeyType'];
+  onSubmitEditing?: TextInputProps['onSubmitEditing'];
+  maxLength?: number;
+  selectTextOnFocus?: boolean;
+  multiline?: boolean;
 };
 
 export function TextField({
@@ -31,9 +39,18 @@ export function TextField({
   autoComplete = 'off',
   secureTextEntry = false,
   rightAccessory,
+  editable = true,
+  autoFocus = false,
+  returnKeyType,
+  onSubmitEditing,
+  maxLength,
+  selectTextOnFocus,
+  multiline = false,
 }: Props) {
   const theme = useTheme();
   const [focused, setFocused] = useState(false);
+  const input = useRef<TextInput | null>(null);
+  const reveal = useFormFieldFocus();
 
   return (
     <View style={styles.wrap}>
@@ -54,6 +71,7 @@ export function TextField({
           },
         ]}>
         <TextInput
+          ref={input}
           accessibilityLabel={label}
           value={value}
           onChangeText={onChangeText}
@@ -65,13 +83,22 @@ export function TextField({
           autoCorrect={autoCorrect}
           autoComplete={autoComplete}
           secureTextEntry={secureTextEntry}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
+          editable={editable}
+          autoFocus={autoFocus}
+          returnKeyType={returnKeyType}
+          onSubmitEditing={onSubmitEditing}
+          maxLength={maxLength}
+          selectTextOnFocus={selectTextOnFocus}
+          multiline={multiline}
+          textAlignVertical={multiline ? 'top' : 'center'}
+          onFocus={() => { setFocused(true); reveal?.(input.current); }}
+          onBlur={() => { setFocused(false); reveal?.(null); }}
           style={[
             styles.input,
+            multiline && styles.multiline,
             {
               color: theme.text,
-              fontFamily: Fonts.regular,
+              fontFamily: multiline ? Fonts.mono : Fonts.regular,
             },
           ]}
         />
@@ -113,5 +140,10 @@ const styles = StyleSheet.create({
   },
   rightAccessory: {
     marginRight: Spacing.half,
+  },
+  multiline: {
+    minHeight: ControlHeight.row * 2,
+    maxHeight: 220,
+    paddingVertical: Spacing.one,
   },
 });

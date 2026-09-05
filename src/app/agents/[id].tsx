@@ -1,5 +1,5 @@
-import { router, Stack, useIsFocused, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { router, Stack, useFocusEffect, useIsFocused, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -31,8 +31,8 @@ import {
   type RemoteAgent,
 } from '@/domain/herdr';
 import { EFFORT_LABELS, modelLabel, supportsTuning } from '@/domain/agent-catalogue';
-import { AgentActionsSheet } from '@/features/agents/agent-actions-sheet';
-import { AgentTuningSheet } from '@/features/agents/agent-tuning-sheet';
+import { beginAgentSettingsFlow, beginRenameAgentFlow } from '@/features/agents/agent-edit-flow';
+import { ActionMenu } from '@/components/ui/action-menu';
 import { HumanRequestBar } from '@/features/agents/human-request-bar';
 import { useAgentConversation, useHerdr } from '@/features/agents/use-herdr';
 import { conversationRefreshInterval, startConversationRefresh } from '@/features/agents/conversation-refresh';
@@ -80,8 +80,11 @@ export default function AgentConversationScreen() {
   const [sending, setSending] = useState(false);
   const [composerHeight, setComposerHeight] = useState(0);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [showActions, setShowActions] = useState(false);
-  const [showTuning, setShowTuning] = useState(false);
+  const [closingAgent, setClosingAgent] = useState(false);
+  const closingAgentRef = useRef(false);
+  const navigating = useRef(false);
+  const actionVisible = useRef(false);
+  const mounted = useRef(false);
   const listRef = useRef<FlatList<ConversationDisplayItem>>(null);
   const sendingRef = useRef(false);
   const draftRevision = useRef(0);
@@ -91,6 +94,55 @@ export default function AgentConversationScreen() {
     command.agentId === id && command.action === 'human_request.answer' &&
     command.payload.requestId === requestId,
   );
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
+  useFocusEffect(useCallback(() => {
+    navigating.current = false;
+    actionVisible.current = true;
+    return () => { actionVisible.current = false; };
+  }, []));
+
+  function openAgentForm(kind: 'settings' | 'rename') {
+    if (!agent || navigating.current || closingAgentRef.current) return;
+    try {
+      const flowId = kind === 'settings' ? beginAgentSettingsFlow(agent) : beginRenameAgentFlow(agent);
+      navigating.current = true;
+      Keyboard.dismiss();
+      router.push({ pathname: kind === 'settings' ? '/flows/agent-settings' : '/flows/rename-agent', params: { flowId } });
+    } catch (error) {
+      navigating.current = false;
+      Alert.alert('Could not open agent options', toUserMessage(error));
+    }
+  }
+
+  function confirmCloseAgent() {
+    if (!agent || closingAgentRef.current) return;
+    const target = agent;
+    Alert.alert('Close this agent?', `${target.title} will stop, and its conversation will no longer be reachable.`, [
+      { text: 'Keep it', style: 'cancel' },
+      {
+        text: 'Close agent', style: 'destructive',
+        onPress: () => {
+          if (closingAgentRef.current) return;
+          closingAgentRef.current = true;
+          setClosingAgent(true);
+          void herdrRepository.closeAgent(target.id).then(() => {
+            if (actionVisible.current) router.dismissTo('/');
+          }).catch((error) => {
+            if (actionVisible.current) Alert.alert('Could not close agent', toUserMessage(error));
+            else console.warn('[AGENT] Could not close agent', error);
+          }).finally(() => {
+            closingAgentRef.current = false;
+            if (mounted.current) setClosingAgent(false);
+          });
+        },
+      },
+    ]);
+  }
 
   function changeDraft(text: string) {
     draftRevision.current++;
@@ -288,19 +340,15 @@ export default function AgentConversationScreen() {
                   accessibilityLabel={workingLabel}
                 />
               ) : null}
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Agent options"
-                onPress={() => setShowActions(true)}
-                hitSlop={Spacing.one}
-                style={({ pressed }) => pressed && styles.pressed}>
-                <AppIcon
-                  name={{ ios: 'ellipsis', android: 'more_horiz', web: 'more_horiz' }}
-                  size={20}
-                  tintColor={Colors.text}
-                  fallback="⋯"
-                />
-              </Pressable>
+              <ActionMenu
+                label="Agent options"
+                disabled={closingAgent}
+                items={[
+                  { id: 'rename', label: 'Rename agent', onPress: () => openAgentForm('rename') },
+                  { id: 'settings', label: 'Model settings', disabled: !supportsTuning(agent.provider), onPress: () => openAgentForm('settings') },
+                  { id: 'close', label: 'Close agent', destructive: true, disabled: !ownerConnected, onPress: confirmCloseAgent },
+                ]}
+              />
             </View>
           ),
         }}
@@ -409,7 +457,7 @@ export default function AgentConversationScreen() {
           provider={agent.provider}
           tuning={agent.tuning}
           tunable={supportsTuning(agent.provider)}
-          onOpenTuning={() => setShowTuning(true)}
+          onOpenTuning={() => openAgentForm('settings')}
           keyboardOffset={keyboardHeight}
         />
         <ConnectionStatus
@@ -418,20 +466,6 @@ export default function AgentConversationScreen() {
           bottomInset={composerHeight + keyboardHeight}
         />
       </View>
-      {showTuning ? (
-        <AgentTuningSheet agent={agent} onClose={() => setShowTuning(false)} />
-      ) : null}
-      {showActions ? (
-        <AgentActionsSheet
-          agent={agent}
-          onClose={() => setShowActions(false)}
-          onClosed={() => {
-            setShowActions(false);
-            // Nothing left to show once the agent is gone.
-            router.back();
-          }}
-        />
-      ) : null}
     </Screen>
   );
 }

@@ -339,9 +339,9 @@ export class HerdrRepository {
     return this.devices.get(deviceId)?.state.connection === 'connected';
   }
 
-  async createAgent(input: CreateAgentInput): Promise<CreateAgentResult> {
+  async createAgent(input: CreateAgentInput, targetDeviceId?: string): Promise<CreateAgentResult> {
     const request = createAgentInputSchema.parse(input);
-    const deviceId = this.requireSelectedDeviceId();
+    const deviceId = targetDeviceId ?? this.requireSelectedDeviceId();
     const result = createAgentResultSchema.parse(
       await this.deviceConnection(deviceId).transport.request('agent.create', request),
     );
@@ -379,9 +379,9 @@ export class HerdrRepository {
     return result;
   }
 
-  async createSpace(input: CreateSpaceInput): Promise<CreateSpaceResult> {
+  async createSpace(input: CreateSpaceInput, targetDeviceId?: string): Promise<CreateSpaceResult> {
     const request = createSpaceInputSchema.parse(input);
-    const deviceId = this.requireSelectedDeviceId();
+    const deviceId = targetDeviceId ?? this.requireSelectedDeviceId();
     const result = createSpaceResultSchema.parse(
       await this.deviceConnection(deviceId).transport.request('workspace.create', request),
     );

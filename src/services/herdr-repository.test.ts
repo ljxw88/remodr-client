@@ -238,6 +238,21 @@ describe('HerdrRepository multi-device runtime', () => {
     expect(second.request).not.toHaveBeenCalled();
   });
 
+  it('keeps creation bound to the form device rather than the current selection', async () => {
+    const { repository, first, second } = await connectTwoDevices();
+    repository.selectDevice('device-2');
+    first.request.mockClear();
+    second.request.mockClear();
+    first.request
+      .mockResolvedValueOnce({ paneId: 'p2', agentId: 'new-agent', name: 'New agent', runtime: runtimeFor('device-1', ['agent-a1', 'new-agent']) })
+      .mockResolvedValueOnce({ workspaceId: 'new-space', runtime: runtimeFor('device-1', ['agent-a1', 'new-agent']) });
+    await repository.createAgent({ provider: 'copilot', workspaceId: 'w1' }, 'device-1');
+    await repository.createSpace({ cwd: '~/Projects' }, 'device-1');
+    expect(first.request.mock.calls.map((call) => call[0])).toEqual(['agent.create', 'workspace.create']);
+    expect(second.request).not.toHaveBeenCalled();
+    expect(repository.getSnapshot().selectedDeviceId).toBe('device-2');
+  });
+
   it('exposes the selected device runtime while retaining the others', async () => {
     const { repository } = await connectTwoDevices();
 

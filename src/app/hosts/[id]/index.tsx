@@ -18,6 +18,7 @@ import { hostRepository } from '@/services/host-repository';
 import { remoteClient } from '@/services/native-remote-client';
 import { toUserMessage } from '@/utils/user-error';
 import { disconnectDeviceRuntime, retryDeviceConnection } from '@/features/agents/connect-runtime';
+import { ConnectionDetails } from '@/features/connection/connection-status';
 
 export default function HostDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -191,6 +192,8 @@ export default function HostDetailScreen() {
             />
           </View>
         </GlassSurface>
+
+        <ConnectionDetails deviceId={host.id} />
 
         <View style={styles.section}>
           <ThemedText type="section">Server tools</ThemedText>

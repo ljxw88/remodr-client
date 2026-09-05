@@ -111,8 +111,9 @@ band inside the surface's own edges — the effect looks like a second rectangle
 floating in the glass. If a surface needs to feel lifted, raise its fill or its
 rim rather than adding a shadow back.
 
-`SheetPanel` renders an opaque base with the shared glass tint and rim in its
-modal window. It does not sample the underlying app's blur target.
+`FormPage` uses a quiet content background. The small `ActionMenu` uses an
+opaque base, shared glass tint and native rim in its modal window; it does not
+sample the underlying app's blur target.
 
 ### The accent, text, and surfaces
 

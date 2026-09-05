@@ -45,9 +45,10 @@ Padding for an absolutely positioned decorative child belongs on an inner
 content view. `CanvasFill` aligns duplicated gradients with the window; a
 gradient restarted below a header would create a seam.
 
-Sheets use an opaque panel in their modal window. They do not sample a target
-from the underlying app window. Android scroll-edge treatment is a gradient
-fade, not cropped backdrop blur.
+Workflow pages use quiet content surfaces. The compact action menu has an
+opaque base in its modal window and does not sample a target from the underlying
+app window. Android scroll-edge treatment is a gradient fade, not cropped
+backdrop blur. See [ADR 016](016-page-first-navigation.md).
 
 ## Rules
 

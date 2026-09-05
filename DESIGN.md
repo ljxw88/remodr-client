@@ -135,32 +135,26 @@ logs. Do not add marketing subtitles to mobile headers.
 - Primary buttons use violet with white semibold text and a pill shape.
 - Secondary buttons use an elevated dark surface with a restrained border.
 - Destructive actions remain visually separate from the primary workflow.
-- Inputs are 48dp high with an 18dp radius. Focus uses a violet border and
+- Inputs use the shared minimum control height with an 18dp radius. Focus uses a violet border and
   subtle depth, not a glow.
 
-### Sheets
+### Workflow pages and contextual menus
 
-All of them go through `SheetModal` and `SheetPanel`.
-
-- The panel slides up from the bottom edge; the scrim only darkens.
-  `animationType="slide"` cannot express that — it moves the whole modal
-  window, dragging the scrim up as a grey rectangle, which reads as a sheet of
-  paper sliding over the screen rather than the app dimming behind a panel.
-  The window fades and the panel animates its own travel instead.
-- The panel travels its measured height, so a short sheet and a full-height one
-  both start just off screen and arrive together, and it stays hidden until
-  that measurement lands. It slides back down on the way out, which means the
-  sheet has to own its exit: React Native tears a modal down the moment its
-  parent stops rendering it, so every dismissal goes through the `close` the
-  sheet hands its children.
-- Finishing the task is not a dismissal. Creating an agent pushes straight to
-  its conversation, so the sheet gets out of the way immediately rather than
-  spending a quarter of a second sliding down over a screen that is already
-  leaving.
-- Sheets are the one opaque surface. They render in their own window, so no
-  blur can reach what sits behind them, and a translucent panel just ghosts the
-  list's text through its own — which reads as a rendering fault rather than as
-  glass. They join the material family through the rim and the tint instead.
+- Creation, folder browsing, model settings and rename use full pages through
+  `FormPage`, with quiet content surfaces and one primary footer action.
+- Long choices use searchable lists. Keep optional settings collapsed until
+  needed instead of showing every model and option at once.
+- Selectors share a draft with their parent through a flow ID. Back preserves
+  editing values; Cancel does not apply them to the server.
+- Forms account for actual keyboard overlap, including native `adjustResize`.
+  Keep focused fields and the footer visible without applying keyboard height
+  twice. Do not use dock clearance on pages where there is no dock.
+- Small agent actions use `ActionMenu` anchored to the ellipsis, without a
+  screen-wide dimming layer. Destructive actions still ask for confirmation.
+- Connection status stays in a floating control. Retry is a small direct
+  action; detailed status belongs on the server page, not another modal.
+- Retain glass on functional floating controls. Do not add animated borders
+  or separately measured decorative rims to resizing forms or the composer.
 
 ### Elevated surfaces
 
@@ -260,11 +254,11 @@ Status must remain understandable without color alone.
 - Group agents by Herdr workspace in one surface rather than separate floating
   cards for every row.
 - Show provider, working directory, and explicit status.
-- Preserve last-known content during reconnect and show a compact reconnect
-  banner.
+- Preserve last-known content during reconnect and show a compact floating
+  connection indicator.
 - A violet-soft icon tile gives each row a stable visual anchor.
 - Tapping a row opens its conversation at the newest content.
-- Keep **New agent** as the only primary action. Its bottom sheet chooses one
+- Keep **New agent** as the only primary action. Its page chooses one
   of the server-advertised providers, a required space, and an explicit
   auto-approval setting without exposing terminal controls.
 - Place a secondary **New space** action beside it. Space creation asks for an

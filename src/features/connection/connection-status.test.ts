@@ -7,6 +7,7 @@ import NetInfo, { type NetInfoState } from '@react-native-community/netinfo';
 import {
   CommandDelivery,
   ConnectionStatus,
+  ConnectionDetails,
   getConnectionStatus,
   getDeliveryStatus,
   UNCERTAIN_DELIVERY_COPY,
@@ -45,22 +46,6 @@ jest.mock('@/features/connection/use-connection', () => ({
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, left: 0, right: 0, bottom: 20 }),
 }));
-jest.mock('@/components/ui/sheet', () => {
-  const React = jest.requireActual<typeof import('react')>('react');
-  const Native = jest.requireActual<typeof import('react-native')>('react-native');
-  return {
-    SheetModal: ({ children, onClose }: {
-      children: (close: () => void) => import('react').ReactNode;
-      onClose: () => void;
-    }) => React.createElement(Native.Modal, { visible: true, onRequestClose: onClose }, children(onClose)),
-    SheetPanel: ({ children, onClose }: {
-      children: import('react').ReactNode; onClose: () => void;
-    }) => React.createElement(Native.View, null,
-      React.createElement(Native.Pressable, { accessibilityLabel: 'Close', onPress: onClose }),
-      children,
-    ),
-  };
-});
 jest.mock('@/services/herdr-repository', () => ({
   herdrRepository: {
     getSnapshot: jest.fn(() => ({ devices: {} })),
@@ -157,7 +142,7 @@ describe('connection status', () => {
   });
 });
 
-describe('connection overlay and bottom sheet', () => {
+describe('connection overlay and server details', () => {
   let renderer: TestRenderer.ReactTestRenderer;
   const outage = { ...disconnected, disconnectedAt: Date.now() - 150_000 };
 
@@ -188,32 +173,30 @@ describe('connection overlay and bottom sheet', () => {
     });
   }
 
-  it('keeps the status out of page layout and puts retry controls only in the sheet', async () => {
+  it('keeps retry out of page layout and opens server details without a sheet', async () => {
     await mount();
     const overlay = renderer.root.findAllByProps({ testID: 'connection-status-overlay' })[0];
     expect(StyleSheet.flatten(overlay.props.style)).toMatchObject({
       position: 'absolute', bottom: 120 + Spacing.one,
     });
     expect(renderer.root.findAllByType(Modal)).toHaveLength(0);
-    expect(renderer.root.findAll((node) => node.props.accessibilityLabel === 'Reconnect now')).toHaveLength(0);
     await press('Open connection details');
-    expect(renderer.root.findAllByType(Modal).length).toBeGreaterThan(0);
+    expect(router.push).toHaveBeenCalledWith({ pathname: '/hosts/[id]', params: { id: 'device-1' } });
+    expect(renderer.root.findAllByType(Modal)).toHaveLength(0);
     await press('Reconnect now');
     expect(retryDeviceConnection).toHaveBeenCalledWith('device-1');
   });
 
-  it('can dismiss during a retry and does not reopen on automatic retry updates', async () => {
+  it('deduplicates retry taps without opening a blocking modal', async () => {
     let finish!: (value: boolean) => void;
     jest.mocked(retryDeviceConnection).mockReturnValue(new Promise((resolve) => { finish = resolve; }));
     await mount();
-    await press('Open connection details');
     const retry = renderer.root.findAll((node) => node.props.accessibilityLabel === 'Reconnect now')[0];
     await TestRenderer.act(async () => {
       retry.props.onPress();
       retry.props.onPress();
     });
     expect(retryDeviceConnection).toHaveBeenCalledTimes(1);
-    await press('Close');
     expect(renderer.root.findAllByType(Modal)).toHaveLength(0);
     jest.mocked(useConnectionSnapshot).mockReturnValue({ ...outage, attempt: 4 });
     await TestRenderer.act(async () => {
@@ -223,9 +206,8 @@ describe('connection overlay and bottom sheet', () => {
     expect(renderer.root.findAllByType(Modal)).toHaveLength(0);
   });
 
-  it('closes an open sheet when automatic recovery succeeds', async () => {
+  it('removes the overlay when automatic recovery succeeds', async () => {
     await mount();
-    await press('Open connection details');
     jest.mocked(useConnectionSnapshot).mockReturnValue({
       ...outage, phase: 'connected', disconnectedAt: null,
     });
@@ -236,55 +218,59 @@ describe('connection overlay and bottom sheet', () => {
     expect(retryDeviceConnection).not.toHaveBeenCalled();
   });
 
-  it('keeps retry errors inside the sheet', async () => {
+  it('keeps a failed retry inline in the floating control', async () => {
     jest.mocked(retryDeviceConnection).mockRejectedValueOnce(new Error('Retry could not start'));
     await mount();
-    await press('Open connection details');
     await press('Reconnect now');
     expect(JSON.stringify(renderer.toJSON())).toContain('Retry could not start');
-    await press('Close');
-    expect(JSON.stringify(renderer.toJSON())).not.toContain('Retry could not start');
+    expect(renderer.root.findAllByType(Modal)).toHaveLength(0);
   });
 
   it('cannot apply an old device retry result to a newly selected device', async () => {
     let fail!: (error: Error) => void;
     jest.mocked(retryDeviceConnection).mockReturnValueOnce(new Promise((_resolve, reject) => { fail = reject; }));
     await mount('device-1');
-    await press('Open connection details');
     await press('Reconnect now');
     await TestRenderer.act(async () => {
       renderer.update(createElement(ConnectionStatus, { deviceId: 'device-2', bottomInset: 120 }));
     });
-    await press('Open connection details');
     await TestRenderer.act(async () => fail(new Error('Old device error')));
     expect(JSON.stringify(renderer.toJSON())).not.toContain('Old device error');
     const retry = renderer.root.findAll((node) => node.props.accessibilityLabel === 'Reconnect now')[0];
     expect(retry.props.disabled).toBe(false);
   });
 
-  it('puts fatal-error settings controls in the sheet rather than the page', async () => {
+  it('routes fatal failures to server settings without offering a blind retry', async () => {
     jest.mocked(useConnectionSnapshot).mockReturnValue({
       ...outage, phase: 'fatal', errorCode: 'ERR_AUTHENTICATION',
     });
     await mount();
-    expect(renderer.root.findAll((node) => node.props.accessibilityLabel === 'Server settings')).toHaveLength(0);
     await press('Open connection details');
-    expect(renderer.root.findAll((node) => node.props.accessibilityLabel === 'Server settings').length).toBeGreaterThan(0);
     expect(renderer.root.findAll((node) => node.props.accessibilityLabel === 'Reconnect now')).toHaveLength(0);
-    await press('Server settings');
     expect(renderer.root.findAllByType(Modal)).toHaveLength(0);
     expect(router.push).toHaveBeenCalledWith({ pathname: '/hosts/[id]', params: { id: 'device-1' } });
   });
 
-  it.each(['unfocused', 'background'])('hides the overlay and modal when %s', async (reason) => {
+  it.each(['unfocused', 'background'])('hides the overlay when %s', async (reason) => {
     await mount();
-    await press('Open connection details');
     if (reason === 'unfocused') jest.mocked(useIsFocused).mockReturnValue(false);
     else jest.mocked(useForeground).mockReturnValue(false);
     await TestRenderer.act(async () => {
       renderer.update(createElement(ConnectionStatus, { deviceId: 'device-1', bottomInset: 120 }));
     });
     expect(renderer.toJSON()).toBeNull();
+  });
+
+  it('shows agent connection details on the owning server page', async () => {
+    jest.mocked(useConnectionSnapshot).mockReturnValue({ ...outage, lastError: 'Network unavailable' });
+    await TestRenderer.act(async () => {
+      renderer = TestRenderer.create(createElement(ConnectionDetails, { deviceId: 'device-2' }));
+    });
+    expect(useConnectionSnapshot).toHaveBeenCalledWith('device-2');
+    expect(JSON.stringify(renderer.toJSON())).toContain('Network unavailable');
+    await press('Reconnect now');
+    expect(retryDeviceConnection).toHaveBeenCalledWith('device-2');
+    expect(renderer.root.findAllByType(Modal)).toHaveLength(0);
   });
 });
 

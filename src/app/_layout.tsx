@@ -72,6 +72,7 @@ export default function RootLayout() {
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="hosts" />
           <Stack.Screen name="agents" />
+          <Stack.Screen name="flows" />
           <Stack.Screen name="diagnostics" />
           <Stack.Screen name="connect" />
           <Stack.Screen name="files" />

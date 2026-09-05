@@ -16,6 +16,7 @@ a list of unfinished milestones.
 | Handle credentials, host trust, or persisted conversation data | [Security](security.md) |
 | Change message formatting or snapshot rendering | [Markdown rendering](markdown-rendering.md) |
 | Work on shader effects | [Skia effects](skia-effects.md) |
+| Change creation, selection, settings, or keyboard behavior | [Page workflows](form-workflows.md) |
 | Make a code change with an agent | [Contributor rules](agent-rules.md) |
 | Find the rationale for an architectural choice | [ADR index](adr/README.md) |
 

@@ -31,6 +31,7 @@ export function AppButton({
       accessibilityHint={accessibilityHint}
       accessibilityState={{ disabled }}
       disabled={disabled}
+      hitSlop={2}
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,

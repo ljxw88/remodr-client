@@ -1,8 +1,9 @@
-import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Keyboard,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -26,8 +27,8 @@ import {
   AgentWorkspaceList,
   compareAgents,
 } from '@/features/agents/agent-workspace-list';
-import { NewAgentSheet } from '@/features/agents/new-agent-sheet';
-import { NewSpaceSheet } from '@/features/agents/new-space-sheet';
+import { beginNewAgentFlow, beginNewSpaceFlow } from '@/features/agents/creation-flow';
+import { selectWorkspace, useWorkspaceSelection } from '@/features/agents/workspace-selection';
 import { useHerdr } from '@/features/agents/use-herdr';
 import {
   useDockContentInset,
@@ -48,11 +49,10 @@ export default function AgentsScreen() {
   const { hosts, loading: hostsLoading } = useHosts();
   const onDockScroll = useDockScrollHandler();
   const dockContentInset = useDockContentInset();
-  const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null);
-  const [showNewAgent, setShowNewAgent] = useState(false);
-  const [showNewSpace, setShowNewSpace] = useState(false);
   const [closingSpaceId, setClosingSpaceId] = useState<string | null>(null);
   const selectedDeviceId = state.selectedDeviceId ?? state.runtime.deviceId ?? null;
+  const selectedSpaceId = useWorkspaceSelection(selectedDeviceId);
+  const navigating = useRef(false);
   const selectedHost = hosts.find((host) => host.id === selectedDeviceId);
   const connected = state.connection === 'connected';
   const spaces = state.runtime.workspaces;
@@ -95,12 +95,29 @@ export default function AgentsScreen() {
   const canCreateSpace = connected && selectedHost != null;
   const compactHeader = width < 375;
 
+  useFocusEffect(useCallback(() => {
+    navigating.current = false;
+  }, []));
+
+  function startCreation(kind: 'agent' | 'space') {
+    if (navigating.current || !selectedDeviceId) return;
+    const device = state.devices[selectedDeviceId];
+    if (!device || device.connection !== 'connected') return;
+    if (kind === 'agent' && !canCreateAgent) return;
+    if (kind === 'space' && !canCreateSpace) return;
+    navigating.current = true;
+    Keyboard.dismiss();
+    const flowId = kind === 'agent'
+      ? beginNewAgentFlow(device, activeSpaceId) : beginNewSpaceFlow(device.deviceId);
+    router.push({ pathname: kind === 'agent' ? '/flows/new-agent' : '/flows/new-space', params: { flowId } });
+  }
+
   /** Selection is local state; the device's bridge is already live. */
   function selectDevice(deviceId: string) {
     if (deviceId === selectedDeviceId) {
       return;
     }
-    setSelectedSpaceId(null);
+    selectWorkspace(deviceId, null);
     herdrRepository.selectDevice(deviceId);
     if (herdrRepository.isDeviceConnected(deviceId)) {
       return;
@@ -132,7 +149,7 @@ export default function AgentsScreen() {
     setClosingSpaceId(space.id);
     try {
       await herdrRepository.closeSpace(space.id, closeGroup);
-      setSelectedSpaceId((current) => current === space.id ? null : current);
+      if (selectedDeviceId && selectedSpaceId === space.id) selectWorkspace(selectedDeviceId, null);
     } catch (error) {
       if (
         !closeGroup &&
@@ -168,10 +185,10 @@ export default function AgentsScreen() {
           <LiquidGlassButton
             agentLabel={compactHeader ? 'Agent' : 'New Agent'}
             canCreateAgent={canCreateAgent}
-            onPressAgent={() => setShowNewAgent(true)}
+            onPressAgent={() => startCreation('agent')}
             spaceLabel={compactHeader ? 'Space' : 'New Space'}
             canCreateSpace={canCreateSpace}
-            onPressSpace={() => setShowNewSpace(true)}
+            onPressSpace={() => startCreation('space')}
           />
         </View>
         <ProfileAvatar
@@ -215,14 +232,14 @@ export default function AgentsScreen() {
                 <FilterChip
                   label="All spaces"
                   selected={activeSpaceId == null}
-                  onPress={() => setSelectedSpaceId(null)}
+                  onPress={() => selectedDeviceId && selectWorkspace(selectedDeviceId, null)}
                 />
                 {spaces.map((space) => (
                   <FilterChip
                     key={space.id}
                     label={space.name}
                     selected={space.id === activeSpaceId}
-                    onPress={() => setSelectedSpaceId(space.id)}
+                    onPress={() => selectedDeviceId && selectWorkspace(selectedDeviceId, space.id)}
                   />
                 ))}
               </ScrollView>
@@ -257,37 +274,6 @@ export default function AgentsScreen() {
         </ScrollEdgeFrame>
       )}
       <ConnectionStatus deviceId={selectedDeviceId} bottomInset={dockContentInset} />
-      {showNewAgent ? (
-        <NewAgentSheet
-          manifests={state.runtime.providers}
-          spaces={spaces}
-          initialSpaceId={activeSpaceId}
-          onClose={() => setShowNewAgent(false)}
-          onCreate={async (input) => {
-            const result = await herdrRepository.createAgent(input);
-            setShowNewAgent(false);
-            if (result.agentId) {
-              router.push({
-                pathname: '/agents/[id]',
-                params: { id: result.agentId },
-              });
-            }
-          }}
-        />
-      ) : null}
-      {showNewSpace && selectedHost ? (
-        <NewSpaceSheet
-          deviceId={selectedHost.id}
-          deviceName={selectedHost.name}
-          onClose={() => setShowNewSpace(false)}
-          onCreate={async (input) => {
-            const result = await herdrRepository.createSpace(input);
-            setShowNewSpace(false);
-            setSelectedSpaceId(result.workspaceId);
-            setShowNewAgent(true);
-          }}
-        />
-      ) : null}
     </Screen>
   );
 }

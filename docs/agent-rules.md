@@ -23,8 +23,9 @@ These rules apply to agent-assisted changes as well as manual changes.
 9. Render received message text immediately. Do not animate cached history or
    describe transcript polling as a live token event stream.
 10. Surface errors according to their meaning. Transient connection loss belongs
-    in automatic recovery and the floating connection indicator. Open reconnect
-    details in the shared bottom sheet on request, not a repeated modal dialog.
+    in automatic recovery and the floating connection indicator. Put detailed
+    controls on the server page, not a repeated modal dialog.
+    Follow [page workflows](form-workflows.md) for keyboard-safe forms.
 11. Do not log credentials, raw prompts, or full bridge request objects.
     Consult [security](security.md) before changing storage or diagnostic output.
 12. Use targeted existing [checks](development.md#checks). Inspect visual changes

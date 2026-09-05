@@ -1,0 +1,89 @@
+name: Build Android Preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Increase inotify watchers
+        run: echo fs.inotify.max_user_watches=524288 | sudo tee -a /etc/sysctl.conf && sudo sysctl -p
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Android APK locally
+        run: |
+          mkdir -p build
+          npx --yes eas-cli build \
+            --platform android \
+            --profile preview \
+            --local \
+            --non-interactive \
+            --output ./build/app-preview.apk
+
+      - name: Upload APK to Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-preview-${{ github.run_number }}
+          path: build/app-preview.apk
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Publish APK to GitHub Releases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+            TITLE="Release $TAG"
+            PRERELEASE_FLAG=""
+          else
+            TAG="preview"
+            TITLE="Android Preview Build"
+            PRERELEASE_FLAG="--prerelease"
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Updating existing release $TAG..."
+            gh release upload "$TAG" build/app-preview.apk --clobber
+            gh release edit "$TAG" --title "$TITLE" --notes "Automated Android APK built from commit ${{ github.sha }} on $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          else
+            echo "Creating new release $TAG..."
+            gh release create "$TAG" build/app-preview.apk \
+              --title "$TITLE" \
+              $PRERELEASE_FLAG \
+              --notes "Automated Android APK built from commit ${{ github.sha }}"
+          fi

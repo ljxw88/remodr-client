@@ -21,6 +21,8 @@ type Props = {
    * with nothing to blur.
    */
   blurBackdrop?: boolean;
+  /** Quieter backing for form workflows; ordinary routes retain the app gradient. */
+  quiet?: boolean;
 };
 
 /**
@@ -46,7 +48,7 @@ type Props = {
  * Any route pushed over another needs this. A route with no header does not,
  * having nothing it fails to cover.
  */
-export function RouteStack({ children, blurBackdrop = false }: Props) {
+export function RouteStack({ children, blurBackdrop = false, quiet = false }: Props) {
   const screenOptions = useStackScreenOptions();
   const entrance = useScreenEntrance();
 
@@ -71,7 +73,7 @@ export function RouteStack({ children, blurBackdrop = false }: Props) {
 
   return (
     <View style={styles.root}>
-      <AppBackground />
+      {quiet ? null : <AppBackground />}
       {blurBackdrop ? <BlurBackdropProvider>{stack}</BlurBackdropProvider> : stack}
     </View>
   );

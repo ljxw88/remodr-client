@@ -1,8 +1,11 @@
 # ADR 013: Project-owned bottom sheets
 
-Status: accepted.
+Status: superseded by [ADR 016](016-page-first-navigation.md).
 
-[Decision index](README.md) | [Implementation](../../src/components/ui/sheet.tsx)
+[Decision index](README.md) | [Historical implementation](https://github.com/ljxw88/remodr-client/blob/86814c7/src/components/ui/sheet.tsx)
+
+This records the earlier sheet implementation. Creation and editing now use
+page workflows; see the [current guide](../form-workflows.md).
 
 ## Context
 
@@ -12,7 +15,7 @@ requirements while adding enough value to justify migration.
 
 ## Decision
 
-Keep `SheetModal` and `SheetPanel`, built on React Native `Modal` and native-driver
+The earlier implementation used `SheetModal` and `SheetPanel`, built on React Native `Modal` and native-driver
 `Animated` transforms/opacity.
 
 The modal window uses `animationType="none"`. The scrim fades independently of

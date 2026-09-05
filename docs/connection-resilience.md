@@ -166,13 +166,12 @@ reading or typing. The current status component uses this progression:
 | 2 minutes or longer | The indicator is labelled Reconnect |
 
 The connection indicator is an overlay above the dock or measured composer,
-so it does not change the page/list layout. Tapping it opens the shared bottom
-sheet with details and a Reconnect now action. The sheet opens only on request,
-can be dismissed while a retry is pending, and closes on recovery. Dismissing
-it does not stop automatic retries or cause it to reopen on every attempt.
+so it does not change the page/list layout. It offers a small retry action;
+tapping the status opens connection details on the server page. There is no
+reconnect modal, and automatic recovery does not interrupt reading or typing.
 
-Fatal trust/authentication errors show the indicator immediately; their sheet
-links to server controls instead of offering blind retries. Per-message
+Fatal trust/authentication errors show the indicator immediately and link to
+server controls instead of offering blind retries. Per-message
 delivery status remains attached to its message. Uncertain delivery is distinct
 from a definite send failure.
 

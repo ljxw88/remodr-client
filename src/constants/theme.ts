@@ -180,3 +180,4 @@ export const ControlHeight = {
 } as const;
 
 export const MaxContentWidth = 1200;
+export const MaxFormWidth = 600;

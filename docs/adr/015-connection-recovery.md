@@ -30,7 +30,7 @@ retaining recovery when the service is denied, stopped, or timed out.
 ## Consequences
 
 Transient failures trigger automatic recovery and a floating status indicator.
-Reconnect controls open in a bottom sheet without resizing the page. Cached
+Detailed controls live on the server page without resizing the chat. Cached
 transcripts and locally saved commands remain visible. Authentication, host
 trust, invalid targets, and uncertain delivery require explicit attention.
 

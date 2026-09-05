@@ -14,7 +14,7 @@ explicit compatibility view.
 
 Each enabled device has its own supervised connection and cached runtime.
 Dropped connections retain transcripts and durable pending sends, with a floating
-status indicator and on-demand reconnect sheet rather than repeated dialogs.
+status indicator and server-page controls rather than repeated dialogs.
 Ambiguous delivery requires review instead of a potentially duplicated command.
 
 ## Run
@@ -37,6 +37,7 @@ Start at the [documentation index](docs/README.md).
 | Setup, debug/preview builds, and checks | [Development](docs/development.md) |
 | USB Metro, physical phones, and Tailscale | [Physical Android development](docs/physical-android-development.md) |
 | Component ownership | [Architecture](docs/architecture.md) |
+| Creation, selection, settings and mobile keyboards | [Page workflows](docs/form-workflows.md) |
 | Server requirements and provider support | [Herdr integration](docs/herdr-mobile-architecture.md) |
 | Reconnect, durable messages, and background limits | [Connection resilience](docs/connection-resilience.md) |
 | Credentials, host verification, and persisted data | [Security](docs/security.md) |
