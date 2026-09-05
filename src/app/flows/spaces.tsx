@@ -3,7 +3,7 @@ import { useRef } from 'react';
 import { FlatList } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { FormError, FormPage, MissingFlow, SelectionRow } from '@/components/ui/form-page';
+import { FormError, FormPage, FormSection, MissingFlow, SelectionRow } from '@/components/ui/form-page';
 import { useHerdr } from '@/features/agents/use-herdr';
 import { flowDrafts, useFlowDraft } from '@/features/forms/flow-drafts';
 import { herdrRepository } from '@/services/herdr-repository';
@@ -34,10 +34,12 @@ export default function SpacesPage() {
   return (
     <FormPage title="Space" scroll={false}>
       <FormError message={!device ? 'This device is no longer available. Go back and choose another device.' : null} />
-      <FlatList data={spaces} keyExtractor={(space) => space.id} keyboardShouldPersistTaps="handled"
-        renderItem={({ item }) => <SelectionRow label={item.name} description={item.cwd ?? undefined}
-          selected={draft.workspaceId === item.id} onPress={() => choose(item.id)} />}
-        ListEmptyComponent={<ThemedText type="small" themeColor="textSecondary">No spaces on this device. Go back and choose another device, or create a space from Agents.</ThemedText>} />
+      <FormSection fill>
+        <FlatList data={spaces} keyExtractor={(space) => space.id} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}
+          renderItem={({ item }) => <SelectionRow label={item.name} description={item.cwd ?? undefined}
+            selected={draft.workspaceId === item.id} onPress={() => choose(item.id)} />}
+          ListEmptyComponent={<ThemedText type="small" themeColor="textSecondary">No spaces on this device. Go back and choose another device, or create a space from Agents.</ThemedText>} />
+      </FormSection>
     </FormPage>
   );
 }

@@ -32,6 +32,8 @@ the dock, and the chat composer rather than every form section.
 values. Routes pass a `flowId`, not callbacks or serialized object graphs.
 Base pages and selectors retain that same draft; Back from a selector preserves
 all editing values. Leaving the workflow releases the draft.
+Successful forms stay locked until navigation finishes; let route cleanup release
+their draft rather than displaying an expired-form state before the next page mounts.
 
 These form drafts are in memory, not the durable chat outbox. An expired or
 unavailable flow displays an explicit recovery page. Cancelling settings or a
@@ -42,6 +44,8 @@ target, so switching global selection cannot send the form to another device.
 Successful creation updates the shared workspace filter without route callbacks.
 Creating a space commits that space before the next New Agent step; cancelling
 the agent step does not delete the space.
+Folder selection uses only a successfully loaded path. Editing the address disables
+selection until Go opens it, so a stale listing cannot select the wrong folder.
 
 Model selection only changes the draft. Model/effort/context compatibility comes
 from `agent-catalogue.ts`. Applying reasoning or context changes retains the
@@ -68,6 +72,9 @@ validation/action as the visible button.
 Busy mutations disable form editing and back/swipe dismissal. Read-only folder
 requests remain cancellable. Confirm keyboard behavior on Android after changing
 the page, footer, or field geometry.
+The root `flows` route disables its own native swipe gesture: a nested page cannot
+control that parent gesture. Use the form's Back control to leave the workflow;
+inner selector pages keep their ordinary back navigation.
 
 Server creation/editing and credential entry also use this page layout.
 Private-key input preserves newlines; the password keyboard action uses the

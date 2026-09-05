@@ -1,12 +1,13 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useRef, useState } from 'react';
-import { FlatList, StyleSheet, View } from 'react-native';
+import { FlatList, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { FormPage, MissingFlow, SelectionRow } from '@/components/ui/form-page';
+import { FormPage, FormSection, MissingFlow, SelectionRow } from '@/components/ui/form-page';
 import { TextField } from '@/components/ui/text-field';
-import { Colors, Radius, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
+import { modelLabel } from '@/domain/agent-catalogue';
 import { chooseModel, modelChoices } from '@/features/agents/agent-edit-flow';
 import { flowDrafts, useFlowDraft } from '@/features/forms/flow-drafts';
 
@@ -50,32 +51,38 @@ export default function ModelsPage() {
         placeholder="Search by name"
         returnKeyType="search"
       />
-      <FlatList
-        style={styles.list}
-        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, Spacing.two) }}
-        data={choices}
-        keyExtractor={(choice) => choice.model == null ? 'auto' : `model:${choice.model}`}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        renderItem={({ item }) => (
-          <View style={styles.row}>
+      <ThemedText testID="current-model" type="caption" themeColor="textMuted">
+        Current: {modelLabel(draft.provider, draft.tuning.model)}
+      </ThemedText>
+      <FormSection fill>
+        <FlatList
+          style={styles.list}
+          contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, Spacing.two) }}
+          data={choices}
+          keyExtractor={(choice) => choice.model == null ? 'auto' : `model:${choice.model}`}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          showsVerticalScrollIndicator={false}
+          renderItem={({ item }) => (
             <SelectionRow
               label={item.label}
               description={item.description}
               selected={draft.tuning.model === item.model}
               onPress={() => select(item.model)}
             />
-          </View>
-        )}
-        ListEmptyComponent={
-          <ThemedText type="small" themeColor="textMuted">No models match this search.</ThemedText>
-        }
-      />
+          )}
+          ListEmptyComponent={
+            <ThemedText type="small" themeColor="textMuted" style={styles.empty}>
+              No models match this search.
+            </ThemedText>
+          }
+        />
+      </FormSection>
     </FormPage>
   );
 }
 
 const styles = StyleSheet.create({
   list: { flex: 1 },
-  row: { backgroundColor: Colors.backgroundElement, borderRadius: Radius.control, overflow: 'hidden' },
+  empty: { padding: Spacing.two },
 });

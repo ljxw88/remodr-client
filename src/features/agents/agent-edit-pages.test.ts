@@ -1,12 +1,13 @@
 import { createElement } from 'react';
 import TestRenderer from 'react-test-renderer';
 import { router, useLocalSearchParams } from 'expo-router';
+import { FlatList } from 'react-native';
 
 import AgentSettingsPage from '@/app/flows/agent-settings';
 import ModelsPage from '@/app/flows/models';
 import RenameAgentPage from '@/app/flows/rename-agent';
 import { AppButton } from '@/components/ui/app-button';
-import { FormError, FormPage, MissingFlow, SelectionRow } from '@/components/ui/form-page';
+import { FormError, FormPage, FormSection, MissingFlow, SelectionRow } from '@/components/ui/form-page';
 import { TextField } from '@/components/ui/text-field';
 import { EMPTY_RUNTIME, remoteAgentSchema } from '@/domain/herdr';
 import { flowDrafts, type AgentSettingsDraft } from '@/features/forms/flow-drafts';
@@ -131,6 +132,14 @@ describe('agent settings and model pages', () => {
   it('selects only the draft and uses a non-nested searchable list with the running model selected', () => {
     TestRenderer.act(() => { renderer = TestRenderer.create(createElement(ModelsPage)); });
     expect(renderer.root.findByType(FormPage).props.scroll).toBe(false);
+    expect(renderer.root.findAllByType(FormSection)).toHaveLength(1);
+    expect(renderer.root.findByType(FormSection).props.fill).toBe(true);
+    const list = renderer.root.findByType(FlatList);
+    expect(list.props.showsVerticalScrollIndicator).toBe(false);
+    expect(list.props.renderItem({ item: { model: 'private-model', label: 'private-model' } }).type)
+      .toBe(SelectionRow);
+    expect(renderer.root.findAllByProps({ testID: 'current-model' })[0].props.children)
+      .toEqual(['Current: ', 'private-model']);
     const current = renderer.root.findAllByType(SelectionRow).find((row) => row.props.label === 'private-model')!;
     expect(current.props.selected).toBe(true);
     TestRenderer.act(() => renderer.root.findByType(TextField).props.onChangeText('claude opus 5'));

@@ -4,7 +4,7 @@ import { ActivityIndicator, FlatList } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { AppButton } from '@/components/ui/app-button';
-import { FormError, FormPage, MissingFlow, SelectionRow } from '@/components/ui/form-page';
+import { FormError, FormPage, FormSection, MissingFlow, SelectionRow } from '@/components/ui/form-page';
 import { agentDraftForDevice, spaceDraftForDevice } from '@/features/agents/creation-flow';
 import { useHerdr } from '@/features/agents/use-herdr';
 import { flowDrafts, useFlowDraft } from '@/features/forms/flow-drafts';
@@ -35,14 +35,16 @@ export default function DevicesPage() {
     <FormPage title="Device" scroll={false}>
       <FormError message={error} />
       {error ? <AppButton label="Try again" variant="secondary" onPress={() => void reload()} /> : null}
-      {loading ? <ActivityIndicator /> : <FlatList data={hosts} keyExtractor={(host) => host.id} keyboardShouldPersistTaps="handled"
-        renderItem={({ item }) => {
-          const device = devices[item.id];
-          return <SelectionRow label={item.name} description={!device ? 'Connect from Devices before using this device.'
-            : device.connection === 'connected' ? `${item.username}@${item.hostname}` : 'Offline — you can keep editing a local draft.'}
-            selected={draft.deviceId === item.id} disabled={!device} onPress={() => choose(item.id)} />;
-        }}
-        ListEmptyComponent={<ThemedText type="small" themeColor="textSecondary">No saved devices. Add a device before continuing.</ThemedText>} />}
+      {loading ? <ActivityIndicator /> : <FormSection fill>
+        <FlatList data={hosts} keyExtractor={(host) => host.id} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}
+          renderItem={({ item }) => {
+            const device = devices[item.id];
+            return <SelectionRow label={item.name} description={!device ? 'Connect from Devices before using this device.'
+              : device.connection === 'connected' ? `${item.username}@${item.hostname}` : 'Offline — you can keep editing a local draft.'}
+              selected={draft.deviceId === item.id} disabled={!device} onPress={() => choose(item.id)} />;
+          }}
+          ListEmptyComponent={<ThemedText type="small" themeColor="textSecondary">No saved devices. Add a device before continuing.</ThemedText>} />
+      </FormSection>}
     </FormPage>
   );
 }

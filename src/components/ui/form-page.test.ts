@@ -40,8 +40,8 @@ describe('keyboard-safe form page', () => {
   it('keeps the footer above measured keyboard overlap without a second automatic inset', () => {
     TestRenderer.act(() => {
       renderer = TestRenderer.create(createElement(FormPage, {
-        title: 'New agent', footer: 'Start agent', children: 'Name and settings',
-      }));
+        title: 'New agent', footer: 'Start agent',
+      }, 'Name and settings'));
     });
     const viewport = renderer.root.findAllByProps({ testID: 'form-viewport' })[0];
     const footer = renderer.root.findAllByProps({ testID: 'form-footer' })[0];
@@ -58,8 +58,8 @@ describe('keyboard-safe form page', () => {
     });
     TestRenderer.act(() => {
       renderer = TestRenderer.create(createElement(FormPage, {
-        title: 'New space', footer: 'Create', children: 'Folder',
-      }));
+        title: 'New space', footer: 'Create',
+      }, 'Folder'));
     });
     expect(StyleSheet.flatten(renderer.root.findAllByProps({ testID: 'form-footer' })[0].props.style).paddingBottom).toBe(24);
   });
@@ -68,13 +68,27 @@ describe('keyboard-safe form page', () => {
     const remove = jest.fn();
     const listen = jest.spyOn(BackHandler, 'addEventListener').mockReturnValue({ remove });
     TestRenderer.act(() => {
-      renderer = TestRenderer.create(createElement(FormPage, { title: 'Starting', busy: true, children: 'Please wait' }));
+      renderer = TestRenderer.create(createElement(FormPage, { title: 'Starting', busy: true }, 'Please wait'));
     });
     expect(listen).toHaveBeenCalledWith('hardwareBackPress', expect.any(Function));
     expect(listen.mock.calls[0][1]()).toBe(true);
     const screen = renderer.root.findByType(Stack.Screen);
     expect(screen.props.options.gestureEnabled).toBe(false);
-    TestRenderer.act(() => renderer.update(createElement(FormPage, { title: 'New agent', busy: false, children: 'Ready' })));
+    TestRenderer.act(() => renderer.update(createElement(FormPage, { title: 'New agent', busy: false }, 'Ready')));
     expect(remove).toHaveBeenCalled();
+  });
+
+  it.each([
+    { inset: 0, visible: false, expected: 24 },
+    { inset: 300, visible: true, expected: 300 },
+    { inset: 0, visible: true, expected: 0 },
+  ])('protects footerless selectors from bottom occlusion: %j', ({ inset, visible, expected }) => {
+    jest.mocked(useKeyboardOverlap).mockReturnValueOnce({
+      ref: jest.fn(), measure: jest.fn(), inset, visible,
+    });
+    TestRenderer.act(() => {
+      renderer = TestRenderer.create(createElement(FormPage, { title: 'Choose model', scroll: false }, 'Models'));
+    });
+    expect(StyleSheet.flatten(renderer.root.findAllByProps({ testID: 'form-viewport' })[0].props.style).paddingBottom).toBe(expected);
   });
 });

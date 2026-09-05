@@ -5,12 +5,10 @@ import {
   Alert,
   FlatList,
   Keyboard,
-  Platform,
   Pressable,
   StyleSheet,
   TextInput,
   View,
-  type KeyboardEvent,
 } from 'react-native';
 
 import { MarkdownMessage } from '@/components/markdown/markdown-message';
@@ -46,6 +44,7 @@ import {
   type ToolActivityGroup,
 } from '@/features/agents/conversation-display';
 import { useTheme } from '@/hooks/use-theme';
+import { useKeyboardOverlap } from '@/hooks/use-keyboard-overlap';
 import { isBridgeUnavailable } from '@/services/herdr-bridge-transport';
 import { herdrRepository } from '@/services/herdr-repository';
 import { toUserMessage } from '@/utils/user-error';
@@ -69,6 +68,7 @@ export default function AgentConversationScreen() {
   const ownerSnapshot = useConnectionSnapshot(ownerDeviceId);
   const foreground = useForeground();
   const focused = useIsFocused();
+  const { ref: keyboardViewport, inset: keyboardHeight, measure: measureKeyboard } = useKeyboardOverlap(focused && foreground);
   const commands = usePendingCommands();
   const ownerConnected = ownerConnection === 'connected' &&
     (!ownerSnapshot || ownerSnapshot.phase === 'connected');
@@ -79,7 +79,6 @@ export default function AgentConversationScreen() {
   const [reloadToken, setReloadToken] = useState(0);
   const [sending, setSending] = useState(false);
   const [composerHeight, setComposerHeight] = useState(0);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [closingAgent, setClosingAgent] = useState(false);
   const closingAgentRef = useRef(false);
   const navigating = useRef(false);
@@ -151,25 +150,12 @@ export default function AgentConversationScreen() {
   }
 
   useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-
-    const onShow = (e: KeyboardEvent) => {
-      setKeyboardHeight(e.endCoordinates.height);
+    if (!focused || !foreground) return;
+    const subscription = Keyboard.addListener('keyboardDidShow', () => {
       listRef.current?.scrollToOffset({ offset: 0, animated: true });
-    };
-    const onHide = () => {
-      setKeyboardHeight(0);
-    };
-
-    const showSub = Keyboard.addListener(showEvent, onShow);
-    const hideSub = Keyboard.addListener(hideEvent, onHide);
-
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
-  }, []);
+    });
+    return () => subscription.remove();
+  }, [focused, foreground]);
   /**
    * Newest first, because the transcript renders inverted. Offset zero is then
    * the newest message, so opening a conversation lands at the bottom by
@@ -353,7 +339,7 @@ export default function AgentConversationScreen() {
           ),
         }}
       />
-      <View style={styles.flex}>
+      <View ref={keyboardViewport} onLayout={measureKeyboard} collapsable={false} style={styles.flex}>
         {/* ScrollEdgeFrame supplies the transcript blur target. Keep the
             composer and reconnect overlay outside it. */}
         <View style={styles.flex}>

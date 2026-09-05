@@ -72,7 +72,9 @@ export default function RootLayout() {
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="hosts" />
           <Stack.Screen name="agents" />
-          <Stack.Screen name="flows" />
+          {/* Keep outer-flow dismissal on explicit controls. An inner page's
+              busy state cannot disable a parent navigator's native gesture. */}
+          <Stack.Screen name="flows" options={{ gestureEnabled: false }} />
           <Stack.Screen name="diagnostics" />
           <Stack.Screen name="connect" />
           <Stack.Screen name="files" />

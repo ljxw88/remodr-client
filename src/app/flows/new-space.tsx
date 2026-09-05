@@ -1,11 +1,14 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { ThemedText } from '@/components/themed-text';
 import { AppButton } from '@/components/ui/app-button';
 import { FormError, FormPage, FormSection, MissingFlow, SelectionRow } from '@/components/ui/form-page';
 import { TextField } from '@/components/ui/text-field';
 import { createSpaceInputSchema } from '@/domain/herdr';
+import { beginNewAgentFlow } from '@/features/agents/creation-flow';
 import { useHerdr } from '@/features/agents/use-herdr';
+import { selectWorkspace } from '@/features/agents/workspace-selection';
 import { useHostSession } from '@/features/connection/use-host-session';
 import { flowDrafts, useFlowDraft, type NewSpaceDraft } from '@/features/forms/flow-drafts';
 import { useHosts } from '@/features/hosts/use-hosts';
@@ -68,16 +71,26 @@ function NewSpaceForm({ flowId, draft }: { flowId: string; draft: NewSpaceDraft 
       }
       const input = createSpaceInputSchema.parse({ cwd: current.cwd, label: current.label });
       const result = await herdrRepository.createSpace(input, current.deviceId);
+      herdrRepository.selectDevice(current.deviceId);
+      selectWorkspace(current.deviceId, result.workspaceId);
       const shouldNavigate = mounted.current;
-      flowDrafts.discard(flowId);
+      const fresh = herdrRepository.getSnapshot().devices[current.deviceId];
+      let nextFlowId: string | undefined;
+      if (shouldNavigate && fresh?.runtime.workspaces.some((space) =>
+        space.id === result.workspaceId && (!space.deviceId || space.deviceId === current.deviceId),
+      )) {
+        nextFlowId = beginNewAgentFlow(fresh, result.workspaceId);
+      }
       if (shouldNavigate) {
-        router.dismissTo({ pathname: '/', params: { selectedSpace: result.workspaceId, selectedDevice: current.deviceId } });
+        if (nextFlowId) router.replace({ pathname: '/flows/new-agent', params: { flowId: nextFlowId } });
+        else router.dismissTo('/');
       }
     } catch (cause) {
-      if (mounted.current) setError(toUserMessage(cause));
-    } finally {
       submitting.current = false;
-      if (mounted.current) setCreating(false);
+      if (mounted.current) {
+        setError(toUserMessage(cause));
+        setCreating(false);
+      }
     }
   }
 
@@ -85,7 +98,8 @@ function NewSpaceForm({ flowId, draft }: { flowId: string; draft: NewSpaceDraft 
     <FormPage title="New space" busy={creating} footer={
       <>
         <FormError message={error ?? validation} />
-        <AppButton label={creating ? 'Creating space…' : 'Create space'} disabled={creating || !!validation} onPress={() => void create()} />
+        <ThemedText type="caption" themeColor="textMuted">Next, choose an agent for this space.</ThemedText>
+        <AppButton label={creating ? 'Creating space…' : 'Create space and continue'} disabled={creating || !!validation} onPress={() => void create()} />
       </>
     }>
       <FormSection>

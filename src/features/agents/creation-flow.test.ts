@@ -1,12 +1,16 @@
 import { createElement } from 'react';
 import TestRenderer from 'react-test-renderer';
 import { router, useLocalSearchParams } from 'expo-router';
+import { FlatList, Keyboard } from 'react-native';
 
+import DevicesPage from '@/app/flows/devices';
 import NewAgentPage from '@/app/flows/new-agent';
 import NewSpacePage from '@/app/flows/new-space';
 import FoldersPage from '@/app/flows/folders';
+import ProvidersPage from '@/app/flows/providers';
+import SpacesPage from '@/app/flows/spaces';
 import { AppButton } from '@/components/ui/app-button';
-import { FormError, SelectionRow } from '@/components/ui/form-page';
+import { FormError, FormSection, SelectionRow } from '@/components/ui/form-page';
 import { TextField } from '@/components/ui/text-field';
 import type { CreateAgentResult, CreateSpaceResult } from '@/domain/herdr';
 import type { RemoteFile, SessionSnapshot } from '@/domain/remote';
@@ -21,6 +25,7 @@ import {
   spaceDraftForDevice,
 } from '@/features/agents/creation-flow';
 import { useHerdr } from '@/features/agents/use-herdr';
+import { selectWorkspace } from '@/features/agents/workspace-selection';
 import { useHostSession } from '@/features/connection/use-host-session';
 import { flowDrafts, type NewAgentDraft, type NewSpaceDraft } from '@/features/forms/flow-drafts';
 import { herdrRepository, type DeviceRuntimeState, type HerdrRepositoryState } from '@/services/herdr-repository';
@@ -50,10 +55,11 @@ jest.mock('@/components/ui/form-page', () => {
 jest.mock('@/components/ui/app-icon', () => ({ AppIcon: () => null }));
 jest.mock('@/features/agents/tuning-fields', () => ({ TuningFields: () => null }));
 jest.mock('@/features/agents/use-herdr', () => ({ useHerdr: jest.fn() }));
+jest.mock('@/features/agents/workspace-selection', () => ({ selectWorkspace: jest.fn() }));
 jest.mock('@/features/connection/use-host-session', () => ({ useHostSession: jest.fn(), refreshSessions: jest.fn() }));
 jest.mock('@/features/hosts/use-hosts', () => ({ useHosts: () => ({ hosts: [], loading: false, error: null, reload: jest.fn() }) }));
 jest.mock('@/services/herdr-repository', () => ({
-  herdrRepository: { getSnapshot: jest.fn(), createAgent: jest.fn(), createSpace: jest.fn() },
+  herdrRepository: { getSnapshot: jest.fn(), createAgent: jest.fn(), createSpace: jest.fn(), selectDevice: jest.fn() },
 }));
 jest.mock('@/services/native-remote-client', () => ({
   remoteClient: { getSession: jest.fn(), sftpList: jest.fn() },
@@ -181,6 +187,9 @@ describe('creation pages and folder lifetime', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.mocked(remoteClient.sftpList).mockReset();
+    jest.mocked(herdrRepository.createAgent).mockReset();
+    jest.mocked(herdrRepository.createSpace).mockReset();
     owner = device();
     session = { hostId: owner.deviceId, sessionId: 'session-a', status: 'connected' };
     jest.mocked(useHerdr).mockReturnValue(repositoryState(owner));
@@ -212,10 +221,29 @@ describe('creation pages and folder lifetime', () => {
     return found;
   }
 
+  function control(label: string) {
+    const found = renderer?.root.findAllByProps({ accessibilityLabel: label }).find((node) => typeof node.props.onPress === 'function');
+    if (!found) throw new Error(`Missing control: ${label}`);
+    return found;
+  }
+
   function updateConnection() {
     jest.mocked(useHerdr).mockReturnValue(repositoryState(owner));
     TestRenderer.act(() => renderer?.update(createElement(FoldersPage)));
   }
+
+  it.each([
+    { name: 'device', Page: DevicesPage },
+    { name: 'provider', Page: ProvidersPage },
+    { name: 'space', Page: SpacesPage },
+  ])('uses one bounded group for the $name selector list', ({ Page }) => {
+    flowId = beginNewAgentFlow(owner);
+    render(Page);
+    const groups = renderer?.root.findAllByType(FormSection);
+    expect(groups).toHaveLength(1);
+    expect(groups?.[0].props.fill).toBe(true);
+    expect(groups?.[0].findByType(FlatList).props.showsVerticalScrollIndicator).toBe(false);
+  });
 
   it('keeps editing local, locks inputs during submit, fences double taps, and targets the captured device', async () => {
     flowId = beginNewAgentFlow(owner);
@@ -229,8 +257,16 @@ describe('creation pages and folder lifetime', () => {
     expect(herdrRepository.createAgent).toHaveBeenCalledTimes(1);
     expect(herdrRepository.createAgent).toHaveBeenCalledWith(expect.objectContaining({ name: 'Draft name', bypassPermissions: true }), 'device-a');
     expect(field('Name (optional)').props.editable).toBe(false);
+    expect(herdrRepository.selectDevice).not.toHaveBeenCalled();
+    expect(selectWorkspace).not.toHaveBeenCalled();
     await TestRenderer.act(async () => result.resolve({ agentId: 'created', paneId: 'pane', name: 'Draft name', runtime: owner.runtime }));
+    expect(herdrRepository.selectDevice).toHaveBeenCalledWith('device-a');
+    expect(selectWorkspace).toHaveBeenCalledWith('device-a', 'space-1');
     expect(router.replace).toHaveBeenCalledWith({ pathname: '/agents/[id]', params: { id: 'created' } });
+    expect(flowDrafts.get(flowId)).toBeDefined();
+    expect(renderer?.root.findAllByProps({ testID: 'missing-flow' })).toHaveLength(0);
+    expect(button('Starting agent…').props.disabled).toBe(true);
+    await TestRenderer.act(async () => { renderer?.unmount(); });
     expect(flowDrafts.get(flowId)).toBeUndefined();
   });
 
@@ -270,41 +306,92 @@ describe('creation pages and folder lifetime', () => {
     expect(flowDrafts.get(flowId)?.kind).toBe('new-agent');
     expect(field('Name (optional)').props.editable).toBe(true);
     expect(renderer?.root.findAllByType(FormError).some((node) => node.props.message === 'Provider refused this model')).toBe(true);
+    expect(herdrRepository.selectDevice).not.toHaveBeenCalled();
+    expect(selectWorkspace).not.toHaveBeenCalled();
   });
 
-  it('submits spaces only once, to their owner, and dismisses with the created workspace selected', async () => {
+  it('submits spaces once to their owner and replaces the form with an agent draft from the fresh snapshot', async () => {
     flowId = beginNewSpaceFlow(owner.deviceId);
     const result = deferred<CreateSpaceResult>();
     jest.mocked(herdrRepository.createSpace).mockReturnValue(result.promise);
     render(NewSpacePage);
     TestRenderer.act(() => field('Root folder').props.onChangeText('/projects'));
-    const submit = button('Create space').props.onPress;
+    const submit = button('Create space and continue').props.onPress;
     TestRenderer.act(() => { submit(); submit(); });
     expect(herdrRepository.createSpace).toHaveBeenCalledTimes(1);
     expect(herdrRepository.createSpace).toHaveBeenCalledWith({ cwd: '/projects', label: '' }, 'device-a');
     expect(field('Root folder').props.editable).toBe(false);
     expect(field('Space name (optional)').props.editable).toBe(false);
+    expect(herdrRepository.selectDevice).not.toHaveBeenCalled();
+    expect(selectWorkspace).not.toHaveBeenCalled();
+    owner = {
+      ...owner, runtime: {
+        ...owner.runtime,
+        providers: [{ provider: 'codex', available: true, aliases: [] }],
+        workspaces: [...owner.runtime.workspaces, { id: 'created-space', name: 'Created', status: 'idle' }],
+      },
+    };
     await TestRenderer.act(async () => result.resolve({ workspaceId: 'created-space', runtime: owner.runtime }));
-    expect(router.dismissTo).toHaveBeenCalledWith({ pathname: '/', params: { selectedSpace: 'created-space', selectedDevice: 'device-a' } });
+    expect(herdrRepository.selectDevice).toHaveBeenCalledWith('device-a');
+    expect(selectWorkspace).toHaveBeenCalledWith('device-a', 'created-space');
+    expect(router.replace).toHaveBeenCalledWith({ pathname: '/flows/new-agent', params: { flowId: expect.any(String) } });
+    expect(router.push).not.toHaveBeenCalled();
+    expect(router.dismissTo).not.toHaveBeenCalled();
+    expect(herdrRepository.createAgent).not.toHaveBeenCalled();
+    const destination = jest.mocked(router.replace).mock.calls[0]?.[0];
+    if (!destination || typeof destination === 'string' || !('params' in destination) ||
+      !destination.params || !('flowId' in destination.params) || typeof destination.params.flowId !== 'string') {
+      throw new Error('The handoff must pass a new flow ID');
+    }
+    expect(destination.params.flowId).not.toBe(flowId);
+    expect(flowDrafts.get(destination.params.flowId)).toMatchObject({
+      kind: 'new-agent', deviceId: 'device-a', workspaceId: 'created-space', provider: 'codex',
+    });
+    flowDrafts.discard(destination.params.flowId);
+    expect(flowDrafts.get(flowId)).toBeDefined();
+    expect(renderer?.root.findAllByProps({ testID: 'missing-flow' })).toHaveLength(0);
+    await TestRenderer.act(async () => { renderer?.unmount(); });
+    expect(flowDrafts.get(flowId)).toBeUndefined();
+  });
+
+  it('does not hand off to the wrong workspace if the created space disappears before continuation', async () => {
+    flowId = beginNewSpaceFlow(owner.deviceId);
+    jest.mocked(herdrRepository.createSpace).mockResolvedValue({ workspaceId: 'created-space', runtime: owner.runtime });
+    render(NewSpacePage);
+    await TestRenderer.act(async () => button('Create space and continue').props.onPress());
+    expect(router.replace).not.toHaveBeenCalled();
+    expect(herdrRepository.selectDevice).toHaveBeenCalledWith('device-a');
+    expect(selectWorkspace).toHaveBeenCalledWith('device-a', 'created-space');
+    expect(router.dismissTo).toHaveBeenCalledWith('/');
+    await TestRenderer.act(async () => { renderer?.unmount(); });
     expect(flowDrafts.get(flowId)).toBeUndefined();
   });
 
   it('requires explicit path opening and Use this folder, with no backend mutations', async () => {
+    const dismissKeyboard = jest.spyOn(Keyboard, 'dismiss');
     flowId = beginNewSpaceFlow(owner.deviceId);
     jest.mocked(remoteClient.sftpList).mockResolvedValue([]);
     render(FoldersPage);
     await TestRenderer.act(async () => {});
+    expect(renderer?.root.findAllByType(FormSection)).toHaveLength(1);
+    expect(renderer?.root.findByType(FormSection).props.fill).toBe(true);
+    expect(renderer?.root.findByType(FlatList).props.showsVerticalScrollIndicator).toBe(false);
+    expect(renderer?.root.findAllByType(TextField)).toHaveLength(1);
+    expect(field('Folder path').props.rightAccessory).toBeDefined();
+    expect(renderer?.root.findAllByType(AppButton).some((node) => node.props.label === 'Open path')).toBe(false);
     expect(remoteClient.sftpList).toHaveBeenCalledWith('session-a', '.');
     TestRenderer.act(() => field('Folder path').props.onChangeText('/projects'));
     expect(button('Use this folder').props.disabled).toBe(true);
     expect(flowDrafts.get(flowId)).toMatchObject({ cwd: '~/' });
-    await TestRenderer.act(async () => button('Open path').props.onPress());
+    await TestRenderer.act(async () => control('Open path').props.onPress());
+    expect(dismissKeyboard).toHaveBeenCalled();
     expect(remoteClient.sftpList).toHaveBeenLastCalledWith('session-a', '/projects');
     expect(flowDrafts.get(flowId)).toMatchObject({ cwd: '~/' });
     TestRenderer.act(() => { button('Use this folder').props.onPress(); button('Use this folder').props.onPress(); });
     expect(flowDrafts.get(flowId)).toMatchObject({ cwd: '/projects' });
     expect(router.back).toHaveBeenCalledTimes(1);
     expect(herdrRepository.createSpace).not.toHaveBeenCalled();
+    dismissKeyboard.mockRestore();
   });
 
   it('ignores older path responses and automatically refreshes on the owning device reconnect', async () => {
@@ -315,7 +402,7 @@ describe('creation pages and folder lifetime', () => {
     jest.mocked(remoteClient.sftpList).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise).mockReturnValueOnce(reconnect.promise);
     render(FoldersPage);
     TestRenderer.act(() => field('Folder path').props.onChangeText('/projects'));
-    TestRenderer.act(() => button('Open path').props.onPress());
+    TestRenderer.act(() => control('Open path').props.onPress());
     await TestRenderer.act(async () => first.resolve([{ name: 'stale-folder', path: './stale-folder', isDirectory: true, size: 0 }]));
     expect(button('Use this folder').props.disabled).toBe(true);
     expect(renderer?.root.findAllByType(SelectionRow)).toHaveLength(0);
@@ -343,6 +430,26 @@ describe('creation pages and folder lifetime', () => {
     expect(renderer?.root.findAllByType(FormError).some((node) => node.props.message === 'Permission denied')).toBe(true);
     await TestRenderer.act(async () => button('Try again').props.onPress());
     expect(button('Use this folder').props.disabled).toBe(false);
+  });
+
+  it('uses the same address handler for keyboard Go and the accessory, and navigates Up from the opened path', async () => {
+    flowId = beginNewSpaceFlow(owner.deviceId);
+    jest.mocked(remoteClient.sftpList).mockResolvedValue([]);
+    render(FoldersPage);
+    await TestRenderer.act(async () => {});
+    expect(control('Parent folder').props.disabled).toBe(true);
+    TestRenderer.act(() => field('Folder path').props.onChangeText('/projects/mobile'));
+    expect(field('Folder path').props.onSubmitEditing).toBe(control('Open path').props.onPress);
+    expect(button('Use this folder').props.disabled).toBe(true);
+    expect(control('Parent folder').props.disabled).toBe(true);
+    expect(renderer?.root.findAllByType(FlatList)).toHaveLength(0);
+    await TestRenderer.act(async () => field('Folder path').props.onSubmitEditing());
+    expect(remoteClient.sftpList).toHaveBeenLastCalledWith('session-a', '/projects/mobile');
+    expect(button('Use this folder').props.disabled).toBe(false);
+    await TestRenderer.act(async () => control('Parent folder').props.onPress());
+    expect(field('Folder path').props.value).toBe('/projects');
+    expect(remoteClient.sftpList).toHaveBeenLastCalledWith('session-a', '/projects');
+    expect(flowDrafts.get(flowId)).toMatchObject({ cwd: '~/' });
   });
 
   it('discards the old session response after reconnect even when it resolves last', async () => {

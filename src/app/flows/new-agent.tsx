@@ -10,6 +10,7 @@ import { providerLabel } from '@/domain/herdr';
 import { agentCreationError, agentCreationInput } from '@/features/agents/creation-flow';
 import { TuningFields } from '@/features/agents/tuning-fields';
 import { useHerdr } from '@/features/agents/use-herdr';
+import { selectWorkspace } from '@/features/agents/workspace-selection';
 import { useHostSession } from '@/features/connection/use-host-session';
 import { flowDrafts, useFlowDraft, type NewAgentDraft } from '@/features/forms/flow-drafts';
 import { useHosts } from '@/features/hosts/use-hosts';
@@ -77,17 +78,19 @@ function NewAgentForm({ flowId, draft }: { flowId: string; draft: NewAgentDraft 
         throw new Error('This device is not connected. Reconnect before starting the agent.');
       }
       const result = await herdrRepository.createAgent(agentCreationInput(current), current.deviceId);
+      herdrRepository.selectDevice(current.deviceId);
+      selectWorkspace(current.deviceId, current.workspaceId);
       const shouldNavigate = mounted.current;
-      flowDrafts.discard(flowId);
       if (shouldNavigate) {
         if (result.agentId) router.replace({ pathname: '/agents/[id]', params: { id: result.agentId } });
         else router.dismissTo('/');
       }
     } catch (cause) {
-      if (mounted.current) setError(toUserMessage(cause));
-    } finally {
       submitting.current = false;
-      if (mounted.current) setCreating(false);
+      if (mounted.current) {
+        setError(toUserMessage(cause));
+        setCreating(false);
+      }
     }
   }
 

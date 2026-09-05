@@ -1,5 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useRef } from 'react';
+import { FlatList } from 'react-native';
 
 import { FormError, FormPage, FormSection, MissingFlow, SelectionRow } from '@/components/ui/form-page';
 import { launchableAgentProviderSchema, providerLabel, type LaunchableAgentProvider } from '@/domain/herdr';
@@ -29,15 +30,17 @@ export default function ProvidersPage() {
   }
 
   return (
-    <FormPage title="Provider">
+    <FormPage title="Provider" scroll={false}>
       <FormError message={!device ? 'This device is no longer available. Go back and choose another device.' : null} />
-      <FormSection description="Availability is reported by the selected device.">
-        {launchableAgentProviderSchema.options.map((provider) => {
-          const manifest = device?.runtime.providers.find((item) => item.provider === provider);
-          return <SelectionRow key={provider} label={providerLabel(provider)} selected={provider === draft.provider}
-            disabled={!manifest?.available} description={manifest?.available ? undefined : manifest?.unavailableReason || 'Not available on this device'}
-            onPress={() => choose(provider)} />;
-        })}
+      <FormSection fill description="Availability is reported by the selected device.">
+        <FlatList data={launchableAgentProviderSchema.options} keyExtractor={(provider) => provider}
+          keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}
+          renderItem={({ item: provider }) => {
+            const manifest = device?.runtime.providers.find((item) => item.provider === provider);
+            return <SelectionRow label={providerLabel(provider)} selected={provider === draft.provider}
+              disabled={!manifest?.available} description={manifest?.available ? undefined : manifest?.unavailableReason || 'Not available on this device'}
+              onPress={() => choose(provider)} />;
+          }} />
       </FormSection>
     </FormPage>
   );

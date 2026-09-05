@@ -19,7 +19,7 @@ export function leaveForm() {
 
 type Props = {
   title: string;
-  children: ReactNode;
+  children?: ReactNode;
   footer?: ReactNode;
   onBack?: () => void;
   busy?: boolean;
@@ -97,7 +97,11 @@ export function FormPage({ title, children, footer, onBack = leaveForm, busy = f
         ),
       }} />
       <FormKeyboardContext.Provider value={onFieldFocus}>
-        <View testID="form-viewport" style={[styles.viewport, { paddingBottom: keyboardInset, paddingLeft: insets.left, paddingRight: insets.right }]}>
+        <View testID="form-viewport" style={[styles.viewport, {
+          paddingBottom: keyboardInset + (footer || keyboardVisible ? 0 : insets.bottom),
+          paddingLeft: insets.left,
+          paddingRight: insets.right,
+        }]}>
           {scroll ? (
             <ScrollView
               testID="form-scroll"
@@ -129,11 +133,11 @@ export function FormPage({ title, children, footer, onBack = leaveForm, busy = f
   );
 }
 
-export function FormSection({ title, description, children }: { title?: string; description?: string; children: ReactNode }) {
+export function FormSection({ title, description, children, fill = false }: { title?: string; description?: string; children: ReactNode; fill?: boolean }) {
   return (
-    <View style={styles.section}>
+    <View style={[styles.section, fill && styles.fill]}>
       {title ? <ThemedText type="smallBold" themeColor="textSecondary">{title}</ThemedText> : null}
-      <View style={styles.group}>{children}</View>
+      <View style={[styles.group, fill && styles.listGroup]}>{children}</View>
       {description ? <ThemedText type="caption" themeColor="textMuted">{description}</ThemedText> : null}
     </View>
   );
@@ -184,7 +188,7 @@ export function MissingFlow({ title = 'Form unavailable' }: { title?: string }) 
     <FormPage title={title} footer={<AppButton label="Back to agents" onPress={() => router.dismissTo('/')} />}>
       <ThemedText type="heading">Start this action again</ThemedText>
       <ThemedText type="small" themeColor="textSecondary">
-        This form is no longer open. Your agents and saved settings have not been changed.
+        This form is no longer open. Return to Agents to review the current state before starting it again.
       </ThemedText>
     </FormPage>
   );
@@ -196,8 +200,10 @@ const styles = StyleSheet.create({
   content: { flexGrow: 1, gap: Spacing.three, padding: Spacing.two + Spacing.half },
   listContent: { flex: 1, gap: Spacing.two, paddingHorizontal: Spacing.two + Spacing.half, paddingTop: Spacing.two },
   footer: { gap: Spacing.one, padding: Spacing.two, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.border, backgroundColor: Colors.background },
-  back: { width: ControlHeight.regular, height: ControlHeight.regular, borderRadius: Radius.pill, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.glassStrong },
+  back: { width: ControlHeight.regular, height: ControlHeight.regular, marginRight: Spacing.one, borderRadius: Radius.pill, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.glassStrong },
   section: { gap: Spacing.one },
+  fill: { flex: 1 },
+  listGroup: { flex: 1, backgroundColor: 'transparent', borderWidth: 0, borderRadius: 0 },
   group: { borderRadius: Radius.control, borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.border, overflow: 'hidden', backgroundColor: Colors.backgroundElement },
   row: { minHeight: ControlHeight.row, flexDirection: 'row', alignItems: 'center', gap: Spacing.one, paddingHorizontal: Spacing.two, paddingVertical: Spacing.one + Spacing.half, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
   rowCopy: { flex: 1, gap: Spacing.half },
