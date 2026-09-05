@@ -29,7 +29,8 @@ retaining recovery when the service is denied, stopped, or timed out.
 
 ## Consequences
 
-Transient failures trigger automatic recovery and inline status. Cached
+Transient failures trigger automatic recovery and a floating status indicator.
+Reconnect controls open in a bottom sheet without resizing the page. Cached
 transcripts and locally saved commands remain visible. Authentication, host
 trust, invalid targets, and uncertain delivery require explicit attention.
 

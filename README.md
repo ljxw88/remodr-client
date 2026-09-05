@@ -13,9 +13,9 @@ Provider adapters return semantic messages where supported; raw output is an
 explicit compatibility view.
 
 Each enabled device has its own supervised connection and cached runtime.
-Dropped connections retain transcripts and durable pending sends, with recovery
-shown inline rather than through repeated retry dialogs. Ambiguous delivery
-requires review instead of a potentially duplicated command.
+Dropped connections retain transcripts and durable pending sends, with a floating
+status indicator and on-demand reconnect sheet rather than repeated dialogs.
+Ambiguous delivery requires review instead of a potentially duplicated command.
 
 ## Run
 

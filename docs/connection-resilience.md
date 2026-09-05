@@ -160,13 +160,21 @@ reading or typing. The current status component uses this progression:
 
 | Disconnected duration | UI |
 | --- | --- |
-| Under 10 seconds | No outage banner; pending-message status still appears |
-| 10-40 seconds | Small connection/network status |
-| 40 seconds or longer | Non-modal reconnect notice |
-| 2 minutes or longer | Notice includes an optional Reconnect now action |
+| Under 10 seconds | No outage indicator; pending-message status still appears |
+| 10-40 seconds | Small floating connection/network indicator |
+| 40 seconds or longer | Floating reconnect notice |
+| 2 minutes or longer | The indicator is labelled Reconnect |
 
-Fatal trust/authentication errors bypass that delay and link to server
-controls. Uncertain delivery is distinct from a definite send failure.
+The connection indicator is an overlay above the dock or measured composer,
+so it does not change the page/list layout. Tapping it opens the shared bottom
+sheet with details and a Reconnect now action. The sheet opens only on request,
+can be dismissed while a retry is pending, and closes on recovery. Dismissing
+it does not stop automatic retries or cause it to reopen on every attempt.
+
+Fatal trust/authentication errors show the indicator immediately; their sheet
+links to server controls instead of offering blind retries. Per-message
+delivery status remains attached to its message. Uncertain delivery is distinct
+from a definite send failure.
 
 Never clear/dim the transcript, steal keyboard focus, or repeatedly show an
 error dialog for transient network failures. Ambiguous delivery and local

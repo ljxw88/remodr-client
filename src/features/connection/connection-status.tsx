@@ -1,12 +1,16 @@
-import { router } from 'expo-router';
+import { router, useIsFocused } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { Radius, Spacing } from '@/constants/theme';
+import { AppButton } from '@/components/ui/app-button';
+import { glassRim } from '@/components/ui/glass-surface';
+import { SheetModal, SheetPanel } from '@/components/ui/sheet';
+import { ControlHeight, Radius, Spacing } from '@/constants/theme';
 import { retryDeviceConnection } from '@/features/agents/connect-runtime';
 import type { ConnectionSnapshot } from '@/features/connection/connection-supervisor';
-import { useConnectionSnapshot, usePendingCommands } from '@/features/connection/use-connection';
+import { useConnectionSnapshot, useForeground, usePendingCommands } from '@/features/connection/use-connection';
 import { useTheme } from '@/hooks/use-theme';
 import { herdrRepository } from '@/services/herdr-repository';
 import { toUserMessage } from '@/utils/user-error';
@@ -63,77 +67,177 @@ export function getConnectionStatus(
   };
 }
 
-export function ConnectionStatus({ deviceId, agentId }: { deviceId?: string | null; agentId?: string }) {
+type ConnectionStatusProps = {
+  deviceId?: string | null;
+  agentId?: string;
+  /** Clearance for the existing dock/composer; this indicator never adds layout space. */
+  bottomInset: number;
+};
+
+export function ConnectionStatus({ deviceId, ...props }: ConnectionStatusProps) {
+  return deviceId ? <DeviceConnectionStatus key={deviceId} deviceId={deviceId} {...props} /> : null;
+}
+
+function DeviceConnectionStatus({
+  deviceId, agentId, bottomInset,
+}: Omit<ConnectionStatusProps, 'deviceId'> & { deviceId: string }) {
   const theme = useTheme();
+  const focused = useIsFocused();
+  const foreground = useForeground();
   const snapshot = useConnectionSnapshot(deviceId);
   const commands = usePendingCommands();
   const [now, setNow] = useState(Date.now);
-  const [retryError, setRetryError] = useState<{ deviceId: string; message: string } | null>(null);
+  const [sheet, setSheet] = useState<{ closeOnConnected: boolean } | null>(null);
+  const [retryError, setRetryError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const retryingRef = useRef(false);
+  const mounted = useRef(true);
+  const openSettingsAfterClose = useRef(false);
+  const visible = focused && foreground;
+  const needsClock = snapshot != null && snapshot.phase !== 'connected' && snapshot.phase !== 'fatal';
   const queuedCount = commands.filter((command) =>
     command.deviceId === deviceId && (!agentId || command.agentId === agentId) &&
     (command.state === 'queued' || command.state === 'sending'),
   ).length;
 
   useEffect(() => {
-    if (!snapshot || snapshot.phase === 'connected' || snapshot.phase === 'fatal') return;
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  useEffect(() => {
+    if (!visible || !needsClock) return;
     const timer = setInterval(() => setNow(Date.now()), 1_000);
     return () => clearInterval(timer);
-  }, [snapshot]);
-  const error = retryError?.deviceId === deviceId && snapshot?.phase !== 'connected'
-    ? retryError?.message : null;
+  }, [visible, needsClock]);
   const status = getConnectionStatus(snapshot, now, queuedCount);
-  if (status.kind === 'hidden' && !error) return null;
+  if (!visible || (status.kind === 'hidden' && !sheet)) return null;
 
-  async function retry() {
-    if (!deviceId || retryingRef.current) return;
+  async function retry(close: () => void) {
+    if (retryingRef.current) return;
     retryingRef.current = true;
     setRetrying(true);
     setRetryError(null);
     try {
-      await retryDeviceConnection(deviceId);
+      const connected = await retryDeviceConnection(deviceId);
+      if (mounted.current && connected) close();
     } catch (cause) {
-      setRetryError({ deviceId, message: toUserMessage(cause) });
+      if (mounted.current) setRetryError(toUserMessage(cause));
     } finally {
       retryingRef.current = false;
-      setRetrying(false);
+      if (mounted.current) setRetrying(false);
     }
   }
 
+  function dismiss() {
+    if (!mounted.current) return;
+    setSheet(null);
+    setRetryError(null);
+    if (openSettingsAfterClose.current) {
+      openSettingsAfterClose.current = false;
+      router.push({ pathname: '/hosts/[id]', params: { id: deviceId } });
+    }
+  }
+
+  const label = status.kind === 'fatal' ? 'Connection needs attention'
+    : status.reconnect ? 'Reconnect'
+      : status.kind === 'banner' ? 'Reconnecting…' : status.text;
+  const recovered = sheet?.closeOnConnected === true && snapshot?.phase === 'connected';
+
   return (
-    <View style={[
-      styles.status,
-      (status.kind === 'banner' || status.kind === 'fatal') && {
-        backgroundColor: theme.backgroundElement,
-        borderRadius: Radius.control,
-      },
-    ]}>
-      <ThemedText
-        type="caption"
-        accessibilityLiveRegion="polite"
-        themeColor={status.kind === 'fatal' ? 'warning' : 'textSecondary'}>
-        {status.text}
-      </ThemedText>
-      {status.kind === 'fatal' && deviceId ? (
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => router.push({ pathname: '/hosts/[id]', params: { id: deviceId } })}>
-          <ThemedText type="smallBold" themeColor="accent">Server settings</ThemedText>
-        </Pressable>
-      ) : status.reconnect ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ disabled: retrying }}
-          disabled={retrying}
-          onPress={() => void retry()}>
-          <ThemedText type="smallBold" themeColor="accent">
-            {retrying ? 'Reconnecting…' : 'Reconnect now'}
-          </ThemedText>
-        </Pressable>
+    <>
+      {status.kind !== 'hidden' ? (
+        <View
+          testID="connection-status-overlay"
+          pointerEvents="box-none"
+          style={[styles.position, { bottom: bottomInset + Spacing.one }]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open connection details"
+            accessibilityHint={status.text}
+            onPress={() => {
+              openSettingsAfterClose.current = false;
+              setRetryError(null);
+              setSheet({ closeOnConnected: snapshot?.phase !== 'connected' });
+            }}
+            style={({ pressed }) => [
+              styles.indicator,
+              glassRim(),
+              { backgroundColor: theme.background, opacity: pressed ? 0.8 : 1 },
+            ]}>
+            <ThemedText
+              type="caption"
+              numberOfLines={1}
+              accessibilityLiveRegion="polite"
+              themeColor={status.kind === 'fatal' ? 'warning' : 'textSecondary'}>
+              {label}
+            </ThemedText>
+          </Pressable>
+        </View>
       ) : null}
-      {error ? <ThemedText type="caption" themeColor="danger">{error}</ThemedText> : null}
-    </View>
+      {sheet ? (
+        <SheetModal closeLabel="Close connection details" onClose={dismiss}>
+          {(close) => (
+            <ConnectionSheetContent
+              close={close}
+              resolved={recovered || status.kind === 'hidden'}
+              text={recovered ? 'Connected.' : status.text}
+              fatal={status.kind === 'fatal'}
+              connected={snapshot?.phase === 'connected'}
+              retrying={retrying}
+              error={retryError}
+              onRetry={() => void retry(close)}
+              onSettings={() => {
+                openSettingsAfterClose.current = true;
+                close();
+              }}
+            />
+          )}
+        </SheetModal>
+      ) : null}
+    </>
+  );
+}
+
+function ConnectionSheetContent({
+  close, resolved, text, fatal, connected, retrying, error, onRetry, onSettings,
+}: {
+  close: () => void;
+  resolved: boolean;
+  text: string;
+  fatal: boolean;
+  connected: boolean;
+  retrying: boolean;
+  error: string | null;
+  onRetry: () => void;
+  onSettings: () => void;
+}) {
+  const insets = useSafeAreaInsets();
+  useEffect(() => {
+    if (resolved) close();
+  }, [resolved, close]);
+
+  return (
+    <SheetPanel onClose={close}>
+      <ScrollView
+        contentContainerStyle={[styles.sheetContent, { paddingBottom: Math.max(insets.bottom, Spacing.two) }]}
+        showsVerticalScrollIndicator={false}>
+        <ThemedText type="heading" style={styles.sheetTitle}>Connection</ThemedText>
+        <ThemedText type="small" accessibilityLiveRegion="polite" themeColor={fatal ? 'warning' : 'textSecondary'}>
+          {text}
+        </ThemedText>
+        {!fatal && !connected ? (
+          <ThemedText type="caption" themeColor="textMuted">
+            Automatic reconnection continues. You can close this panel and keep reading or writing.
+          </ThemedText>
+        ) : null}
+        {fatal ? (
+          <AppButton label="Server settings" onPress={onSettings} />
+        ) : !connected ? (
+          <AppButton label={retrying ? 'Reconnecting…' : 'Reconnect now'} onPress={onRetry} disabled={retrying} />
+        ) : null}
+        {error ? <ThemedText type="caption" themeColor="danger">{error}</ThemedText> : null}
+      </ScrollView>
+    </SheetPanel>
   );
 }
 
@@ -214,10 +318,26 @@ export function CommandDelivery({
 }
 
 const styles = StyleSheet.create({
-  status: {
-    gap: Spacing.half,
+  position: {
+    position: 'absolute',
+    left: Spacing.two,
+    right: Spacing.two,
+    alignItems: 'center',
+  },
+  indicator: {
+    maxWidth: '100%',
+    minHeight: ControlHeight.regular,
+    justifyContent: 'center',
+    borderRadius: Radius.pill,
     paddingHorizontal: Spacing.two,
     paddingVertical: Spacing.one,
+  },
+  sheetContent: {
+    gap: Spacing.two,
+    paddingTop: Spacing.two,
+  },
+  sheetTitle: {
+    paddingRight: ControlHeight.regular,
   },
   delivery: {
     gap: Spacing.half,

@@ -306,24 +306,10 @@ export default function AgentConversationScreen() {
         }}
       />
       <View style={styles.flex}>
-        {/*
-          No blur backdrop on this screen, deliberately.
-
-          A `BlurTargetView` draws nothing at all while the screen it is on is
-          being dismissed, so everything inside one vanished the instant you
-          pressed back: the transcript and the agent header blinked out and an
-          empty chat animated away. The chrome outside the target — the native
-          header, the composer — kept drawing, which is what made it read as
-          the conversation being thrown away rather than as a transition.
-
-          Nothing is lost by dropping it. The edge fade below already dissolves
-          rows into the canvas across the composer's full height, so the blur
-          was sampling flat background; `GlassSurface` falls back to the same
-          translucent fill and rim every chip and card in the app already uses.
-        */}
+        {/* ScrollEdgeFrame supplies the transcript blur target. Keep the
+            composer and reconnect overlay outside it. */}
         <View style={styles.flex}>
           <AgentHeader agent={agent} connected={ownerConnected} />
-          <ConnectionStatus deviceId={ownerDeviceId} agentId={agent.id} />
           <ScrollEdgeFrame
             inverted
             // The fade is what stops rows reading through the gaps between the
@@ -425,6 +411,11 @@ export default function AgentConversationScreen() {
           tunable={supportsTuning(agent.provider)}
           onOpenTuning={() => setShowTuning(true)}
           keyboardOffset={keyboardHeight}
+        />
+        <ConnectionStatus
+          deviceId={ownerDeviceId}
+          agentId={agent.id}
+          bottomInset={composerHeight + keyboardHeight}
         />
       </View>
       {showTuning ? (

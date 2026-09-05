@@ -231,8 +231,6 @@ export default function AgentsScreen() {
         </View>
       ) : null}
 
-      <ConnectionStatus deviceId={selectedDeviceId} />
-
       {hostsLoading ? (
         <View style={styles.center}>
           <ActivityIndicator color={theme.accent} />
@@ -258,6 +256,7 @@ export default function AgentsScreen() {
           )}
         </ScrollEdgeFrame>
       )}
+      <ConnectionStatus deviceId={selectedDeviceId} bottomInset={dockContentInset} />
       {showNewAgent ? (
         <NewAgentSheet
           manifests={state.runtime.providers}
