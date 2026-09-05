@@ -7,7 +7,7 @@ import { ThemedText } from '@/components/themed-text';
 import { FormPage, FormSection, MissingFlow, SelectionRow } from '@/components/ui/form-page';
 import { TextField } from '@/components/ui/text-field';
 import { Spacing } from '@/constants/theme';
-import { modelLabel } from '@/domain/agent-catalogue';
+import { catalogueUnavailableReason, modelLabel } from '@/domain/agent-catalogue';
 import { chooseModel, modelChoices } from '@/features/agents/agent-edit-flow';
 import { flowDrafts, useFlowDraft } from '@/features/forms/flow-drafts';
 
@@ -54,6 +54,11 @@ export default function ModelsPage() {
       <ThemedText testID="current-model" type="caption" themeColor="textMuted">
         Current: {modelLabel(draft.provider, draft.tuning.model)}
       </ThemedText>
+      {catalogueUnavailableReason(draft.provider) ? (
+        <ThemedText type="small" themeColor="textMuted">
+          {catalogueUnavailableReason(draft.provider)} Auto uses the remote CLI defaults.
+        </ThemedText>
+      ) : null}
       <FormSection fill>
         <FlatList
           style={styles.list}

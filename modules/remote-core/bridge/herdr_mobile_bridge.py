@@ -13,9 +13,12 @@ import json
 import os
 import queue
 import re
+import select
+import shutil
 import socket
 import sqlite3
 import stat
+import subprocess
 import sys
 import threading
 import time
@@ -25,34 +28,40 @@ from typing import Any
 
 BRIDGE_VERSION = "0.1.0"
 PROTOCOL = 1
-SUPPORTED_PROVIDERS = ("copilot", "claude", "codex", "opencode")
+SUPPORTED_PROVIDERS = ("copilot", "claude", "codex", "cursor")
 BYPASS_ARGUMENTS = {
     "claude": ["--dangerously-skip-permissions"],
     "codex": ["--dangerously-bypass-approvals-and-sandbox"],
     "copilot": ["--allow-all-tools"],
-    "opencode": ["--auto"],
+    "cursor": ["--force"],
 }
 SHELL_READY_TIMEOUT = 20
 """How long a freshly made pane is given to reach its shell prompt."""
+
+PROCESS_INSPECTION_TIMEOUT = 2.0
+PROCESS_INSPECTION_MAX_BYTES = 512 * 1024
+PROCESS_INSPECTION_MAX_FDS = 4096
 
 MAX_AGENT_NAME = 60
 """Longest name a tab label will carry, so one cannot fill the list row."""
 
 # The bridge's half of the model catalogue: which flags each CLI takes. The
 # app holds the other half — which models and settings to offer — in
-# `src/domain/agent-catalogue.ts`. A CLI must appear in both or neither: models
+# `src/domain/model-catalogues/`. A CLI must appear in both or neither: models
 # offered with no flags here cannot be sent, and flags here with no models
 # there are never asked for.
 TUNING_ARGUMENTS = {
-    # Only Copilot for now. The others take a model differently, or not at all
-    # from the command line, and guessing a flag would fail at startup with
-    # nothing useful to show for it.
     "copilot": {
         "model": "--model",
         "effort": "--effort",
         "context": "--context",
     },
+    "claude": {"model": "--model", "effort": "--effort"},
+    "codex": {"model": "--model", "effort": "-c"},
+    "cursor": {"model": "--model"},
 }
+RETUNABLE_PROVIDERS = ("copilot",)
+CODEX_STATUS_CONFIG = 'tui.status_line=["session-id","model-with-reasoning","current-dir"]'
 
 CONTEXT_TIERS = ("default", "long_context")
 
@@ -70,7 +79,12 @@ NO_MODEL = "auto"
 
 ORDERED_TUNING = ("model", "effort", "context")
 
-REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
+PROVIDER_EFFORTS = {
+    "copilot": tuple(effort for effort in REASONING_EFFORTS if effort != "ultra"),
+    "claude": ("low", "medium", "high", "xhigh", "max"),
+    "codex": REASONING_EFFORTS,
+}
 
 SUBSCRIPTION_RETRY_INITIAL = 0.25
 SUBSCRIPTION_RETRY_MAX = 2.0
@@ -419,6 +433,10 @@ class Bridge:
         self.dialog_settle_seconds = 0.25
         # Pane id -> the Copilot session id this app asked that pane to open.
         self.started_sessions: dict[str, str] = {}
+        self.observed_session_panes: set[str] = set()
+        self.process_bound_panes: set[str] = set()
+        self.session_identity_errors: dict[str, str] = {}
+        self.session_identity_diagnostics: dict[str, str] = {}
         # Pane id -> the model, effort and context it was last started with.
         self.agent_tuning: dict[str, dict[str, Any]] = {}
         # Pane id -> whether it was started with its permissions bypassed.
@@ -427,7 +445,7 @@ class Bridge:
         self.session_tuning_cache: dict[str, tuple[int, dict[str, Any]]] = {}
         self.output_lock = threading.Lock()
         self.state_lock = threading.Lock()
-        self.refresh_lock = threading.Lock()
+        self.refresh_lock = threading.RLock()
         self.buffered_events: queue.Queue[dict[str, Any]] = queue.Queue()
         self.pane_subscriptions: set[str] = set()
         self.pane_subscription_lock = threading.Lock()
@@ -443,9 +461,10 @@ class Bridge:
         self.agent_catalog: list[dict[str, Any]] | None = None
         self.raw_agents: dict[str, dict[str, Any]] = {}
         self.pending_human_requests: dict[str, dict[str, Any]] = {}
+        self.human_request_scopes: dict[str, tuple[str, Any, Any]] = {}
         self.pending_agents: dict[str, dict[str, Any]] = {}
         self.conversation_cache: dict[
-            str, tuple[tuple[int, int, int, int], dict[str, Any]]
+            tuple[str, str, str], tuple[tuple[int, int, int, int], dict[str, Any]]
         ] = {}
         self.command_context = threading.local()
         self.command_store_error: BridgeError | None = None
@@ -581,8 +600,10 @@ class Bridge:
             self._refresh_runtime()
             return self.runtime
         if action == "agent.conversation":
-            agent = self._require_agent(payload)
-            return self._load_conversation(agent)
+            with self.refresh_lock:
+                self._refresh_runtime_and_publish()
+                agent = self._require_agent(payload)
+                return self._load_conversation(agent)
         if action == "agent.send_message":
             agent = self._require_agent(payload)
             text = payload.get("text")
@@ -736,6 +757,9 @@ class Bridge:
             )
         self._refresh_runtime()
         agent = self._require_agent(payload)
+        identity_error = self.session_identity_errors.get(agent.get("paneId"))
+        if identity_error:
+            raise BridgeError("COMMAND_PRECONDITION_FAILED", identity_error)
         checked_fields = (*fields, "provider") if "provider" in expected else fields
         if any(expected[field] != agent.get(field) for field in checked_fields):
             raise BridgeError(
@@ -749,7 +773,15 @@ class Bridge:
                 raise BridgeError(
                     "COMMAND_PRECONDITION_FAILED", "The question is no longer active."
                 )
-            self.pending_human_requests[request["id"]] = request
+            self._remember_human_request(request, agent)
+
+    def _remember_human_request(
+        self, request: dict[str, Any], agent: dict[str, Any]
+    ) -> None:
+        self.pending_human_requests[request["id"]] = request
+        self.human_request_scopes[request["id"]] = (
+            agent["id"], agent.get("provider"), agent.get("providerSessionId")
+        )
 
     def _answer_human_request(self, payload: dict[str, Any]) -> dict[str, Any]:
         request_id = payload.get("requestId")
@@ -757,6 +789,11 @@ class Bridge:
         if not isinstance(request_id, str):
             raise BridgeError("INVALID_REQUEST", "Human request ID is required.")
         request = self.pending_human_requests.get(request_id)
+        scope = self.human_request_scopes.get(request_id)
+        if scope is not None and scope[1:] != (
+            agent.get("provider"), agent.get("providerSessionId")
+        ):
+            raise BridgeError("INVALID_REQUEST", "The question belongs to another session.")
         answer = payload.get("answer") or {}
         if not isinstance(answer, dict):
             raise BridgeError("INVALID_ANSWER", "Answer must be an object.")
@@ -794,6 +831,7 @@ class Bridge:
                     raise
                 self._answer_blocked_dialog(agent, request, selected_ids, text)
         self.pending_human_requests.pop(request_id, None)
+        self.human_request_scopes.pop(request_id, None)
         return {"accepted": True}
 
     @staticmethod
@@ -812,6 +850,9 @@ class Bridge:
             if agent is None or params.get("target") != agent.get("paneId"):
                 raise BridgeError("COMMAND_PRECONDITION_FAILED", "Command target is not bound.")
             self._require_agent({"agentId": agent["id"]})
+            identity_error = self.session_identity_errors.get(agent.get("paneId"))
+            if identity_error:
+                raise BridgeError("COMMAND_PRECONDITION_FAILED", identity_error)
             self.command_context.side_effect = True
         return self._herdr_request(method, params)
 
@@ -884,7 +925,7 @@ class Bridge:
             return bound
         return agent
 
-    def _refresh_runtime(self) -> None:
+    def _refresh_runtime(self, *, inspect_copilot: bool = True) -> None:
         with self.refresh_lock:
             result = self._herdr_request("session.snapshot", {})
             snapshot = result.get("snapshot")
@@ -893,12 +934,298 @@ class Bridge:
                     "INVALID_HERDR_RESPONSE", "Herdr snapshot is missing."
                 )
             self._agent_catalog_snapshot()
-            normalized = self._normalize_snapshot(snapshot)
+            normalized = self._normalize_snapshot(snapshot, inspect_copilot=inspect_copilot)
             with self.state_lock:
                 self.runtime = normalized
             self._ensure_pane_subscriptions()
 
-    def _normalize_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+    def _refresh_runtime_and_publish(self) -> None:
+        with self.refresh_lock:
+            before = {
+                key: value for key, value in self.runtime.items()
+                if key != "lastRuntimeEvent"
+            }
+            self._refresh_runtime()
+            after = {
+                key: value for key, value in self.runtime.items()
+                if key != "lastRuntimeEvent"
+            }
+            if before != after:
+                self.write_event("runtime.snapshot", self.runtime)
+
+    def _invalidate_agent_session(
+        self, agent_id: str, pane_id: str, session_id: Any
+    ) -> None:
+        self.agent_tuning.pop(pane_id, None)
+        self.session_tuning_cache.pop(session_id, None)
+        self.conversation_cache = {
+            key: value for key, value in self.conversation_cache.items()
+            if key[0] != agent_id
+        }
+        for request_id, scope in list(self.human_request_scopes.items()):
+            if scope[0] == agent_id:
+                self.pending_human_requests.pop(request_id, None)
+                self.human_request_scopes.pop(request_id, None)
+
+    def _copilot_foreground_process(self, pane_id: str) -> tuple[int, int]:
+        result = self._herdr_request("pane.process_info", {"pane_id": pane_id})
+        info = result.get("process_info")
+        if not isinstance(info, dict) or info.get("pane_id") != pane_id:
+            raise OSError("pane process metadata is unavailable or mismatched")
+        group = info.get("foreground_process_group_id")
+        shell_pid = info.get("shell_pid")
+        processes = info.get("foreground_processes")
+        if (
+            type(group) is not int or group <= 0
+            or type(shell_pid) is not int or shell_pid <= 0
+            or not isinstance(processes, list)
+        ):
+            raise OSError("pane process metadata is incomplete")
+        roots = [
+            item for item in processes
+            if isinstance(item, dict) and type(item.get("pid")) is int
+            and item["pid"] == group
+        ]
+        if len(roots) != 1 or group == shell_pid:
+            raise ValueError("no unique foreground Copilot group leader")
+        root = roots[0]
+        if any(
+            not isinstance(root.get(key), str)
+            or Path(root[key]).name != "copilot"
+            for key in ("name", "argv0")
+        ):
+            raise ValueError("foreground group leader is not the Copilot executable")
+        return group, shell_pid
+
+    @staticmethod
+    def _bounded_process_output(arguments: list[str]) -> bytes:
+        deadline = time.monotonic() + PROCESS_INSPECTION_TIMEOUT
+        with subprocess.Popen(
+            arguments, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        ) as process:
+            try:
+                output = bytearray()
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise OSError("process descriptor inspection timed out")
+                    readable, _, _ = select.select([process.stdout], [], [], remaining)
+                    if not readable:
+                        raise OSError("process descriptor inspection timed out")
+                    chunk = os.read(process.stdout.fileno(), 16384)
+                    if not chunk:
+                        break
+                    output.extend(chunk)
+                    if len(output) > PROCESS_INSPECTION_MAX_BYTES:
+                        raise OSError("process descriptor output exceeds the size limit")
+                code = process.wait(timeout=max(0.001, deadline - time.monotonic()))
+                if code != 0:
+                    raise OSError("process descriptor inspection was refused")
+                return bytes(output)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+
+    @staticmethod
+    def _lsof_paths(output: bytes, pid: int) -> list[str]:
+        paths = []
+        current_pid = None
+        owner = None
+        for field in output.split(b"\0"):
+            field = field.lstrip(b"\n")
+            if not field:
+                continue
+            if field[:1] == b"p":
+                current_pid = int(field[1:])
+                if current_pid != pid:
+                    raise OSError("descriptor output belongs to another process")
+            elif field[:1] == b"u":
+                owner = int(field[1:])
+                if owner != os.getuid():
+                    raise OSError("descriptor output belongs to another user")
+            elif field[:1] == b"n":
+                if current_pid != pid or owner != os.getuid():
+                    raise OSError("descriptor output has no verified process owner")
+                paths.append(os.fsdecode(field[1:]))
+        if current_pid != pid or owner != os.getuid():
+            raise OSError("descriptor output has no verified process owner")
+        return paths
+
+    @staticmethod
+    def _linux_process_paths(pid: int) -> list[str]:
+        process_dir = Path("/proc") / str(pid)
+        if process_dir.stat().st_uid != os.getuid():
+            raise OSError("foreground process belongs to another user")
+        deadline = time.monotonic() + PROCESS_INSPECTION_TIMEOUT
+        paths = []
+        size = 0
+        with os.scandir(process_dir / "fd") as entries:
+            for index, entry in enumerate(entries):
+                if index >= PROCESS_INSPECTION_MAX_FDS or time.monotonic() >= deadline:
+                    raise OSError("process descriptor inspection exceeds its limit")
+                if not entry.name.isdigit():
+                    continue
+                try:
+                    path = os.readlink(entry.path)
+                except FileNotFoundError:
+                    continue
+                size += len(os.fsencode(path))
+                if size > PROCESS_INSPECTION_MAX_BYTES:
+                    raise OSError("process descriptor output exceeds the size limit")
+                paths.append(path)
+        return paths
+
+    def _copilot_open_session_ids(self, pid: int) -> set[str]:
+        if sys.platform.startswith("linux"):
+            paths = self._linux_process_paths(pid)
+        elif sys.platform == "darwin":
+            lsof = "/usr/sbin/lsof"
+            if not Path(lsof).is_file():
+                lsof = shutil.which("lsof")
+            if not lsof:
+                raise OSError("lsof is unavailable")
+            paths = self._lsof_paths(
+                self._bounded_process_output([lsof, "-nP", "-a", "-p", str(pid), "-F0pun"]),
+                pid,
+            )
+        else:
+            raise OSError("process descriptor inspection is unsupported on this platform")
+        root = (Path.home() / ".copilot" / "session-state").resolve()
+        sessions = set()
+        for value in paths:
+            path = Path(value)
+            if (
+                path.is_absolute() and path.name == "session.db"
+                and path.parent.parent == root
+                and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", path.parent.name)
+            ):
+                sessions.add(path.parent.name)
+        return sessions
+
+    def _effective_copilot_session(
+        self, pane_id: str, native_session_id: str | None
+    ) -> str | None:
+        status = "unavailable"
+        reason = ""
+        session_id = None
+        inspected = False
+        try:
+            binding = self._copilot_foreground_process(pane_id)
+            sessions = self._copilot_open_session_ids(binding[0])
+            inspected = True
+            # Recheck the live pane binding after inspection. Session results are
+            # never cached by PID, so clears and process/PID reuse are re-inspected.
+            if self._copilot_foreground_process(pane_id) != binding:
+                raise ValueError("foreground process changed during descriptor inspection")
+            if len(sessions) > 1:
+                raise ValueError("foreground Copilot has multiple open session databases")
+            if sessions:
+                session_id = next(iter(sessions))
+                status = "verified"
+            else:
+                # Idle/new CLIs need not have opened the optional session database.
+                reason = "foreground Copilot does not expose an open session database"
+        except ValueError as error:
+            status, reason = "unresolved", str(error)
+        except (OSError, BridgeError, subprocess.SubprocessError) as error:
+            if inspected:
+                status = "unresolved"
+            reason = str(error)
+
+        if status == "verified":
+            self.process_bound_panes.add(pane_id)
+            self.session_identity_errors.pop(pane_id, None)
+            diagnostic = (
+                "Using the foreground Copilot session database; native session reference differs."
+                if session_id != native_session_id else ""
+            )
+        elif status == "unresolved" or pane_id in self.process_bound_panes:
+            self.process_bound_panes.add(pane_id)
+            self.observed_session_panes.add(pane_id)
+            self.session_identity_errors[pane_id] = reason
+            diagnostic = f"Session identity unresolved: {reason}; not using a possibly stale native ID."
+        else:
+            self.session_identity_errors.pop(pane_id, None)
+            session_id = native_session_id
+            diagnostic = f"Process-bound session inspection unavailable: {reason}; using unverified native identity."
+        if self.session_identity_diagnostics.get(pane_id) != diagnostic:
+            if diagnostic:
+                self._diagnostic("COPILOT_SESSION_IDENTITY", f"{pane_id}: {diagnostic}")
+            self.session_identity_diagnostics[pane_id] = diagnostic
+        return session_id
+
+    @staticmethod
+    def _codex_uuid(value: Any) -> str | None:
+        if not isinstance(value, str):
+            return None
+        try:
+            parsed = uuid.UUID(value)
+        except ValueError:
+            return None
+        return str(parsed) if parsed.int and str(parsed) == value.lower() else None
+
+    @classmethod
+    def _codex_status_session(cls, text: Any) -> str | None:
+        if not isinstance(text, str):
+            return None
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if not lines:
+            return None
+        # Only the live footer is evidence. UUIDs in messages or /status history
+        # must never select the target of a queued command.
+        sessions = {
+            session
+            for part in lines[-1].split("\u00b7")
+            if (session := cls._codex_uuid(part.strip())) is not None
+        }
+        return next(iter(sessions)) if len(sessions) == 1 else None
+
+    def _effective_codex_session(
+        self, raw: dict[str, Any], native_session_id: str | None
+    ) -> str | None:
+        pane_id = str(raw.get("pane_id") or "")
+        reason = (
+            "Codex has not exposed its active thread. Finish any startup dialogs "
+            "and enable Thread ID in Codex /statusline. New Remodr Codex agents "
+            "enable this automatically."
+        )
+        try:
+            result = self._herdr_request(
+                "agent.read",
+                {"target": pane_id, "source": "visible", "format": "text",
+                 "strip_ansi": True, "lines": 6},
+            )
+            read = result.get("read")
+            session_id = self._codex_status_session(
+                read.get("text") if isinstance(read, dict) else None
+            )
+        except (OSError, BridgeError) as error:
+            session_id = None
+            reason = f"Codex thread identity could not be read: {error}"
+        if session_id:
+            self.session_identity_errors.pop(pane_id, None)
+            self.session_identity_diagnostics.pop(pane_id, None)
+            return session_id
+
+        self.session_identity_errors[pane_id] = reason
+        if self.session_identity_diagnostics.get(pane_id) != reason:
+            self._diagnostic("CODEX_SESSION_IDENTITY", f"{pane_id}: {reason}")
+            self.session_identity_diagnostics[pane_id] = reason
+        previous = self.raw_agents.get(self._stable_agent_id(pane_id))
+        # Preserve the last displayed transcript while a dialog hides the footer.
+        # This hint is not dispatch authority: command preparation refuses it.
+        if (
+            previous and previous.get("provider") == "codex"
+            and previous.get("terminal_id") == raw.get("terminal_id")
+        ):
+            return previous.get("providerSessionId")
+        return native_session_id
+
+    def _normalize_snapshot(
+        self, snapshot: dict[str, Any], *, inspect_copilot: bool = True
+    ) -> dict[str, Any]:
         catalog = self.agent_catalog or self._fallback_agent_catalog()
         workspace_labels = {
             item.get("workspace_id"): item.get("label") or "Workspace"
@@ -934,7 +1261,37 @@ class Bridge:
             provider_session_id = (
                 session.get("value") if isinstance(session, dict) else None
             )
-            if not provider_session_id:
+            if not isinstance(provider_session_id, str) or not provider_session_id:
+                provider_session_id = None
+            if provider == "copilot":
+                if inspect_copilot:
+                    provider_session_id = self._effective_copilot_session(
+                        pane_id, provider_session_id
+                    )
+                elif pane_id in self.process_bound_panes:
+                    # Event hints must not rescan every process or restore a stale
+                    # native ID. Reads and mutations always inspect afresh.
+                    previous = self.raw_agents.get(self._stable_agent_id(pane_id))
+                    provider_session_id = (
+                        previous.get("providerSessionId")
+                        if previous and previous.get("provider") == provider
+                        and previous.get("terminal_id") == raw.get("terminal_id")
+                        else None
+                    )
+            elif provider == "codex":
+                self.process_bound_panes.discard(pane_id)
+                provider_session_id = self._effective_codex_session(
+                    raw, provider_session_id
+                )
+            else:
+                self.process_bound_panes.discard(pane_id)
+                self.session_identity_errors.pop(pane_id, None)
+                self.session_identity_diagnostics.pop(pane_id, None)
+            reported_session_id = provider_session_id
+            if (
+                not provider_session_id and provider == "copilot"
+                and pane_id not in self.observed_session_panes
+            ):
                 # Herdr only learns a session id once the agent writes its
                 # state out, which is after it has done something. For an agent
                 # this app started we already know it, so the conversation can
@@ -942,6 +1299,30 @@ class Bridge:
                 # scraping the terminal.
                 provider_session_id = self.started_sessions.get(pane_id)
             agent_id = self._stable_agent_id(pane_id)
+            previous = self.raw_agents.get(agent_id)
+            remembered = self.started_sessions.get(pane_id)
+            previous_session_id = previous.get("providerSessionId") if previous else None
+            observed = pane_id in self.observed_session_panes
+            if previous_session_id is None and not observed:
+                previous_session_id = remembered
+            # First identification is not a rotation away from launch settings.
+            had_session_identity = observed or previous_session_id is not None
+            if (
+                (previous is not None or remembered is not None)
+                and (
+                    (had_session_identity and previous_session_id != provider_session_id)
+                    or (previous and previous.get("provider") != provider)
+                )
+            ):
+                self._invalidate_agent_session(agent_id, pane_id, previous_session_id)
+            if reported_session_id:
+                self.observed_session_panes.add(pane_id)
+                if provider == "copilot" and remembered is not None:
+                    self.started_sessions[pane_id] = reported_session_id
+            if provider != "copilot" or (
+                not reported_session_id and pane_id in self.observed_session_panes
+            ):
+                self.started_sessions.pop(pane_id, None)
             workspace_id = str(raw.get("workspace_id") or "")
             capabilities = self._agent_capabilities(provider, provider_session_id)
             agent = {
@@ -949,7 +1330,7 @@ class Bridge:
                 "deviceId": self.device_id,
                 "provider": provider,
                 "providerSessionId": provider_session_id,
-                "tuning": self._reported_tuning(pane_id, provider_session_id),
+                "tuning": self._reported_tuning(pane_id, provider_session_id, provider),
                 "herdrSessionId": self.session_name,
                 "workspaceId": workspace_id,
                 "workspaceName": workspace_labels.get(workspace_id, "Workspace"),
@@ -981,6 +1362,16 @@ class Bridge:
         self.started_sessions = {
             pane: session
             for pane, session in self.started_sessions.items()
+            if pane in live_pane_ids
+        }
+        self.observed_session_panes.intersection_update(live_pane_ids)
+        self.process_bound_panes.intersection_update(live_pane_ids)
+        self.session_identity_errors = {
+            pane: error for pane, error in self.session_identity_errors.items()
+            if pane in live_pane_ids
+        }
+        self.session_identity_diagnostics = {
+            pane: message for pane, message in self.session_identity_diagnostics.items()
             if pane in live_pane_ids
         }
         self.agent_tuning = {
@@ -1017,6 +1408,12 @@ class Bridge:
                 **pending,
             }
 
+        for agent_id, previous in self.raw_agents.items():
+            if agent_id not in raw_agents:
+                self._invalidate_agent_session(
+                    agent_id, str(previous.get("paneId") or ""),
+                    previous.get("providerSessionId"),
+                )
         with self.state_lock:
             self.raw_agents = raw_agents
         return {
@@ -1241,7 +1638,7 @@ class Bridge:
                 }
 
     def _create_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
-        provider = payload.get("provider")
+        provider = self._provider(payload.get("provider"))
         workspace_id = payload.get("workspaceId")
         bypass_permissions = payload.get("bypassPermissions", True)
         name_input = payload.get("name")
@@ -1250,9 +1647,9 @@ class Bridge:
             if isinstance(name_input, str) and name_input.strip()
             else ""
         )
-        tuning = self._tuning_arguments(provider, payload)
         if provider not in SUPPORTED_PROVIDERS:
             raise BridgeError("INVALID_PROVIDER", "Unsupported agent provider.")
+        tuning = self._tuning_arguments(provider, payload)
         if not isinstance(workspace_id, str) or not workspace_id:
             raise BridgeError("INVALID_WORKSPACE", "A space is required.")
         if not isinstance(bypass_permissions, bool):
@@ -1319,7 +1716,10 @@ class Bridge:
                 self.agent_tuning[pane_id] = self._tuning_of(payload)
                 self.agent_bypass[pane_id] = bypass_permissions
             for _ in range(20):
-                self._refresh_runtime()
+                if provider == "codex":
+                    self._refresh_runtime(inspect_copilot=False)
+                else:
+                    self._refresh_runtime()
                 agent = next(
                     (
                         item
@@ -1328,7 +1728,7 @@ class Bridge:
                     ),
                     None,
                 )
-                if agent:
+                if agent and (provider != "codex" or agent.get("providerSessionId")):
                     break
                 time.sleep(0.1)
             if not agent:
@@ -1366,6 +1766,12 @@ class Bridge:
         Naming the session as well when the user named the agent keeps the two
         the same thing rather than two names for one piece of work.
         """
+        if str(provider) == "codex":
+            # Codex queues SessionStart hooks until the first turn. Its live
+            # status line exposes the real thread UUID before any input.
+            # "session-id" is the backwards-compatible alias of "thread-id".
+            args.extend(["-c", CODEX_STATUS_CONFIG])
+            return None
         if str(provider) != "copilot":
             return None
         session_id = str(uuid.uuid4())
@@ -1382,21 +1788,34 @@ class Bridge:
         default — which for a model is the CLI picking one, and is the only
         choice guaranteed to be available on every account.
         """
-        flags = TUNING_ARGUMENTS.get(str(provider), {})
+        flags = TUNING_ARGUMENTS.get(str(provider))
+        if flags is None:
+            raise BridgeError("INVALID_PROVIDER", "Unsupported agent provider.")
         arguments: list[str] = []
-        model = payload.get("model")
-        if "model" in flags and isinstance(model, str) and model.strip():
-            arguments.extend([flags["model"], model.strip()])
-        effort = payload.get("effort")
-        if "effort" in flags and isinstance(effort, str) and effort.strip():
-            if effort not in REASONING_EFFORTS:
+        for key in ORDERED_TUNING:
+            value = payload.get(key)
+            if value is None:
+                continue
+            if not isinstance(value, str):
+                raise BridgeError(f"INVALID_{key.upper()}", f"Invalid {key} setting.")
+            value = value.strip()
+            if not value:
+                continue
+            if key not in flags:
+                raise BridgeError(
+                    "UNSUPPORTED_TUNING",
+                    f"{Bridge._provider_label(str(provider))} does not support "
+                    f"the {key} setting from here.",
+                )
+            if key == "effort" and value not in PROVIDER_EFFORTS.get(str(provider), ()):
                 raise BridgeError("INVALID_EFFORT", "Unsupported reasoning effort.")
-            arguments.extend([flags["effort"], effort])
-        context = payload.get("context")
-        if "context" in flags and isinstance(context, str) and context.strip():
-            if context not in CONTEXT_TIERS:
+            if key == "context" and value not in CONTEXT_TIERS:
                 raise BridgeError("INVALID_CONTEXT", "Unsupported context window.")
-            arguments.extend([flags["context"], context])
+            if key == "model" and any(ord(char) < 32 or ord(char) == 127 for char in value):
+                raise BridgeError("INVALID_MODEL", "Invalid model setting.")
+            if provider == "codex" and key == "effort":
+                value = f"model_reasoning_effort={json.dumps(value)}"
+            arguments.extend([flags[key], value])
         return arguments
 
     @staticmethod
@@ -1412,6 +1831,11 @@ class Bridge:
         }
 
     def _retune_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self.refresh_lock:
+            self._refresh_runtime_and_publish()
+            return self._retune_current_agent(payload)
+
+    def _retune_current_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Change the model, reasoning effort or context window of a live agent.
 
         A model can be swapped in place — Copilot takes `/model` mid-session —
@@ -1420,8 +1844,10 @@ class Bridge:
         resumes the conversation rather than beginning a new one.
         """
         agent = self._require_agent(payload)
+        if agent.get("paneId") in self.session_identity_errors:
+            raise BridgeError("SESSION_IDENTITY_UNRESOLVED", "The active provider session cannot be verified.")
         provider = agent.get("provider")
-        if provider not in TUNING_ARGUMENTS:
+        if provider not in RETUNABLE_PROVIDERS:
             raise BridgeError(
                 "PROVIDER_NOT_TUNABLE",
                 f"{self._provider_label(str(provider))} cannot be tuned from here.",
@@ -1430,19 +1856,16 @@ class Bridge:
         if not isinstance(pane_id, str) or not pane_id:
             raise BridgeError("AGENT_NOT_FOUND", "This agent has no pane.")
 
-        wanted = self._tuning_of(payload)
         # Validate before touching anything, so a bad value cannot leave the
         # agent stopped.
-        self._tuning_arguments(provider, wanted)
-        with self.state_lock:
-            session_id = self.started_sessions.get(pane_id)
-        if not session_id:
-            session_id = agent.get("providerSessionId")
+        self._tuning_arguments(provider, payload)
+        wanted = self._tuning_of(payload)
+        session_id = agent.get("providerSessionId")
         # Against everything known about the agent, not only what was set from
         # here. Comparing against the latter alone made a plain model swap look
         # like a reasoning change on any agent this bridge did not start, and
         # restarting one to change nothing interrupts whatever it is doing.
-        current = self._reported_tuning(pane_id, session_id)
+        current = self._reported_tuning(pane_id, session_id, provider)
 
         restart_needed = any(
             wanted.get(key) != current.get(key) for key in ("effort", "context")
@@ -1537,7 +1960,7 @@ class Bridge:
             )
 
     def _reported_tuning(
-        self, pane_id: str, provider_session_id: Any
+        self, pane_id: str, provider_session_id: Any, provider: str
     ) -> dict[str, Any]:
         """What the agent is actually running, as far as we can tell.
 
@@ -1545,13 +1968,12 @@ class Bridge:
         agent will use next: the log can be a moment behind a change made from
         here.
 
-        Everything not set from here comes from the log, which is how a
-        conversation started before this bridge ran — or before it last
-        restarted — still shows what it is actually running instead of
-        claiming a default it never had.
+        For Copilot, everything not set from here comes from its session log.
+        Other providers' session formats are not read for tuning, so settings
+        not remembered from creation remain unknown.
         """
         ours = self.agent_tuning.get(pane_id) or {}
-        logged = self._session_tuning(provider_session_id)
+        logged = self._session_tuning(provider_session_id) if provider == "copilot" else {}
         return {key: ours.get(key) or logged.get(key) for key in ORDERED_TUNING}
 
     def _session_tuning(self, provider_session_id: Any) -> dict[str, Any]:
@@ -1607,6 +2029,8 @@ class Bridge:
             try:
                 event = json.loads(raw)
             except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            if not isinstance(event, dict) or event.get("agentId"):
                 continue
             kind = event.get("type")
             data = event.get("data")
@@ -1722,6 +2146,7 @@ class Bridge:
                     "deviceId": self.device_id,
                     "provider": provider,
                     "providerSessionId": None,
+                    "tuning": self._reported_tuning(pane_id, None, provider),
                     "herdrSessionId": self.session_name,
                     "workspaceId": workspace_id,
                     "workspaceName": workspace.get("name", "Workspace"),
@@ -1893,6 +2318,25 @@ class Bridge:
         )
 
     def _load_conversation(self, agent: dict[str, Any]) -> dict[str, Any]:
+        with self.refresh_lock:
+            current = self.raw_agents.get(agent["id"])
+            if current is not None and any(
+                current.get(field) != agent.get(field)
+                for field in ("provider", "providerSessionId", "paneId")
+            ):
+                raise BridgeError(
+                    "COMMAND_PRECONDITION_FAILED", "The target session has changed."
+                )
+            return self._load_bound_conversation(agent)
+
+    def _load_bound_conversation(self, agent: dict[str, Any]) -> dict[str, Any]:
+        if agent.get("paneId") in self.session_identity_errors:
+            reason = (
+                self.session_identity_errors[agent["paneId"]]
+                if agent.get("provider") == "codex"
+                else "The active provider session cannot be verified."
+            )
+            raise BridgeError("SESSION_IDENTITY_UNRESOLVED", reason)
         provider = agent["provider"]
         try:
             if provider == "copilot":
@@ -1901,14 +2345,15 @@ class Bridge:
                 conversation = self._load_claude(agent)
             elif provider == "codex":
                 conversation = self._load_codex(agent)
-            elif provider == "opencode":
-                conversation = self._load_opencode(agent)
             else:
                 conversation = None
-            if conversation and conversation.get("items"):
+            if conversation is not None:
                 return conversation
         except Exception as error:
             self._diagnostic(f"PROVIDER_{provider.upper()}", repr(error))
+            raise BridgeError(
+                "CONVERSATION_UNAVAILABLE", "The current session transcript could not be read."
+            ) from error
         return self._load_fallback(agent)
 
     def _load_copilot(self, agent: dict[str, Any]) -> dict[str, Any] | None:
@@ -1928,8 +2373,12 @@ class Bridge:
             database_stat.st_size if database_stat else 0,
             database_stat.st_mtime_ns if database_stat else 0,
         )
-        cached = self.conversation_cache.get(session_id)
+        cache_key = (agent["id"], "copilot", session_id)
+        cached = self.conversation_cache.get(cache_key)
         if cached and cached[0] == cache_version:
+            request = cached[1].get("activeHumanRequest")
+            if request:
+                self._remember_human_request(request, agent)
             return cached[1]
 
         records: dict[str, dict[str, Any]] = {}
@@ -1950,7 +2399,8 @@ class Bridge:
                     event = json.loads(line)
                 except (json.JSONDecodeError, ValueError):
                     continue
-                if not isinstance(event, dict):
+                # Child-agent events share this file but are not the pane's conversation.
+                if not isinstance(event, dict) or event.get("agentId"):
                     continue
                 event_type = event.get("type")
                 data = event.get("data") if isinstance(event.get("data"), dict) else {}
@@ -2027,7 +2477,7 @@ class Bridge:
                             arguments if isinstance(arguments, dict) else {},
                         )
                         if request:
-                            self.pending_human_requests[request["id"]] = request
+                            self._remember_human_request(request, agent)
                             human_tool_ids[tool_call_id] = request["id"]
                             upsert(
                                 "human:" + request["id"],
@@ -2056,6 +2506,7 @@ class Bridge:
                     if tool_call_id in human_tool_ids:
                         request_id = human_tool_ids[tool_call_id]
                         self.pending_human_requests.pop(request_id, None)
+                        self.human_request_scopes.pop(request_id, None)
                         current = records.get("human:" + request_id)
                         if current:
                             current["resolved"] = True
@@ -2073,6 +2524,7 @@ class Bridge:
         conversation = {
             "agentId": agent["id"],
             "provider": "copilot",
+            "providerSessionId": session_id,
             "semantic": True,
             "items": items,
             "activeHumanRequest": next(
@@ -2085,7 +2537,7 @@ class Bridge:
                 None,
             ),
         }
-        self.conversation_cache[session_id] = (cache_version, conversation)
+        self.conversation_cache[cache_key] = (cache_version, conversation)
         return conversation
 
     def _normalize_copilot_question(
@@ -2205,15 +2657,123 @@ class Bridge:
         return self._load_role_jsonl(agent, path, "claude") if path else None
 
     def _load_codex(self, agent: dict[str, Any]) -> dict[str, Any] | None:
-        session_id = agent.get("providerSessionId")
-        if not isinstance(session_id, str):
+        session_id = self._codex_uuid(agent.get("providerSessionId"))
+        if not session_id:
             return None
-        candidates = list((Path.home() / ".codex" / "sessions").glob("**/*.jsonl"))
-        path = next((item for item in candidates if session_id in item.name), None)
-        return self._load_role_jsonl(agent, path, "codex") if path else None
+        path = self._codex_transcript_path(session_id)
+        if path is None:
+            return None
+        info = path.stat()
+        version = (info.st_size, info.st_mtime_ns, info.st_ino, info.st_ctime_ns)
+        key = (agent["id"], "codex", session_id)
+        cached = self.conversation_cache.get(key)
+        if cached and cached[0] == version:
+            return cached[1]
 
-    def _load_opencode(self, agent: dict[str, Any]) -> dict[str, Any] | None:
-        return None
+        completed: list[dict[str, Any]] = []
+        legacy: list[dict[str, Any]] = []
+        positions: dict[str, int] = {}
+        verified = False
+        paginated = False
+        with path.open(encoding="utf-8", errors="replace") as transcript:
+            for line_number, line in enumerate(transcript):
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(event, dict):
+                    continue
+                payload = event.get("payload")
+                if not isinstance(payload, dict):
+                    continue
+                if event.get("type") == "session_meta":
+                    if self._codex_uuid(payload.get("id")) != session_id:
+                        raise BridgeError(
+                            "CONVERSATION_SESSION_MISMATCH",
+                            "The Codex transcript belongs to a different thread.",
+                        )
+                    verified = True
+                    paginated = payload.get("history_mode") == "paginated"
+                    continue
+                if event.get("type") != "event_msg":
+                    continue
+                event_type = payload.get("type")
+                if event_type == "item_completed":
+                    if payload.get("thread_id") not in (None, session_id):
+                        continue
+                    item = payload.get("item")
+                    if not isinstance(item, dict):
+                        continue
+                    kind = item.get("type")
+                    if kind not in ("UserMessage", "AgentMessage"):
+                        continue
+                    if kind == "AgentMessage" and item.get("phase") not in (
+                        None, "commentary", "final_answer",
+                    ):
+                        continue
+                    text = self._content_text(item.get("content"))
+                    if not text:
+                        continue
+                    item_id = item.get("id") or f"line:{line_number}"
+                    message = {
+                        "id": f"codex:{kind}:{item_id}",
+                        "kind": "user_message" if kind == "UserMessage" else "assistant_message",
+                        "text" if kind == "UserMessage" else "markdown": text,
+                    }
+                    if message["id"] in positions:
+                        completed[positions[message["id"]]] = message
+                    else:
+                        positions[message["id"]] = len(completed)
+                        completed.append(message)
+                elif event_type in ("user_message", "agent_message"):
+                    text = payload.get("message")
+                    if isinstance(text, str) and text:
+                        legacy.append({
+                            "id": f"codex:{session_id}:line:{line_number}",
+                            "kind": "user_message" if event_type == "user_message" else "assistant_message",
+                            "text" if event_type == "user_message" else "markdown": text,
+                        })
+        if not verified:
+            return None
+        conversation = {
+            "agentId": agent["id"],
+            "provider": "codex",
+            "providerSessionId": session_id,
+            "semantic": True,
+            "items": completed if paginated or completed else legacy,
+            "activeHumanRequest": None,
+        }
+        self.conversation_cache[key] = (version, conversation)
+        return conversation
+
+    def _codex_transcript_path(self, session_id: str) -> Path | None:
+        home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex").expanduser()
+        indexes = []
+        for path in home.glob("state_*.sqlite"):
+            match = re.fullmatch(r"state_(\d+)\.sqlite", path.name)
+            if match:
+                indexes.append((int(match.group(1)), path))
+        for _, database in sorted(indexes, reverse=True):
+            try:
+                connection = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True, timeout=0.2)
+                try:
+                    row = connection.execute(
+                        "SELECT rollout_path FROM threads WHERE id = ?", (session_id,)
+                    ).fetchone()
+                finally:
+                    connection.close()
+            except sqlite3.Error as error:
+                self._diagnostic("CODEX_TRANSCRIPT_INDEX", str(error))
+                continue
+            if row:
+                if not isinstance(row[0], str) or not row[0]:
+                    raise BridgeError("CONVERSATION_UNAVAILABLE", "Codex has an invalid transcript index entry.")
+                path = Path(row[0])
+                return path if path.suffix == ".jsonl" and path.is_file() else None
+        candidates = list((home / "sessions").glob(f"**/*{session_id}*.jsonl"))
+        if len(candidates) > 1:
+            raise BridgeError("CONVERSATION_UNAVAILABLE", "Multiple Codex transcripts match this thread without an authoritative index.")
+        return candidates[0] if candidates else None
 
     def _load_role_jsonl(
         self, agent: dict[str, Any], path: Path, provider: str
@@ -2248,11 +2808,10 @@ class Bridge:
                             "markdown": text,
                         }
                     )
-        if not items:
-            return None
         return {
             "agentId": agent["id"],
             "provider": provider,
+            "providerSessionId": agent.get("providerSessionId"),
             "semantic": True,
             "items": items,
             "activeHumanRequest": None,
@@ -2275,6 +2834,7 @@ class Bridge:
         return {
             "agentId": agent["id"],
             "provider": agent["provider"],
+            "providerSessionId": agent.get("providerSessionId"),
             "semantic": False,
             "items": [
                 {
@@ -2329,8 +2889,9 @@ class Bridge:
                 )
             self.subscribed.set()
             if resynchronize:
-                self._refresh_runtime()
-                self.write_event("runtime.snapshot", self.runtime)
+                with self.refresh_lock:
+                    self._refresh_runtime()
+                    self.write_event("runtime.snapshot", self.runtime)
             while self.running:
                 line = stream.readline()
                 if not line:
@@ -2430,8 +2991,12 @@ class Bridge:
             time.sleep(min(0.1, remaining))
 
     def _handle_herdr_event(self, event: dict[str, Any]) -> None:
+        with self.refresh_lock:
+            self._handle_locked_herdr_event(event)
+
+    def _handle_locked_herdr_event(self, event: dict[str, Any]) -> None:
         try:
-            self._refresh_runtime()
+            self._refresh_runtime(inspect_copilot=False)
             self.write_event("runtime.snapshot", self.runtime)
             data = event.get("data")
             if isinstance(data, dict) and data.get("type") in (
@@ -2500,6 +3065,7 @@ class Bridge:
         for provider in SUPPORTED_PROVIDERS:
             provider_capabilities[provider] = {
                 "installed": availability.get(provider, False),
+                "supportsRetuning": provider in RETUNABLE_PROVIDERS,
                 "structuredConversation": provider in ("copilot", "claude", "codex"),
                 "streamingConversation": provider == "copilot",
                 "structuredQuestions": provider == "copilot",
@@ -2532,6 +3098,7 @@ class Bridge:
                 / "events.jsonl"
             ).is_file()
         return {
+            "supportsRetuning": provider in RETUNABLE_PROVIDERS,
             "structuredConversation": semantic,
             "streamingConversation": semantic and provider == "copilot",
             "structuredQuestions": semantic and provider == "copilot",
@@ -2549,8 +3116,8 @@ class Bridge:
             return "claude"
         if "codex" in normalized:
             return "codex"
-        if "opencode" in normalized:
-            return "opencode"
+        if normalized in ("cursor", "cursoragent"):
+            return "cursor"
         return "unknown"
 
     @staticmethod
@@ -2559,7 +3126,7 @@ class Bridge:
             "copilot": "GitHub Copilot",
             "claude": "Claude Code",
             "codex": "Codex",
-            "opencode": "OpenCode",
+            "cursor": "Cursor Agent",
         }.get(provider, "Agent")
 
     @staticmethod

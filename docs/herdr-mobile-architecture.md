@@ -14,14 +14,25 @@ previous development baselines, not an exhaustive support matrix or a claim
 about what is installed on the reader's server.
 
 The bridge reads Herdr's provider catalog at runtime. It does not assume that
-Claude Code, Codex, Copilot, or OpenCode is installed. Default session/socket
+Claude Code, Codex, Copilot, or Cursor Agent is installed. Default session/socket
 values are `default` and `~/.config/herdr/herdr.sock`; see the bridge's
 `HERDR_SESSION` and `HERDR_SOCKET` handling for overrides.
 
+Incoming snapshots also tolerate providers unsupported by this app, including
+OpenCode from an older bundled bridge. Their manifests are marked unavailable
+with an explicit reason, and existing agents/conversations use the `unknown`
+provider rather than failing the entire connection. Outbound creation still
+accepts only the four supported providers; OpenCode is never mapped to Cursor.
+Reloading JavaScript does not replace the native bundled bridge: rebuild and
+reinstall the app to deploy updated Cursor launch support.
+
 Model, reasoning-effort, and context choices in the mobile picker come from the
-bundled [`agent-catalogue.ts`](../src/domain/agent-catalogue.ts), not a live model
-discovery API. Update that catalog with the app when supported choices change;
-it is separate from the server's provider-installation catalog.
+bundled [per-provider JSON catalogues](../src/domain/model-catalogues/), loaded
+by [`agent-catalogue.ts`](../src/domain/agent-catalogue.ts). Run the
+[model refresh script](model-catalogues.md) on a maintenance machine and ship
+the resulting JSON with the app. This is separate from the server's
+provider-installation catalog. Live retuning remains Copilot-only; launch
+configuration uses each provider's own flags.
 
 ## Transport and deployment
 
@@ -66,14 +77,20 @@ Creation code handles partial setup cleanup. Runtime subscriptions trigger fresh
 Herdr snapshots; per-pane status subscriptions supplement the global feed.
 Closing the mobile attachment does not close Herdr panes or terminate agents.
 
+An agent ID is stable across `/clear`; its `providerSessionId` is not.
+Conversation reads reconcile the current session even without a lifecycle event,
+and responses identify the session actually read. Session-bound caches and launch
+bookkeeping must follow that reported identity rather than the original launch
+ID. See [session rotation and queued-command isolation](connection-resilience.md#clearing-or-replacing-a-provider-session).
+
 ## Provider adapters
 
 | Provider | Current conversation source | Limits |
 | --- | --- | --- |
 | Copilot | `~/.copilot/session-state/<id>/events.jsonl`, plus session database TODOs | Structured messages, tool activity and `ask_user` questions; requires a known provider session |
 | Claude Code | Matching JSONL files under `~/.claude/projects/` | Defensive role/content parsing, no structured question normalizer |
-| Codex | Matching JSONL files under `~/.codex/sessions/` | Defensive role/content parsing, no structured question normalizer |
-| OpenCode | Herdr `agent.read` | `_load_opencode` has no semantic adapter |
+| Codex | SQLite-indexed JSONL rollouts under `CODEX_HOME` (default `~/.codex`) | Legacy messages and paginated completed items; no structured question normalizer |
+| Cursor Agent | Herdr `agent.read` | Explicit raw-output compatibility view; no semantic transcript adapter |
 | Unknown or unreadable adapter | Herdr `agent.read` | Explicit raw-output compatibility view |
 
 Adapter code does not imply support for every future CLI log schema. If a
@@ -88,6 +105,46 @@ immediately; refresh timing and Markdown behavior belong in
 Structured Copilot questions are normalized from both supported `ask_user`
 shapes. See [ADR 014](adr/014-answering-agent-questions.md) for composer/bar
 placement and delivery constraints.
+
+### Codex startup and thread identity
+
+Codex 0.153.4 allocates a real thread UUID before the first prompt, but defers
+its `SessionStart` hooks and transcript materialization until the first turn.
+Requiring the hook's identity before allowing that turn creates a deadlock.
+
+Remodr-created Codex agents include this per-launch configuration:
+
+```text
+-c 'tui.status_line=["session-id","model-with-reasoning","current-dir"]'
+```
+
+`session-id` is the backwards-compatible name for the current `thread-id` item.
+Putting it first keeps the full UUID visible in narrower terminals. For an
+already-running Codex session, enable **Thread ID** in `/statusline` and move it
+before other fields. This changes presentation, not the conversation.
+
+The bridge reads only the live status footer in that exact Herdr pane. It never
+guesses identity from the newest log, a cwd match, or a process's set of writer
+locks. `/new` changes the visible UUID immediately, even while Herdr's hook
+reference still names the previous session. A hidden/unreadable footer preserves
+the last display binding but cannot authorize a send.
+
+Transcript lookup prefers the read-only `state_N.sqlite` index. JSONL metadata
+must match the bound thread. Paginated `item_completed` user/agent messages are
+preferred over raw response items, which also contain injected project context.
+Legacy `user_message`/`agent_message` records remain supported. IDs are stable
+between polls, repeated completed items are reconciled, and unchanged logs use
+the conversation cache. Missing or compressed rollouts use the explicit terminal
+compatibility view rather than inventing messages.
+
+The official `herdr integration install codex` hook remains useful for native
+Herdr restore after a turn. Review it through Codex's normal hook-trust UI; do not
+disable hook trust. It is not the pre-first-prompt identity source.
+
+Version-specific references:
+[deferred startup hooks](https://github.com/openai/codex/blob/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/core/src/session/turn.rs#L264-L269),
+[live thread-ID rendering](https://github.com/openai/codex/blob/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/tui/src/chatwidget/status_surfaces.rs#L753-L757),
+and [paginated persistence](https://github.com/openai/codex/blob/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/rollout/src/policy.rs#L89-L108).
 
 ## Related decisions
 

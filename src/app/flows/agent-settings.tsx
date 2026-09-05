@@ -5,6 +5,7 @@ import { View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { AppButton } from '@/components/ui/app-button';
 import { FormError, FormPage, MissingFlow } from '@/components/ui/form-page';
+import { supportsRetuning } from '@/domain/agent-catalogue';
 import { agentEditError, tuningChanges } from '@/features/agents/agent-edit-flow';
 import { TuningFields } from '@/features/agents/tuning-fields';
 import { useHerdr } from '@/features/agents/use-herdr';
@@ -26,7 +27,7 @@ export default function AgentSettingsPage() {
     return () => { mounted.current = false; };
   }, []);
 
-  if (!flowId || !draft || draft.kind !== 'agent-settings') {
+  if (!flowId || !draft || draft.kind !== 'agent-settings' || !supportsRetuning(draft.provider)) {
     return <MissingFlow title="Model Settings Unavailable" />;
   }
   const availabilityError = agentEditError(devices, draft);

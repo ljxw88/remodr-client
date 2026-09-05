@@ -1,15 +1,69 @@
 import {
+  agentProviderSchema,
   bridgeEventSchema,
   bridgeHelloSchema,
   bridgeResponseSchema,
   closeSpaceResultSchema,
   conversationSchema,
   createAgentResultSchema,
+  createAgentInputSchema,
   createSpaceResultSchema,
+  launchableAgentProviderSchema,
+  providerLabel,
   runtimeStateSchema,
 } from '@/domain/herdr';
 
 describe('Herdr mobile protocol', () => {
+  it('launches Cursor Agent instead of OpenCode', () => {
+    expect(launchableAgentProviderSchema.parse('cursor')).toBe('cursor');
+    expect(providerLabel('cursor')).toBe('Cursor Agent');
+    expect(launchableAgentProviderSchema.safeParse('opencode').success).toBe(false);
+  });
+
+  it.each(['opencode', 'future-provider'])('tolerates %s in incoming snapshots without making it launchable', (provider) => {
+    const snapshot = {
+      connectionState: 'connected',
+      workspaces: [],
+      providers: [
+        { provider: 'copilot', available: true },
+        { provider: 'claude', available: true },
+        { provider: 'codex', available: true },
+        { provider, available: true },
+      ],
+      agents: [{
+        id: 'legacy-agent', provider, herdrSessionId: 'default',
+        workspaceId: 'w1', workspaceName: 'Work', paneId: 'p1',
+        status: 'idle', title: 'Existing session', focused: false, capabilities: {},
+      }],
+    };
+    const parsed = runtimeStateSchema.parse(snapshot);
+    expect(parsed.providers.slice(0, 3).map((manifest) => manifest.provider))
+      .toEqual(['copilot', 'claude', 'codex']);
+    expect(parsed.providers[3]).toMatchObject({
+      provider: 'unknown', available: false,
+      unavailableReason: expect.stringContaining(provider),
+    });
+    expect(parsed.agents[0]).toMatchObject({ id: 'legacy-agent', provider: 'unknown' });
+    expect(parsed.providers.some((manifest) => manifest.provider === 'cursor')).toBe(false);
+    expect(createAgentInputSchema.safeParse({ provider, workspaceId: 'w1' }).success).toBe(false);
+    expect(createSpaceResultSchema.parse({ workspaceId: 'w1', runtime: snapshot }).runtime).toEqual(parsed);
+    expect(runtimeStateSchema.parse(parsed)).toEqual(parsed);
+    expect(conversationSchema.parse({
+      agentId: 'legacy-agent', provider, semantic: false,
+      items: [{ id: 'raw', kind: 'raw_output', text: 'Existing terminal output' }],
+    })).toMatchObject({ provider: 'unknown', items: [{ text: 'Existing terminal output' }] });
+  });
+
+  it('still rejects malformed provider fields and known-provider manifest data', () => {
+    for (const provider of [undefined, null, 42, {}, '']) {
+      expect(agentProviderSchema.safeParse(provider).success).toBe(false);
+    }
+    expect(runtimeStateSchema.safeParse({
+      connectionState: 'connected', agents: [], workspaces: [],
+      providers: [{ provider: 'copilot', available: 'yes' }],
+    }).success).toBe(false);
+  });
+
   it('parses a hello with future capability fields', () => {
     expect(
       bridgeHelloSchema.parse({
@@ -175,7 +229,7 @@ describe('Herdr mobile protocol', () => {
             todos: true,
             fallback: true,
           },
-          tuning: { model: 'a-model-we-do-not-ship', effort: 'ultra', context: 'huge' },
+          tuning: { model: 'a-model-we-do-not-ship', effort: 'future-effort', context: 'huge' },
         },
       ],
     });

@@ -53,3 +53,4 @@ describe('compact tuning fields', () => {
     expect(onChange).toHaveBeenCalledWith({ model: 'gpt-5.6-sol', effort: null, context: 'default' });
   });
 });
+jest.mock('@/domain/model-catalogues/copilot.json', () => require('../../domain/__fixtures__/copilot.json'));

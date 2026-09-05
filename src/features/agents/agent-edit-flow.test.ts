@@ -131,3 +131,4 @@ describe('page model choices', () => {
     expect(previous).toEqual({ model: 'private-model', effort: 'max', context: 'long_context' });
   });
 });
+jest.mock('@/domain/model-catalogues/copilot.json', () => require('../../domain/__fixtures__/copilot.json'));

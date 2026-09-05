@@ -26,7 +26,8 @@ import {
   type HumanRequest,
   type RemoteAgent,
 } from '@/domain/herdr';
-import { supportsTuning } from '@/domain/agent-catalogue';
+import { modelLabel, supportsRetuning } from '@/domain/agent-catalogue';
+import { agentSession, commandSession, sameAgentSession, type AgentSession } from '@/domain/agent-session';
 import { beginAgentSettingsFlow, beginRenameAgentFlow } from '@/features/agents/agent-edit-flow';
 import { ActionMenu } from '@/components/ui/action-menu';
 import { HumanRequestBar } from '@/features/agents/human-request-bar';
@@ -89,6 +90,7 @@ export default function AgentConversationScreen() {
   const requestId = conversation?.activeHumanRequest?.id;
   const answerPending = commands.some((command) =>
     command.agentId === id && command.action === 'human_request.answer' &&
+    sameAgentSession(commandSession(command.payload), agentSession(agent)) &&
     command.payload.requestId === requestId,
   );
 
@@ -219,6 +221,8 @@ export default function AgentConversationScreen() {
       },
     });
   }, [
+    agent?.provider,
+    agent?.providerSessionId,
     agent?.capabilities.streamingConversation,
     agentId,
     agentStatus,
@@ -262,6 +266,7 @@ export default function AgentConversationScreen() {
     }
     if (requestId && herdrRepository.getPendingCommands().some((command) =>
       command.agentId === agent.id && command.action === 'human_request.answer' &&
+      sameAgentSession(commandSession(command.payload), agentSession(agent)) &&
       command.payload.requestId === requestId,
     )) {
       setSendError('An answer is already queued. Review its delivery status before answering again.');
@@ -329,7 +334,7 @@ export default function AgentConversationScreen() {
                 disabled={closingAgent}
                 items={[
                   { id: 'rename', label: 'Rename Agent', onPress: () => openAgentForm('rename') },
-                  { id: 'settings', label: 'Model Settings', disabled: !supportsTuning(agent.provider), onPress: () => openAgentForm('settings') },
+                  { id: 'settings', label: 'Model Settings', disabled: !supportsRetuning(agent.provider), onPress: () => openAgentForm('settings') },
                   { id: 'close', label: 'Close agent', destructive: true, disabled: !ownerConnected, onPress: confirmCloseAgent },
                 ]}
               />
@@ -436,9 +441,11 @@ export default function AgentConversationScreen() {
           answerPending={answerPending}
           error={sendError}
           agentId={agent.id}
+          session={{ provider: agent.provider, paneId: agent.paneId, providerSessionId: agent.providerSessionId ?? null }}
           request={conversation?.activeHumanRequest ?? null}
           onHeightChange={setComposerHeight}
-          tunable={supportsTuning(agent.provider)}
+          modelName={modelLabel(agent.provider, agent.tuning?.model)}
+          tunable={supportsRetuning(agent.provider)}
           onOpenModelSettings={() => openAgentForm('settings')}
           keyboardOffset={keyboardHeight}
         />
@@ -553,6 +560,7 @@ function ConversationRow({
           commandId={item.commandId}
           delivery={item.delivery}
           deliveryError={item.deliveryError}
+          previousSession={item.previousSession}
         />
       </Pressable>
     );
@@ -824,9 +832,11 @@ function AskedQuestionRow({ request }: { request: HumanRequest }) {
 }
 
 function ModelSettingsButton({
+  label,
   onPress,
   disabled = false,
 }: {
+  label: string;
   onPress: () => void;
   disabled?: boolean;
 }) {
@@ -834,7 +844,7 @@ function ModelSettingsButton({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel="Model Settings"
+      accessibilityLabel={`Model Settings: ${label}`}
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
@@ -851,8 +861,9 @@ function ModelSettingsButton({
       <ThemedText
         type="smallBold"
         numberOfLines={1}
-        style={{ color: theme.text, fontSize: 13 }}>
-        Model
+        ellipsizeMode="tail"
+        style={{ color: theme.text, fontSize: 13, flexShrink: 1 }}>
+        {label}
       </ThemedText>
       {disabled ? null : (
         <AppIcon
@@ -878,8 +889,10 @@ function Composer({
   answerPending,
   error,
   agentId,
+  session,
   request,
   onHeightChange,
+  modelName,
   tunable,
   onOpenModelSettings,
   keyboardOffset = 0,
@@ -892,8 +905,10 @@ function Composer({
   answerPending: boolean;
   error: string | null;
   agentId: string;
+  session: AgentSession;
   request: HumanRequest | null;
   onHeightChange: (height: number) => void;
+  modelName: string;
   tunable: boolean;
   onOpenModelSettings: () => void;
   keyboardOffset?: number;
@@ -911,8 +926,9 @@ function Composer({
         // Keyed so a new question starts with a clean slate rather than
         // inheriting the last one's half-made selection.
         <HumanRequestBar
-          key={request.id}
+          key={JSON.stringify([session.provider, session.paneId, session.providerSessionId, request.id])}
           agentId={agentId}
+          session={session}
           request={request}
           enqueueing={sending}
           enqueueGuard={enqueueGuard}
@@ -962,7 +978,7 @@ function Composer({
             ) : null}
 
             <View style={styles.cardBottom}>
-              <ModelSettingsButton onPress={onOpenModelSettings} disabled={!tunable} />
+              <ModelSettingsButton label={modelName} onPress={onOpenModelSettings} disabled={!tunable} />
 
               <Pressable
                 accessibilityRole="button"
@@ -1207,10 +1223,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: Spacing.two,
     marginTop: Spacing.one,
     minHeight: 36,
   },
   pill: {
+    flexShrink: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
@@ -1220,6 +1239,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   send: {
+    flexShrink: 0,
     width: 36,
     height: 36,
     alignItems: 'center',

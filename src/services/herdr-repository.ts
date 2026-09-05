@@ -28,7 +28,9 @@ import {
   type DeviceAgentCounts,
   type HerdrConnectionState,
   type HerdrRuntimeState,
+  type RemoteAgent,
 } from '@/domain/herdr';
+import { agentSession, commandSession, conversationMatchesAgent, sameAgentSession, type AgentSession } from '@/domain/agent-session';
 import { HerdrBridgeTransport } from '@/services/herdr-bridge-transport';
 import { classifyConnectionError, connectionErrorCode, ConnectionError } from '@/domain/connection-error';
 import { CommandOutbox, type PendingCommand } from '@/services/command-outbox';
@@ -108,6 +110,8 @@ export class HerdrRepository {
   private rawConversations = new Map<string, AgentConversation>();
   private refreshing = new Map<string, Promise<AgentConversation>>();
   private restoring = new Map<string, Promise<void>>();
+  private conversationEpochs = new Map<string, number>();
+  private conversationWrites = new Map<string, Promise<void>>();
   private draining = new Map<string, Promise<void>>();
   private outboxTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -435,7 +439,11 @@ export class HerdrRepository {
   async loadConversation(agentId: string): Promise<AgentConversation> {
     const existing = this.refreshing.get(agentId);
     if (existing) return existing;
-    const attempt = this.loadConversationOnce(agentId).finally(() => {
+    const attempt = this.loadConversationOnce(agentId).catch((error: unknown) => {
+      // A rotation can be discovered by the very request reading the transcript.
+      if (connectionErrorCode(error) === 'CONVERSATION_SESSION_CHANGED') return this.loadConversationOnce(agentId);
+      throw error;
+    }).finally(() => {
       if (this.refreshing.get(agentId) === attempt) this.refreshing.delete(agentId);
     });
     this.refreshing.set(agentId, attempt);
@@ -446,15 +454,37 @@ export class HerdrRepository {
     if (this.rawConversations.has(agentId)) return Promise.resolve();
     const active = this.restoring.get(agentId);
     if (active) return active;
+    const epoch = this.conversationEpoch(agentId);
     const attempt = (async () => {
       const cached = await AsyncStorage.getItem(CONVERSATION_PREFIX + agentId);
-      if (cached && !this.rawConversations.has(agentId)) {
-        const conversation = conversationSchema.parse(JSON.parse(cached));
-        if (conversation.agentId !== agentId) throw new Error('Cached conversation identity does not match.');
+      if (cached && epoch === this.conversationEpoch(agentId) && !this.rawConversations.has(agentId)) {
+        let value: unknown;
+        try {
+          value = JSON.parse(cached);
+        } catch (error) {
+          if (!(error instanceof SyntaxError)) throw error;
+          console.warn('[CONVERSATION_CACHE] Discarding malformed cached transcript', agentId);
+          await this.persistConversation(agentId, null, epoch);
+          return;
+        }
+        const parsed = conversationSchema.safeParse(value);
+        if (!parsed.success || parsed.data.agentId !== agentId) {
+          console.warn('[CONVERSATION_CACHE] Discarding invalid or mismatched cached transcript', agentId);
+          await this.persistConversation(agentId, null, epoch);
+          return;
+        }
+        const conversation = parsed.data;
+        const agent = this.currentAgent(agentId);
+        if (agent && !conversationMatchesAgent(conversation, agent)) {
+          await this.persistConversation(agentId, null, epoch);
+          return;
+        }
         this.rawConversations.set(agentId, conversation);
         this.publishConversations();
       }
-    })().finally(() => { this.restoring.delete(agentId); });
+    })().finally(() => {
+      if (this.restoring.get(agentId) === attempt) this.restoring.delete(agentId);
+    });
     this.restoring.set(agentId, attempt);
     return attempt;
   }
@@ -463,22 +493,69 @@ export class HerdrRepository {
     await this.restoreConversation(agentId);
     const deviceId = this.deviceIdForAgent(agentId);
     const device = deviceId ? this.devices.get(deviceId) : undefined;
-    if (!device) throw new Error('That agent is not available on a connected device.');
+    if (!device || !deviceId) throw new Error('That agent is not available on a connected device.');
     if (device.state.connection !== 'connected') throw new ConnectionError('BRIDGE_NOT_STARTED', 'Reconnecting to the device.');
     const generation = device.generation;
+    const requestedAgent = this.currentAgent(agentId);
+    if (!requestedAgent) throw new Error('That agent is no longer available.');
+    const epoch = this.conversationEpoch(agentId);
+    const assertCurrent = () => {
+      if (device.generation !== generation) throw new ConnectionError('ERR_BRIDGE_CLOSED', 'Stale conversation response.');
+      if (epoch !== this.conversationEpoch(agentId)
+        || !sameAgentSession(agentSession(requestedAgent), agentSession(this.currentAgent(agentId)))) {
+        throw new ConnectionError('CONVERSATION_SESSION_CHANGED', 'The agent session changed. Refreshing its conversation.');
+      }
+    };
     const raw = await this.requestForAgent(agentId, 'agent.conversation', { agentId });
-    const conversation = conversationSchema.parse(raw);
-    if (device.generation !== generation) throw new ConnectionError('ERR_BRIDGE_CLOSED', 'Stale conversation response.');
+    assertCurrent();
+    const parsed = conversationSchema.parse(raw);
+    if (parsed.agentId !== agentId || parsed.provider !== requestedAgent.provider) {
+      throw new ConnectionError('INVALID_RESPONSE', 'Conversation belongs to a different agent.');
+    }
+    const conversation = {
+      ...parsed,
+      providerSessionId: parsed.providerSessionId === undefined
+        ? requestedAgent.providerSessionId ?? null : parsed.providerSessionId,
+    };
+    if (!conversationMatchesAgent(conversation, requestedAgent)) {
+      await this.refreshDeviceRuntime(deviceId);
+      throw new ConnectionError('CONVERSATION_SESSION_CHANGED', 'The bridge read a different session. Refreshing its identity.');
+    }
     const serialized = JSON.stringify(conversation);
     const changed = serialized !== JSON.stringify(this.rawConversations.get(agentId));
     if (changed) {
-      await AsyncStorage.setItem(CONVERSATION_PREFIX + agentId, serialized);
-      if (device.generation !== generation) throw new ConnectionError('ERR_BRIDGE_CLOSED', 'Stale conversation response.');
+      await this.persistConversation(agentId, conversation, epoch);
+      assertCurrent();
       this.rawConversations.set(agentId, conversation);
     }
     await this.reconcileCommands(conversation);
+    assertCurrent();
     if (changed) this.publishConversations();
     return this.getConversation(agentId) ?? conversation;
+  }
+
+  private currentAgent(agentId: string): RemoteAgent | undefined {
+    const deviceId = this.deviceIdForAgent(agentId);
+    return deviceId ? this.devices.get(deviceId)?.state.runtime.agents.find((agent) => agent.id === agentId) : undefined;
+  }
+
+  private conversationEpoch(agentId: string): number {
+    return this.conversationEpochs.get(agentId) ?? 0;
+  }
+
+  private persistConversation(agentId: string, conversation: AgentConversation | null, epoch: number): Promise<void> {
+    const operation = (this.conversationWrites.get(agentId) ?? Promise.resolve()).then(async () => {
+      if (epoch !== this.conversationEpoch(agentId)) return;
+      if (conversation) await AsyncStorage.setItem(CONVERSATION_PREFIX + agentId, JSON.stringify(conversation));
+      else await AsyncStorage.removeItem(CONVERSATION_PREFIX + agentId);
+    });
+    // Serialize removals with writes so an older response cannot undo invalidation.
+    const settled = operation.then(() => undefined, () => undefined);
+    this.conversationWrites.set(agentId, settled);
+    void settled.then(() => {
+      if (this.conversationWrites.get(agentId) === settled) this.conversationWrites.delete(agentId);
+    });
+    return operation;
   }
 
   async sendMessage(agentId: string, text: string): Promise<void> {
@@ -488,16 +565,23 @@ export class HerdrRepository {
 
   private async queueCommand(
     agentId: string, action: PendingCommand['action'], payload: Record<string, unknown>, text: string,
+    expectedSession: AgentSession | undefined = agentSession(this.currentAgent(agentId)),
   ): Promise<void> {
     await this.hydrate();
     const deviceId = this.deviceIdForAgent(agentId);
     const device = deviceId ? this.devices.get(deviceId) : undefined;
     const agent = device?.state.runtime.agents.find((candidate) => candidate.id === agentId);
     if (!device || !agent) throw new Error('This agent is no longer available.');
+    if (expectedSession && !sameAgentSession(expectedSession, agentSession(agent))) {
+      throw new Error('The agent session changed before the message could be queued. Review the current conversation.');
+    }
     if (device.state.hello && device.state.hello.capabilities.durableCommands !== true) {
       throw new Error('Reconnect to update the device bridge before sending.');
     }
     if (!agent.providerSessionId) {
+      if (agent.provider === 'codex') {
+        throw new Error('Codex has not exposed its active thread yet. Finish its startup dialogs or enable Thread ID in Codex /statusline. New Remodr Codex agents enable this automatically.');
+      }
       throw new Error('Waiting for the agent session identity. Reconnect or refresh before sending.');
     }
     const generation = device.generation;
@@ -530,6 +614,11 @@ export class HerdrRepository {
     answer: { selectedOptionIds?: string[]; customText?: string | null },
   ): Promise<void> {
     const conversation = this.rawConversations.get(agentId);
+    const agent = this.currentAgent(agentId);
+    if (!conversation || !agent || !conversationMatchesAgent(conversation, agent)
+      || conversation.activeHumanRequest?.id !== requestId) {
+      throw new Error('This question no longer belongs to the current session. Refresh the conversation.');
+    }
     const labels = conversation?.activeHumanRequest?.options
       .filter((option) => answer.selectedOptionIds?.includes(option.id))
       .map((option) => option.label).join(', ');
@@ -537,7 +626,7 @@ export class HerdrRepository {
       agentId,
       requestId,
       answer,
-    }, answer.customText ?? labels ?? 'Answer');
+    }, answer.customText ?? labels ?? 'Answer', agentSession(agent));
   }
 
   async interrupt(agentId: string): Promise<void> {
@@ -595,8 +684,10 @@ export class HerdrRepository {
     const generation = device.generation;
     while (device.generation === generation && device.state.connection === 'connected') {
       const commands = this.outbox.getSnapshot().filter((entry) => entry.deviceId === deviceId);
-      const blockedAgents = new Set(commands.filter((entry) => entry.state === 'uncertain').map((entry) => entry.agentId));
-      const command = commands.find((entry) => entry.state === 'queued' && !entry.invalidated && !blockedAgents.has(entry.agentId));
+      const uncertain = commands.filter((entry) => entry.state === 'uncertain');
+      const command = commands.find((entry) => entry.state === 'queued' && !entry.invalidated
+        && !uncertain.some((blocked) => blocked.agentId === entry.agentId
+          && sameAgentSession(commandSession(blocked.payload), commandSession(entry.payload))));
       if (!command) return;
       if (device.state.hello?.capabilities.durableCommands !== true) {
         await this.outbox.update(command.id, { state: 'failed', error: 'Reconnect to update the device bridge.' });
@@ -617,6 +708,13 @@ export class HerdrRepository {
           // Capture an authoritative baseline before a first send. A cached
           // transcript may contain an older message with exactly the same text.
           await this.loadConversation(command.agentId);
+          if (!sameAgentSession(commandSession(command.payload), agentSession(this.currentAgent(command.agentId)))) {
+            await this.outbox.update(command.id, {
+              state: 'failed', invalidated: true,
+              error: 'The agent session changed. This message was not sent to the new session.',
+            });
+            continue;
+          }
           await this.outbox.setBaseline(command.id,
             (this.rawConversations.get(command.agentId)?.items ?? []).map((item) => item.id));
         }
@@ -629,6 +727,14 @@ export class HerdrRepository {
             invalidated: command.action === 'agent.interrupt',
           });
           return;
+        }
+        if (!command.attempted
+          && !sameAgentSession(commandSession(claimed.payload), agentSession(this.currentAgent(command.agentId)))) {
+          await this.outbox.update(command.id, {
+            state: 'failed', invalidated: true,
+            error: 'The agent session changed before dispatch. This message was not sent to the new session.',
+          });
+          continue;
         }
         await device.transport.request(claimed.action, claimed.payload, claimed.id);
         await this.outbox.update(command.id, { state: 'sent', error: null });
@@ -660,6 +766,9 @@ export class HerdrRepository {
   async retryCommand(id: string): Promise<void> {
     const command = this.outbox.getSnapshot().find((entry) => entry.id === id);
     if (!command) throw new Error('This command is no longer queued.');
+    if (!sameAgentSession(commandSession(command.payload), agentSession(this.currentAgent(command.agentId)))) {
+      throw new Error('This message belongs to a previous session. Compose a new message for the current session.');
+    }
     if (command.invalidated) throw new Error('The device configuration changed. Review and compose a new message.');
     if (command.state === 'sending' || command.state === 'sent') return;
     if (command.state === 'uncertain') {
@@ -689,6 +798,9 @@ export class HerdrRepository {
     const claimed = new Set<string>();
     for (const command of this.outbox.getSnapshot()) {
       if (command.agentId !== conversation.agentId || command.state !== 'sent') continue;
+      const agent = this.currentAgent(conversation.agentId);
+      if (!agent || !conversationMatchesAgent(conversation, agent)
+        || !sameAgentSession(commandSession(command.payload), agentSession(agent))) continue;
       const match = conversation.items.find((item) => item.kind === 'user_message' &&
         item.text === command.text && !command.baselineIds.includes(item.id) && !claimed.has(item.id));
       if (match) {
@@ -706,6 +818,7 @@ export class HerdrRepository {
     for (const command of this.outbox.getSnapshot()) {
       const device = this.devices.get(command.deviceId);
       const agent = device?.state.runtime.agents.find((entry) => entry.id === command.agentId);
+      const previousSession = !!agent && !sameAgentSession(commandSession(command.payload), agentSession(agent));
       const conversation = merged.get(command.agentId) ?? {
         agentId: command.agentId, provider: agent?.provider ?? 'unknown', semantic: true, items: [],
       };
@@ -714,7 +827,10 @@ export class HerdrRepository {
         items: [...conversation.items, {
           id: `local:${command.id}`, kind: 'user_message', text: command.text,
           timestamp: command.createdAt, commandId: command.id, delivery: command.state,
-          deliveryError: command.error ?? undefined,
+          previousSession,
+          deliveryError: previousSession
+            ? `Previous session. ${command.error ?? 'This message does not belong to the current conversation.'}`
+            : command.error ?? undefined,
         }],
       });
     }
@@ -808,9 +924,30 @@ export class HerdrRepository {
       throw new ConnectionError('INVALID_RESPONSE', 'Runtime belongs to a different device.');
     }
     const deviceId = fallbackDeviceId;
-    this.setDeviceState(deviceId, { runtime });
+    const device = this.deviceConnection(deviceId);
+    const previousAgents = new Map(device.state.runtime.agents.map((agent) => [agent.id, agent]));
+    const currentAgents = new Map(runtime.agents.map((agent) => [agent.id, agent]));
+    const invalidated = new Set<string>();
+    for (const [id, previous] of previousAgents) {
+      if (!sameAgentSession(agentSession(previous), agentSession(currentAgents.get(id)))) invalidated.add(id);
+    }
+    for (const agent of runtime.agents) {
+      const cached = this.rawConversations.get(agent.id);
+      if (cached && !conversationMatchesAgent(cached, agent)) invalidated.add(agent.id);
+    }
+    const removals: Promise<void>[] = [];
+    for (const id of invalidated) {
+      const epoch = this.conversationEpoch(id) + 1;
+      this.conversationEpochs.set(id, epoch);
+      this.rawConversations.delete(id);
+      this.restoring.delete(id);
+      removals.push(this.persistConversation(id, null, epoch));
+    }
+    device.state = { ...device.state, runtime };
     this.reindexAgents();
+    if (invalidated.size) this.publishConversations();
     this.publish();
+    await Promise.all(removals);
     await this.persistRuntimes();
   }
 

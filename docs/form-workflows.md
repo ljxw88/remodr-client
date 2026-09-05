@@ -58,8 +58,11 @@ Folder selection uses only a successfully loaded path. Editing the address disab
 selection until Go opens it, so a stale listing cannot select the wrong folder.
 
 Model selection only changes the draft. Model/effort/context compatibility comes
-from `agent-catalogue.ts`. Applying reasoning or context changes retains the
-existing restart warning and explicit confirmation action.
+from the [per-provider JSON catalogues](model-catalogues.md), through
+`agent-catalogue.ts`. Model selection at creation is available for Copilot,
+Codex, Claude Code, and Cursor Agent. Live Model Settings remain Copilot-only:
+applying reasoning or context changes retains the existing restart warning
+and explicit confirmation action.
 
 ## Mobile keyboards
 
@@ -95,8 +98,10 @@ same guarded Connect operation as the footer.
 `ActionMenu` anchors a compact menu to the chat's ellipsis. It supports outside
 tap and system Back without a full-screen dimming layer. Menu actions navigate
 to editing pages or request a destructive confirmation.
-The composer's single **Model** button opens **Model Settings**, where the current
-model, reasoning effort, and context window are shown together.
+The composer's single model button displays the current model's catalogue label
+(the raw identifier for unknown models, or **Auto** when none is reported).
+It opens **Model Settings** for providers that support live retuning. Long labels
+truncate without displacing Send; the accessibility label retains the full name.
 
 Connection status remains a floating indicator with a small retry action.
 Detailed connection state is on the server page; no reconnect sheet opens.

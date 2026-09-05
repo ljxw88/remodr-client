@@ -1,4 +1,4 @@
-import type { BridgeEvent, HerdrRuntimeState } from '@/domain/herdr';
+import type { AgentConversation, BridgeEvent, HerdrRuntimeState } from '@/domain/herdr';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   HerdrRepository,
@@ -203,6 +203,299 @@ describe('HerdrRepository device-scoped requests', () => {
 });
 
 describe('HerdrRepository multi-device runtime', () => {
+  it('gives Codex setup guidance without sending to an unidentified thread', async () => {
+    const snapshot: HerdrRuntimeState = {
+      ...runtime,
+      agents: [{ ...runtime.agents[0], provider: 'codex', providerSessionId: null }],
+    };
+    const transport = fakeTransport(snapshot);
+    const repository = repositoryWith([transport]);
+    await repository.connect('ssh-1', 'device-1');
+    await expect(repository.sendMessage('agent-1', 'hello')).rejects.toThrow('Thread ID in Codex /statusline');
+    expect(transport.request.mock.calls.some(([action]) => action === 'agent.send_message')).toBe(false);
+  });
+
+  it('connects to an older bridge that still advertises OpenCode', async () => {
+    const transport = fakeTransport();
+    transport.request.mockResolvedValue({
+      ...runtime,
+      providers: [
+        { provider: 'copilot', available: true },
+        { provider: 'claude', available: true },
+        { provider: 'codex', available: true },
+        { provider: 'opencode', available: true },
+      ],
+      agents: [
+        ...runtime.agents,
+        { ...runtime.agents[0], id: 'legacy-agent', paneId: 'p2', provider: 'opencode' },
+      ],
+    });
+    const repository = repositoryWith([transport]);
+    await repository.connect('ssh-1', 'device-1');
+    const device = repository.getSnapshot().devices['device-1'];
+    expect(device.connection).toBe('connected');
+    expect(device.lastError).toBeNull();
+    expect(device.runtime.providers[3]).toMatchObject({ provider: 'unknown', available: false });
+    expect(device.runtime.agents.map((agent) => agent.provider)).toEqual(['copilot', 'unknown']);
+  });
+
+    describe('HerdrRepository provider session rotation', () => {
+      it.each(['wrong-agent', 'malformed-json', 'invalid-schema'])('recovers from %s cached data by loading the authoritative transcript', async (kind) => {
+        const { repository, transport } = await setup();
+        const bad = kind === 'malformed-json' ? '{broken'
+          : kind === 'invalid-schema' ? JSON.stringify({ agentId })
+            : JSON.stringify({ ...transcript('old-session'), agentId: 'another-agent' });
+        jest.mocked(AsyncStorage.getItem).mockResolvedValueOnce(bad);
+        const warning = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+          await expect(repository.loadConversation(agentId)).resolves.toMatchObject({
+            agentId, providerSessionId: 'old-session',
+          });
+          expect(AsyncStorage.removeItem).toHaveBeenCalledWith(cacheKey);
+          expect(transport.request).toHaveBeenCalledWith('agent.conversation', { agentId });
+          expect(warning).toHaveBeenCalled();
+          expect(repository.getConversation('another-agent')).toBeNull();
+        } finally {
+          warning.mockRestore();
+        }
+      });
+
+      it('surfaces cache-removal failures and recovers when storage works again', async () => {
+        const { repository, transport } = await setup();
+        const bad = JSON.stringify({ ...transcript('old-session'), agentId: 'another-agent' });
+        jest.mocked(AsyncStorage.getItem).mockResolvedValue(bad);
+        jest.mocked(AsyncStorage.removeItem).mockRejectedValueOnce(new Error('storage unavailable'));
+        transport.request.mockClear();
+        const warning = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+          await expect(repository.loadConversation(agentId)).rejects.toThrow('storage unavailable');
+          expect(transport.request).not.toHaveBeenCalled();
+          await expect(repository.loadConversation(agentId)).resolves.toMatchObject({ agentId });
+        } finally {
+          warning.mockRestore();
+        }
+      });
+
+      it('does not treat a storage read failure as a corrupt cache', async () => {
+        const { repository, transport } = await setup();
+        jest.mocked(AsyncStorage.getItem).mockRejectedValueOnce(new Error('storage read failed'));
+        transport.request.mockClear();
+        await expect(repository.loadConversation(agentId)).rejects.toThrow('storage read failed');
+        expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
+        expect(transport.request).not.toHaveBeenCalled();
+      });
+
+      const agentId = 'agent-1';
+      const deviceId = 'device-1';
+      const cacheKey = `remote-workspace.herdr.conversation.${agentId}`;
+
+      function sessionRuntime(session: string): HerdrRuntimeState {
+        return { ...runtime, agents: [{ ...runtime.agents[0], providerSessionId: session }] };
+      }
+
+      function transcript(session: string, text = session): AgentConversation {
+        return {
+          agentId, provider: 'copilot', providerSessionId: session, semantic: true,
+          items: text ? [{ id: 'reply', kind: 'assistant_message', markdown: text }] : [],
+          activeHumanRequest: null,
+        };
+      }
+
+      async function setup() {
+        let session = 'old-session';
+        const transport = fakeTransport();
+        transport.request.mockImplementation(async (action: string) => {
+          if (action === 'runtime.snapshot') return sessionRuntime(session);
+          if (action === 'agent.conversation') return transcript(session);
+          return { accepted: true };
+        });
+        const repository = repositoryWith([transport]);
+        repository.selectDevice(deviceId);
+        await repository.connect('ssh-1', deviceId);
+        return { repository, transport, rotate: (next: string) => { session = next; } };
+      }
+
+      function deferred<T>() {
+        let resolve!: (value: T) => void;
+        const promise = new Promise<T>((done) => { resolve = done; });
+        return { promise, resolve };
+      }
+
+      beforeEach(() => {
+        jest.useFakeTimers();
+        jest.mocked(AsyncStorage.getItem).mockReset().mockResolvedValue(null);
+        jest.mocked(AsyncStorage.setItem).mockReset().mockResolvedValue(undefined);
+        jest.mocked(AsyncStorage.removeItem).mockReset().mockResolvedValue(undefined);
+      });
+
+      afterEach(() => {
+        jest.clearAllTimers();
+        jest.useRealTimers();
+      });
+
+      it('clears the previous transcript and question immediately when the session rotates', async () => {
+        const { repository, transport, rotate } = await setup();
+        transport.request.mockResolvedValueOnce({
+          ...transcript('old-session'),
+          activeHumanRequest: { id: 'old-question', kind: 'text', question: 'Old?', options: [], allowCustomAnswer: true, multiSelect: false },
+        });
+        await repository.loadConversation(agentId);
+        expect(repository.getConversation(agentId)?.activeHumanRequest?.id).toBe('old-question');
+        rotate('new-session');
+        await repository.refreshRuntime();
+        expect(repository.getConversation(agentId)).toBeNull();
+        expect(AsyncStorage.removeItem).toHaveBeenCalledWith(cacheKey);
+        transport.request.mockResolvedValueOnce(transcript('new-session', ''));
+        await repository.loadConversation(agentId);
+        expect(repository.getConversation(agentId)).toMatchObject({ providerSessionId: 'new-session', items: [], activeHumanRequest: null });
+        await repository.loadConversation(agentId);
+        expect(repository.getConversation(agentId)?.items[0]).toMatchObject({ markdown: 'new-session' });
+      });
+
+      it.each([false, true])('discards an old in-flight response, even if malformed (%s), and follows the new session', async (malformed) => {
+        const { repository, transport, rotate } = await setup();
+        const began = deferred<void>();
+        const old = deferred<unknown>();
+        transport.request.mockImplementationOnce(() => { began.resolve(); return old.promise; });
+        const loading = repository.loadConversation(agentId);
+        await began.promise;
+        rotate('new-session');
+        await repository.refreshRuntime();
+        old.resolve(malformed ? { invalid: true } : transcript('old-session'));
+        await expect(loading).resolves.toMatchObject({ providerSessionId: 'new-session' });
+        expect(repository.getConversation(agentId)?.items[0]).toMatchObject({ markdown: 'new-session' });
+        expect(jest.mocked(AsyncStorage.setItem).mock.calls.filter(([key]) => key === cacheKey)
+          .map(([, value]) => JSON.parse(value).providerSessionId)).toEqual(['new-session']);
+      });
+
+      it('recovers an explicit new-session response even if the runtime event was missed', async () => {
+        const { repository, rotate } = await setup();
+        rotate('new-session');
+        await expect(repository.loadConversation(agentId)).resolves.toMatchObject({ providerSessionId: 'new-session' });
+        expect(repository.getSnapshot().runtime.agents[0].providerSessionId).toBe('new-session');
+      });
+
+      it('handles rotation announced by the conversation request itself', async () => {
+        const { repository, transport, rotate } = await setup();
+        transport.request.mockImplementationOnce(async () => {
+          rotate('new-session');
+          transport.emit({ protocol: 1, type: 'event', event: 'runtime.snapshot', data: sessionRuntime('new-session') });
+          return transcript('new-session');
+        });
+        await expect(repository.loadConversation(agentId)).resolves.toMatchObject({ providerSessionId: 'new-session' });
+      });
+
+      it('does not let an asynchronous disk restore resurrect the old transcript', async () => {
+        const { repository, rotate } = await setup();
+        const oldCache = deferred<string>();
+        jest.mocked(AsyncStorage.getItem).mockReturnValueOnce(oldCache.promise);
+        const restoring = repository.restoreConversation(agentId);
+        rotate('new-session');
+        await repository.refreshRuntime();
+        oldCache.resolve(JSON.stringify(transcript('old-session')));
+        await restoring;
+        expect(repository.getConversation(agentId)).toBeNull();
+        await repository.loadConversation(agentId);
+        expect(repository.getConversation(agentId)?.providerSessionId).toBe('new-session');
+      });
+
+      it('serializes cache removal after a previously started write, before the replacement write', async () => {
+        const { repository, rotate } = await setup();
+        const writing = deferred<void>();
+        const began = deferred<void>();
+        const operations: string[] = [];
+        jest.mocked(AsyncStorage.setItem).mockImplementation(async (key, value) => {
+          if (key !== cacheKey) return;
+          const session = JSON.parse(value).providerSessionId;
+          operations.push(`write:${session}`);
+          if (session === 'old-session') { began.resolve(); await writing.promise; }
+        });
+        jest.mocked(AsyncStorage.removeItem).mockImplementation(async (key) => {
+          if (key === cacheKey) operations.push('remove');
+        });
+        const loading = repository.loadConversation(agentId);
+        await began.promise;
+        rotate('new-session');
+        const refreshing = repository.refreshRuntime();
+        await Promise.resolve();
+        writing.resolve();
+        await Promise.all([loading, refreshing]);
+        expect(operations).toEqual(['write:old-session', 'remove', 'write:new-session']);
+        expect(repository.getConversation(agentId)?.providerSessionId).toBe('new-session');
+      });
+
+      it('rejects a different agent response and never caches it', async () => {
+        const { repository, transport } = await setup();
+        transport.request.mockResolvedValueOnce({ ...transcript('old-session'), agentId: 'another-agent' });
+        await expect(repository.loadConversation(agentId)).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+        expect(repository.getConversation(agentId)).toBeNull();
+        expect(jest.mocked(AsyncStorage.setItem).mock.calls.some(([key]) => key === cacheKey)).toBe(false);
+      });
+
+      it('binds legacy bridge responses to the unchanged request session but rejects legacy persisted data', async () => {
+        const { repository, transport } = await setup();
+        const { providerSessionId: _session, ...legacy } = transcript('old-session');
+        jest.mocked(AsyncStorage.getItem).mockResolvedValueOnce(JSON.stringify(legacy));
+        await repository.restoreConversation(agentId);
+        expect(repository.getConversation(agentId)).toBeNull();
+        transport.request.mockResolvedValueOnce(legacy);
+        await repository.loadConversation(agentId);
+        expect(repository.getConversation(agentId)?.providerSessionId).toBe('old-session');
+      });
+
+      it('fails unsent old-session work without rebinding it to the replacement session', async () => {
+        const { repository, transport, rotate } = await setup();
+        await repository.sendMessage(agentId, 'For the old session');
+        const original = repository.getPendingCommands()[0];
+        rotate('new-session');
+        await repository.refreshRuntime();
+        await repository.flushCommands(deviceId);
+        expect(repository.getPendingCommands()[0]).toMatchObject({
+          id: original.id, payload: original.payload, state: 'failed', invalidated: true, attempted: false,
+        });
+        expect(transport.request.mock.calls.some(([action]) => action === 'agent.send_message')).toBe(false);
+        expect(repository.getConversation(agentId)?.items.at(-1)).toMatchObject({
+          deliveryError: expect.stringContaining('Previous session'),
+        });
+        await expect(repository.retryCommand(original.id)).rejects.toThrow('previous session');
+      });
+
+      it('does not reconcile an old acknowledged send against matching text in a new session', async () => {
+        const { repository, transport, rotate } = await setup();
+        await repository.sendMessage(agentId, 'Same text');
+        await repository.flushCommands(deviceId);
+        const original = repository.getPendingCommands()[0];
+        rotate('new-session');
+        await repository.refreshRuntime();
+        transport.request.mockResolvedValueOnce({
+          ...transcript('new-session'), items: [{ id: 'new-user-message', kind: 'user_message', text: 'Same text' }],
+        });
+        await repository.loadConversation(agentId);
+        expect(repository.getPendingCommands()).toEqual([expect.objectContaining({ id: original.id, state: 'sent' })]);
+        expect(repository.getConversation(agentId)?.items.at(-1)).toMatchObject({ previousSession: true, delivery: 'sent' });
+        await repository.discardCommand(original.id);
+        expect(repository.getPendingCommands()).toHaveLength(0);
+      });
+
+      it('does not let uncertain work from an old session block sending in the new one', async () => {
+        const { repository, transport, rotate } = await setup();
+        await repository.sendMessage(agentId, 'Old message');
+        transport.request
+          .mockResolvedValueOnce(transcript('old-session'))
+          .mockRejectedValueOnce(new ConnectionError('COMMAND_UNCERTAIN', 'Delivery unknown'));
+        await repository.flushCommands(deviceId);
+        expect(repository.getPendingCommands()[0].state).toBe('uncertain');
+        rotate('new-session');
+        await repository.refreshRuntime();
+        await repository.sendMessage(agentId, 'New message');
+        await repository.flushCommands(deviceId);
+        const sends = transport.request.mock.calls.filter(([action]) => action === 'agent.send_message');
+        expect(sends).toHaveLength(2);
+        expect(sends[1][1].precondition.providerSessionId).toBe('new-session');
+        expect(repository.getPendingCommands()[0].state).toBe('uncertain');
+      });
+    });
+
   async function connectTwoDevices() {
     const first = fakeTransport(runtimeFor('device-1', ['agent-a1']));
     const second = fakeTransport(runtimeFor('device-2', ['agent-b1', 'agent-b2']));

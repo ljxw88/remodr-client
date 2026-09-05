@@ -1,17 +1,20 @@
 import { z } from 'zod';
+import { contextTierSchema, reasoningEffortSchema } from '@/domain/model-catalogue-schema';
+
+export { contextTierSchema, reasoningEffortSchema } from '@/domain/model-catalogue-schema';
 
 export const launchableAgentProviderSchema = z.enum([
   'copilot',
   'claude',
   'codex',
-  'opencode',
+  'cursor',
 ]);
 export type LaunchableAgentProvider = z.infer<typeof launchableAgentProviderSchema>;
 
-export const agentProviderSchema = z.union([
-  launchableAgentProviderSchema,
-  z.literal('unknown'),
-]);
+// Older/newer bridges may report providers this app cannot launch.
+export const agentProviderSchema = z.string().min(1).pipe(
+  z.union([launchableAgentProviderSchema, z.literal('unknown')]).catch('unknown'),
+);
 export type AgentProvider = z.infer<typeof agentProviderSchema>;
 
 export const agentStatusSchema = z.enum([
@@ -31,18 +34,6 @@ export const agentCapabilitiesSchema = z.object({
   todos: z.boolean().default(false),
   fallback: z.boolean().default(true),
 });
-
-export const reasoningEffortSchema = z.enum([
-  'none',
-  'minimal',
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-  'max',
-]);
-
-export const contextTierSchema = z.enum(['default', 'long_context']);
 
 /**
  * What an agent is running, as far as the bridge can tell.
@@ -90,10 +81,19 @@ export const workspaceSchema = z.object({
 export type AgentWorkspace = z.infer<typeof workspaceSchema>;
 
 export const agentManifestSchema = z.object({
-  provider: launchableAgentProviderSchema,
+  provider: z.string().min(1),
   available: z.boolean(),
   aliases: z.array(z.string()).default([]),
   unavailableReason: z.string().nullable().optional(),
+}).transform((manifest) => {
+  const provider = agentProviderSchema.parse(manifest.provider);
+  return provider === 'unknown' ? {
+    ...manifest,
+    provider,
+    available: false,
+    unavailableReason: manifest.unavailableReason
+      ?? `This app does not support the provider "${manifest.provider}" reported by the bridge.`,
+  } : { ...manifest, provider };
 });
 export type AgentManifest = z.infer<typeof agentManifestSchema>;
 
@@ -224,6 +224,7 @@ export const conversationItemSchema = z.discriminatedUnion('kind', [
     commandId: z.string().optional(),
     delivery: z.enum(['queued', 'sending', 'sent', 'failed', 'uncertain']).optional(),
     deliveryError: z.string().optional(),
+    previousSession: z.boolean().optional(),
   }),
   conversationBaseSchema.extend({
     kind: z.literal('assistant_message'),
@@ -266,6 +267,8 @@ export type ConversationItem = z.infer<typeof conversationItemSchema>;
 export const conversationSchema = z.object({
   agentId: z.string(),
   provider: agentProviderSchema,
+  /** Absent only on older bridges/cache entries that did not identify the session read. */
+  providerSessionId: z.string().nullable().optional(),
   semantic: z.boolean(),
   items: z.array(conversationItemSchema),
   activeHumanRequest: humanRequestSchema.nullable().optional(),
@@ -323,8 +326,8 @@ export function providerLabel(provider: AgentProvider): string {
       return 'Claude Code';
     case 'codex':
       return 'Codex';
-    case 'opencode':
-      return 'OpenCode';
+    case 'cursor':
+      return 'Cursor Agent';
     default:
       return 'Agent';
   }

@@ -57,6 +57,7 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
+    "models:refresh": "node ./scripts/refresh-models.cjs",
     "test": "jest"
   },
   "jest": {

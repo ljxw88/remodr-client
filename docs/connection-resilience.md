@@ -99,7 +99,7 @@ a reconnection workaround.
 There is an unavoidable boundary: sending `agent.prompt` to Herdr and committing
 the bridge ledger are not one transaction. If the bridge dies between those
 steps, the outcome is uncertain, not safely retryable. Automatic replay stops
-for that command and later commands to the same agent. The user can inspect the
+for that command and later commands to the same provider session. The user can inspect the
 conversation; the client does not claim exactly-once execution.
 
 | Local state | Meaning |
@@ -124,6 +124,62 @@ replayed into a later run.
 The repository retains its last transcript while detached and persists fetched
 conversations. Only one conversation fetch per agent runs at a time.
 Generation checks reject responses from a replaced attachment.
+
+### Clearing or replacing a provider session
+
+The pane-based agent ID identifies the terminal, not its current conversation.
+`/clear` can replace the provider session while keeping the same pane, process,
+and status. A session-only change is not guaranteed to produce a Herdr status
+event, so conversation reads must reconcile authoritative session identity
+rather than relying on event delivery alone.
+
+For Codex, the active UUID comes from its configured live status line: session
+hooks run too late to identify a new thread before the first prompt. The footer
+also detects `/new` before the hook reference changes. No cwd/newest-file
+heuristic is used, and an unverifiable identity blocks dispatch. See
+[Codex startup](herdr-mobile-architecture.md#codex-startup-and-thread-identity).
+
+Conversation responses carry `providerSessionId`. The repository fences reads
+and disk restores with an agent-session epoch, clears the previous transcript
+and question on a changed provider/session, and serializes cache removals with
+in-flight writes. A session change discovered during a read triggers one bounded
+retry; a response naming a different session also requests a fresh runtime
+snapshot. Empty transcripts are valid: they replace the old conversation instead
+of reviving terminal scrollback.
+
+Older bridge responses without session metadata are bound only to the unchanged
+request identity. Persisted legacy transcripts without a binding are not reused
+when a runtime already identifies the active session. Offline history can still
+be restored before runtime discovery, then revalidated against that runtime.
+Malformed, obsolete-schema, or wrong-agent cache entries are discarded
+individually with a diagnostic, allowing a fresh read to proceed. They are not
+permanent connection errors. Cache I/O failures still surface; recovery never
+clears drafts, credentials, other conversations, or the durable command queue.
+
+Queued commands retain their original provider/session/pane preconditions and
+durable IDs. Unsent work for a replaced session fails without being redirected.
+Already-attempted work retains its original receipt-recovery semantics. Echo
+reconciliation, consumed-message baselines, question deduplication, and uncertainty
+blocking are all session-scoped. Retained local entries are explicitly labelled
+**Previous session**, not presented as messages sent to the replacement session.
+They can be discarded, including acknowledged entries whose old transcript can
+no longer echo them; a replaced session never offers a retry into the new one.
+Question controls are also keyed by session so a reused question ID cannot
+inherit a previous answer's lock.
+
+Herdr 0.8.2 can acknowledge a Copilot session report while retaining the previous
+session ID: its native session-replacement allowlist omits Copilot. Polling that
+same stale value is not sufficient. For Copilot, the bridge therefore also uses
+the exact pane's foreground process and its open session database to identify
+the active conversation. This is process-bound evidence, not a guess from the
+newest transcript in a directory shared by several agents. Other providers still
+depend on their native Herdr integrations for session identity.
+
+Rebuild/reinstall the app to deploy changes to its bundled Python bridge; a
+JavaScript reload alone does not replace that native asset. When diagnosing an
+old installation, compare the running `herdr_mobile_bridge-<sha256>.py` filename
+with the checksum of `modules/remote-core/bridge/herdr_mobile_bridge.py`; the
+APK's `assets/herdr_mobile_bridge.py` must contain the same bytes.
 
 On recovery, fetch authoritative snapshots, including the visible conversation
 even if its agent has already finished. Pending local messages are an overlay,
