@@ -86,6 +86,7 @@ describe('agent settings and model pages', () => {
     jest.mocked(herdrRepository.retuneAgent).mockImplementation(() =>
       new Promise((resolve) => { finish = () => resolve({ agentId: 'agent-a', runtime: EMPTY_RUNTIME }); }));
     TestRenderer.act(() => { renderer = TestRenderer.create(createElement(AgentSettingsPage)); });
+    expect(renderer.root.findByType(FormPage).props.title).toBe('Model Settings');
     expect(renderer.root.findByType(AppButton).props.disabled).toBe(true);
     expect(renderer.root.findByType(TuningFields).props.value.model).toBe('private-model');
     expect(herdrRepository.retuneAgent).not.toHaveBeenCalled();
@@ -131,6 +132,7 @@ describe('agent settings and model pages', () => {
 
   it('selects only the draft and uses a non-nested searchable list with the running model selected', () => {
     TestRenderer.act(() => { renderer = TestRenderer.create(createElement(ModelsPage)); });
+    expect(renderer.root.findByType(FormPage).props.title).toBe('Choose Model');
     expect(renderer.root.findByType(FormPage).props.scroll).toBe(false);
     expect(renderer.root.findAllByType(FormSection)).toHaveLength(1);
     expect(renderer.root.findByType(FormSection).props.fill).toBe(true);
@@ -217,6 +219,7 @@ describe('agent settings and model pages', () => {
     jest.mocked(herdrRepository.renameAgent).mockImplementation(() =>
       new Promise((resolve) => { finish = () => resolve({ agentId: 'agent-a', runtime: EMPTY_RUNTIME }); }));
     TestRenderer.act(() => { renderer = TestRenderer.create(createElement(RenameAgentPage)); });
+    expect(renderer.root.findByType(FormPage).props.title).toBe('Rename Agent');
     expect(renderer.root.findByType(AppButton).props.disabled).toBe(true);
     expect(renderer.root.findByType(TextField).props.autoFocus).toBe(true);
     TestRenderer.act(() => renderer.root.findByType(TextField).props.onSubmitEditing());

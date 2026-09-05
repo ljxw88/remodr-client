@@ -25,7 +25,7 @@ export default function RenameAgentPage() {
   }, []);
 
   if (!flowId || !draft || draft.kind !== 'rename-agent') {
-    return <MissingFlow title="Rename unavailable" />;
+    return <MissingFlow title="Rename Unavailable" />;
   }
   const availabilityError = agentEditError(devices, draft);
   const validationError = renameError(draft.name, draft.initialName);
@@ -53,7 +53,7 @@ export default function RenameAgentPage() {
 
   return (
     <FormPage
-      title="Rename agent"
+      title="Rename Agent"
       busy={busy}
       footer={
         <>

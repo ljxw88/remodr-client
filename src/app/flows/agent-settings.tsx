@@ -27,7 +27,7 @@ export default function AgentSettingsPage() {
   }, []);
 
   if (!flowId || !draft || draft.kind !== 'agent-settings') {
-    return <MissingFlow title="Agent settings unavailable" />;
+    return <MissingFlow title="Model Settings Unavailable" />;
   }
   const availabilityError = agentEditError(devices, draft);
   const { changed, restarts } = tuningChanges(draft.initialTuning, draft.tuning);
@@ -55,7 +55,7 @@ export default function AgentSettingsPage() {
 
   return (
     <FormPage
-      title="Agent settings"
+      title="Model Settings"
       busy={busy}
       footer={
         <>

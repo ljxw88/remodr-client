@@ -1,5 +1,5 @@
 import { TabTrigger } from 'expo-router/ui';
-import { usePathname } from 'expo-router';
+import { useNavigation, usePathname } from 'expo-router';
 import {
   createContext,
   useCallback,
@@ -25,6 +25,7 @@ import { AppIcon, type AppIconName } from '@/components/ui/app-icon';
 import { GlassSurface } from '@/components/ui/glass-surface';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useScreenEntrance } from '@/features/navigation/screen-entrance';
+import type { StackNavigation } from '@/features/navigation/stack-screen-options';
 import { useReduceMotion } from '@/hooks/use-reduce-motion';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -130,12 +131,20 @@ const TabRoutes = ['/', '/servers', '/settings'];
 
 export function AnimatedTabContent({ children }: PropsWithChildren) {
   const pathname = usePathname();
+  const navigation = useNavigation<StackNavigation>();
   const covered = !TabRoutes.includes(pathname);
   const tabIndex = covered ? -1 : TabRoutes.indexOf(pathname);
   const previousIndex = useRef(tabIndex);
   const wasCovered = useRef(covered);
   const mounted = useRef(false);
+  const pendingReturn = useRef(false);
   const entrance = useScreenEntrance();
+
+  useLayoutEffect(() => navigation.addListener('transitionEnd', (event) => {
+    if (event.data.closing || !pendingReturn.current || !navigation.isFocused()) return;
+    pendingReturn.current = false;
+    entrance.play(-1);
+  }), [entrance, navigation]);
 
   useLayoutEffect(() => {
     // The content stays mounted across a tab change, so the first pass is the
@@ -152,15 +161,17 @@ export function AnimatedTabContent({ children }: PropsWithChildren) {
     // are already holding is still the one to come back to.
     if (covered) {
       wasCovered.current = true;
+      pendingReturn.current = false;
+      entrance.reset();
       return;
     }
 
-    // Uncovered by a close. The route that was on top sat above us, so the tab
-    // it uncovers arrives the way anything arrives when you go back.
-    if (wasCovered.current) {
+    // The pathname changes before the root fragment reappears. Wait for its
+    // native arrival so this motion is not spent underneath the closing page.
+    if (wasCovered.current || pendingReturn.current) {
       wasCovered.current = false;
       previousIndex.current = tabIndex;
-      entrance.play(-1);
+      pendingReturn.current = true;
       return;
     }
 

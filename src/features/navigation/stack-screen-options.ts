@@ -11,6 +11,9 @@ import { useTheme } from '@/hooks/use-theme';
  * The routes themselves are not: see `components/ui/screen.tsx`.
  */
 type ScreenOptions = ComponentProps<typeof Stack>['screenOptions'];
+export type StackNavigation = Parameters<
+  NonNullable<ComponentProps<typeof Stack>['layout']>
+>[0]['descriptors'][string]['navigation'];
 
 export function useStackScreenOptions(): ScreenOptions {
   const theme = useTheme();

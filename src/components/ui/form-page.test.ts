@@ -47,7 +47,9 @@ describe('keyboard-safe form page', () => {
     const footer = renderer.root.findAllByProps({ testID: 'form-footer' })[0];
     const scroll = renderer.root.findAllByProps({ testID: 'form-scroll' })[0];
     expect(StyleSheet.flatten(viewport.props.style).paddingBottom).toBe(300);
-    expect(StyleSheet.flatten(footer.props.style).paddingBottom).toBe(Spacing.one);
+    const footerStyle = StyleSheet.flatten(footer.props.style);
+    expect(footerStyle.paddingBottom).toBe(Spacing.two);
+    expect(footerStyle.paddingBottom).toBe(footerStyle.padding);
     expect(scroll.props.automaticallyAdjustKeyboardInsets).toBe(false);
     expect(scroll.props.keyboardShouldPersistTaps).toBe('handled');
   });

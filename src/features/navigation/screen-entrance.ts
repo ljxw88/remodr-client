@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Animated, Easing } from 'react-native';
 
 import { useReduceMotion } from '@/hooks/use-reduce-motion';
@@ -25,8 +25,8 @@ import { useReduceMotion } from '@/hooks/use-reduce-motion';
  * `RouteStack` paints outside the moving part for exactly this reason.
  */
 const Entrance = {
-  offsetFrom: 24,
-  duration: 300,
+  offsetFrom: 16,
+  duration: 200,
 };
 
 /**
@@ -34,9 +34,8 @@ const Entrance = {
  *
  * The trigger is left to the caller because the two places that settle do not
  * agree on when. The dock keeps its content mounted and settles it whenever the
- * tab changes; a pushed stack mounts fresh and settles once, on arrival, and
- * the tab it uncovers settles again on the way back. Only the motion is shared,
- * so the app has one answer to what arriving looks like.
+ * tab changes. A stack settles when its active route changes or it is uncovered
+ * by Back. Only the motion is shared, so the app has one answer to arriving.
  *
  * `direction` is which way the screen comes from: forward is 1, back is -1.
  */
@@ -44,12 +43,17 @@ export function useScreenEntrance() {
   const [translateX] = useState(() => new Animated.Value(0));
   const shouldReduceMotion = useReduceMotion();
 
+  const reset = useCallback(() => {
+    translateX.stopAnimation();
+    translateX.setValue(0);
+  }, [translateX]);
+
+  useEffect(() => reset, [reset]);
+
   const play = useCallback(
     (direction: 1 | -1 = 1) => {
-      if (shouldReduceMotion()) {
-        translateX.setValue(0);
-        return;
-      }
+      reset();
+      if (shouldReduceMotion()) return;
 
       translateX.setValue(direction * Entrance.offsetFrom);
 
@@ -58,16 +62,17 @@ export function useScreenEntrance() {
         duration: Entrance.duration,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
+        isInteraction: false,
       }).start();
     },
-    [shouldReduceMotion, translateX],
+    [reset, shouldReduceMotion, translateX],
   );
 
   return useMemo(
     // Stable across renders on purpose. Callers reach for this from an effect,
     // and an identity that changed every pass would replay the arrival every
     // time anything above re-rendered.
-    () => ({ style: { transform: [{ translateX }] }, play }),
-    [play, translateX],
+    () => ({ style: { transform: [{ translateX }] }, play, reset }),
+    [play, reset, translateX],
   );
 }

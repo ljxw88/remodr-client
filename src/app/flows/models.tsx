@@ -19,7 +19,7 @@ export default function ModelsPage() {
   const leaving = useRef(false);
   const insets = useSafeAreaInsets();
   if (!flowId || !draft || (draft.kind !== 'new-agent' && draft.kind !== 'agent-settings')) {
-    return <MissingFlow title="Models unavailable" />;
+    return <MissingFlow title="Models Unavailable" />;
   }
 
   const choices = modelChoices(
@@ -43,7 +43,7 @@ export default function ModelsPage() {
   }
 
   return (
-    <FormPage title="Choose model" scroll={false}>
+    <FormPage title="Choose Model" scroll={false}>
       <TextField
         label="Search models"
         value={query}

@@ -14,7 +14,7 @@ ask for confirmation.
 | `new-space` | Space name and root path; continues to New Agent after creation |
 | `devices`, `providers`, `spaces` | Scoped selection for an in-progress creation form |
 | `folders` | Remote directory browser with explicit folder selection |
-| `agent-settings` | Draft model/reasoning/context changes with explicit Apply |
+| `agent-settings` | Model Settings: draft model/reasoning/context changes with explicit Apply |
 | `models` | Searchable model catalog shared by creation and settings |
 | `rename-agent` | Focused name-editing page |
 
@@ -25,8 +25,18 @@ inside these forms because the dock is not present on the workflow route.
 
 The flow stack uses a quiet background. Glass remains on navigation controls,
 the dock, and the chat composer rather than every form section.
+Static page titles use Title Case; user-supplied agent names keep their original casing.
 
 ## Drafts and navigation
+
+`RouteStack` applies the shared 200ms, 16dp arrival motion to page changes and Back,
+including returning from another stack. Header and content move together over an
+opaque canvas; native stack transitions remain disabled to avoid overlapping
+screens and blank blur targets. The stable navigator layout preserves mounted
+forms, while field edits and keyboard changes never restart the animation.
+Direction is prepared from route state, but motion waits for native appearance
+(`transitionEnd` with `closing: false`), since JS focus precedes the actual
+Android fragment swap. Stale, duplicate, and closing events are ignored.
 
 [`flow-drafts.ts`](../src/features/forms/flow-drafts.ts) stores in-progress form
 values. Routes pass a `flowId`, not callbacks or serialized object graphs.
@@ -85,6 +95,8 @@ same guarded Connect operation as the footer.
 `ActionMenu` anchors a compact menu to the chat's ellipsis. It supports outside
 tap and system Back without a full-screen dimming layer. Menu actions navigate
 to editing pages or request a destructive confirmation.
+The composer's single **Model** button opens **Model Settings**, where the current
+model, reasoning effort, and context window are shown together.
 
 Connection status remains a floating indicator with a small retry action.
 Detailed connection state is on the server page; no reconnect sheet opens.

@@ -23,12 +23,10 @@ import {
   providerLabel,
   statusLabel,
   type ConversationItem,
-  type AgentProvider,
-  type AgentTuning,
   type HumanRequest,
   type RemoteAgent,
 } from '@/domain/herdr';
-import { EFFORT_LABELS, modelLabel, supportsTuning } from '@/domain/agent-catalogue';
+import { supportsTuning } from '@/domain/agent-catalogue';
 import { beginAgentSettingsFlow, beginRenameAgentFlow } from '@/features/agents/agent-edit-flow';
 import { ActionMenu } from '@/components/ui/action-menu';
 import { HumanRequestBar } from '@/features/agents/human-request-bar';
@@ -330,8 +328,8 @@ export default function AgentConversationScreen() {
                 label="Agent options"
                 disabled={closingAgent}
                 items={[
-                  { id: 'rename', label: 'Rename agent', onPress: () => openAgentForm('rename') },
-                  { id: 'settings', label: 'Model settings', disabled: !supportsTuning(agent.provider), onPress: () => openAgentForm('settings') },
+                  { id: 'rename', label: 'Rename Agent', onPress: () => openAgentForm('rename') },
+                  { id: 'settings', label: 'Model Settings', disabled: !supportsTuning(agent.provider), onPress: () => openAgentForm('settings') },
                   { id: 'close', label: 'Close agent', destructive: true, disabled: !ownerConnected, onPress: confirmCloseAgent },
                 ]}
               />
@@ -440,10 +438,8 @@ export default function AgentConversationScreen() {
           agentId={agent.id}
           request={conversation?.activeHumanRequest ?? null}
           onHeightChange={setComposerHeight}
-          provider={agent.provider}
-          tuning={agent.tuning}
           tunable={supportsTuning(agent.provider)}
-          onOpenTuning={() => openAgentForm('settings')}
+          onOpenModelSettings={() => openAgentForm('settings')}
           keyboardOffset={keyboardHeight}
         />
         <ConnectionStatus
@@ -827,13 +823,10 @@ function AskedQuestionRow({ request }: { request: HumanRequest }) {
   );
 }
 
-/** One of the small chips under the input, showing a setting and opening it. */
-function TuningPill({
-  label,
+function ModelSettingsButton({
   onPress,
   disabled = false,
 }: {
-  label: string;
   onPress: () => void;
   disabled?: boolean;
 }) {
@@ -841,7 +834,7 @@ function TuningPill({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Model options: ${label}`}
+      accessibilityLabel="Model Settings"
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
@@ -859,7 +852,7 @@ function TuningPill({
         type="smallBold"
         numberOfLines={1}
         style={{ color: theme.text, fontSize: 13 }}>
-        {label}
+        Model
       </ThemedText>
       {disabled ? null : (
         <AppIcon
@@ -887,10 +880,8 @@ function Composer({
   agentId,
   request,
   onHeightChange,
-  provider,
-  tuning,
   tunable,
-  onOpenTuning,
+  onOpenModelSettings,
   keyboardOffset = 0,
 }: {
   value: string;
@@ -903,10 +894,8 @@ function Composer({
   agentId: string;
   request: HumanRequest | null;
   onHeightChange: (height: number) => void;
-  provider: AgentProvider;
-  tuning?: AgentTuning;
   tunable: boolean;
-  onOpenTuning: () => void;
+  onOpenModelSettings: () => void;
   keyboardOffset?: number;
 }) {
   const theme = useTheme();
@@ -973,24 +962,7 @@ function Composer({
             ) : null}
 
             <View style={styles.cardBottom}>
-              <View style={styles.pillsRow}>
-                {/*
-                  What the agent is running, and the way to change it. The
-                  model is the one setting the agent reports itself, so it is
-                  shown even for an agent this app did not start.
-                */}
-                <TuningPill
-                  label={modelLabel(provider, tuning?.model)}
-                  onPress={onOpenTuning}
-                  disabled={!tunable}
-                />
-                {tunable && tuning?.effort ? (
-                  <TuningPill
-                    label={EFFORT_LABELS[tuning.effort]}
-                    onPress={onOpenTuning}
-                  />
-                ) : null}
-              </View>
+              <ModelSettingsButton onPress={onOpenModelSettings} disabled={!tunable} />
 
               <Pressable
                 accessibilityRole="button"
@@ -1237,11 +1209,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: Spacing.one,
     minHeight: 36,
-  },
-  pillsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
   },
   pill: {
     flexDirection: 'row',

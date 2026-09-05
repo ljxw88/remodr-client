@@ -20,7 +20,7 @@ export default function NewSpacePage() {
   const params = useLocalSearchParams<{ flowId?: string | string[] }>();
   const flowId = typeof params.flowId === 'string' ? params.flowId : undefined;
   const draft = useFlowDraft(flowId);
-  if (!flowId || draft?.kind !== 'new-space') return <MissingFlow title="New space" />;
+  if (!flowId || draft?.kind !== 'new-space') return <MissingFlow title="New Space" />;
   return <NewSpaceForm flowId={flowId} draft={draft} />;
 }
 
@@ -95,7 +95,7 @@ function NewSpaceForm({ flowId, draft }: { flowId: string; draft: NewSpaceDraft 
   }
 
   return (
-    <FormPage title="New space" busy={creating} footer={
+    <FormPage title="New Space" busy={creating} footer={
       <>
         <FormError message={error ?? validation} />
         <ThemedText type="caption" themeColor="textMuted">Next, choose an agent for this space.</ThemedText>

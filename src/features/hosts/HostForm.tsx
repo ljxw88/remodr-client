@@ -21,7 +21,7 @@ type Props = {
   footer?: ReactNode;
 };
 
-export function HostForm({ title = 'New server', initialValues, submitLabel, onSubmit, onSaved, footer }: Props) {
+export function HostForm({ title = 'New Server', initialValues, submitLabel, onSubmit, onSaved, footer }: Props) {
   const { width, fontScale } = useWindowDimensions();
   const stacked = width < 360 || fontScale > 1.3;
   const [fields, setFields] = useState<HostFormFields>({ ...DEFAULT_HOST_FORM, ...initialValues });

@@ -38,7 +38,7 @@ export default function TunnelsScreen() {
 
   return (
     <Screen>
-      <Stack.Screen options={{ title: 'Local forward' }} />
+      <Stack.Screen options={{ title: 'Local Forward' }} />
       <View style={styles.form}>
         <View style={styles.section}>
           <ThemedText type="section">New tunnel</ThemedText>

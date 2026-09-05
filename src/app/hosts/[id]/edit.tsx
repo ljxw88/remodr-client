@@ -47,7 +47,7 @@ export default function EditServerScreen() {
   return (
       <HostForm
         key={host.id}
-        title="Edit server"
+        title="Edit Server"
         initialValues={hostFormFromProfile(host)}
         submitLabel="Save changes"
         onSubmit={async (input) => {

@@ -1,5 +1,5 @@
-import { Stack } from 'expo-router';
-import { useLayoutEffect, type ReactNode } from 'react';
+import { Stack, useIsFocused } from 'expo-router';
+import { useLayoutEffect, useRef, type ComponentProps, type ReactNode } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
 
 import { AppBackground } from '@/components/ui/app-background';
@@ -50,26 +50,7 @@ type Props = {
  */
 export function RouteStack({ children, blurBackdrop = false, quiet = false }: Props) {
   const screenOptions = useStackScreenOptions();
-  const entrance = useScreenEntrance();
-
-  // On arrival, once. The stack is mounted by being opened, and closing it
-  // unmounts it, so there is nothing to leave behind and nothing to reset.
-  useLayoutEffect(() => {
-    entrance.play(1);
-  }, [entrance]);
-
-  const stack = (
-    /*
-      The canvas stays outside this, so what the screen settles over is its
-      own background rather than the route it replaced. That is the whole
-      trick: the screen is already opaque and already in place when the
-      motion starts, so there is never a moment where two screens are legible
-      at once.
-    */
-    <Animated.View style={[styles.stack, entrance.style]}>
-      <Stack screenOptions={screenOptions}>{children}</Stack>
-    </Animated.View>
-  );
+  const stack = <Stack screenOptions={screenOptions} layout={stackLayout}>{children}</Stack>;
 
   return (
     <View style={styles.root}>
@@ -79,9 +60,54 @@ export function RouteStack({ children, blurBackdrop = false, quiet = false }: Pr
   );
 }
 
+type StackLayoutProps = Parameters<NonNullable<ComponentProps<typeof Stack>['layout']>>[0];
+
+const stackLayout = ({ state, descriptors, children }: StackLayoutProps) => (
+  <StackArrival state={state} descriptors={descriptors}>{children}</StackArrival>
+);
+
+function StackArrival({ state, descriptors, children }: Pick<StackLayoutProps, 'state' | 'descriptors' | 'children'>) {
+  const focused = useIsFocused();
+  const entrance = useScreenEntrance();
+  const routeKey = state.routes[state.index].key;
+  const navigation = descriptors[routeKey].navigation;
+  const previous = useRef<{ key: string; index: number } | null>(null);
+  const covered = useRef(false);
+
+  useLayoutEffect(() => {
+    if (!focused) {
+      covered.current = true;
+      entrance.reset();
+      return;
+    }
+
+    const last = previous.current;
+    const returning = last && (
+      state.index < last.index || (routeKey === last.key && covered.current)
+    );
+    previous.current = { key: routeKey, index: state.index };
+    covered.current = false;
+    entrance.reset();
+    let appeared = false;
+
+    // JS focus changes before Android swaps fragments, even with animation:none.
+    // Native appearance is the first safe point to move only the incoming page.
+    return navigation.addListener('transitionEnd', (event) => {
+      if (event.data.closing || appeared || !navigation.isFocused()) return;
+      appeared = true;
+      entrance.play(returning ? -1 : 1);
+    });
+  }, [entrance, focused, navigation, routeKey, state.index]);
+
+  // Animate the committed navigator, including its header, over its own canvas.
+  // A stable layout preserves mounted forms and never animates the outgoing page.
+  return <Animated.View style={[styles.stack, entrance.style]}>{children}</Animated.View>;
+}
+
 const styles = StyleSheet.create({
   root: {
     flex: 1,
+    overflow: 'hidden',
     // The foot of the gradient, so an unpainted frame is the colour it is
     // about to be rather than a hole.
     backgroundColor: Colors.background,

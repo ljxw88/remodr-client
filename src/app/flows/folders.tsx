@@ -36,7 +36,7 @@ export default function FoldersPage() {
   const params = useLocalSearchParams<{ flowId?: string | string[] }>();
   const flowId = typeof params.flowId === 'string' ? params.flowId : undefined;
   const draft = useFlowDraft(flowId);
-  if (!flowId || draft?.kind !== 'new-space') return <MissingFlow title="Choose folder" />;
+  if (!flowId || draft?.kind !== 'new-space') return <MissingFlow title="Choose Folder" />;
   return <FolderBrowser key={`${flowId}:${draft.deviceId}`} flowId={flowId} draft={draft} />;
 }
 
@@ -139,7 +139,7 @@ function FolderBrowser({ flowId, draft }: { flowId: string; draft: NewSpaceDraft
   }
 
   return (
-    <FormPage title="Choose folder" scroll={false} footer={
+    <FormPage title="Choose Folder" scroll={false} footer={
       <>
         {unopenedPath ? <ThemedText type="caption" themeColor="textMuted">Open the entered path before selecting it.</ThemedText> : null}
         <AppButton label="Use this folder" disabled={loading || !!error || unopenedPath || !currentListing} onPress={useFolder} />

@@ -123,7 +123,7 @@ export function FormPage({ title, children, footer, onBack = leaveForm, busy = f
           {footer ? (
             <View
               testID="form-footer"
-              style={[styles.footer, { paddingBottom: keyboardVisible ? Spacing.one : Math.max(insets.bottom, Spacing.two) }]}>
+              style={[styles.footer, { paddingBottom: keyboardVisible ? Spacing.two : Math.max(insets.bottom, Spacing.two) }]}>
               {footer}
             </View>
           ) : null}
@@ -183,7 +183,7 @@ export function FormError({ message }: { message?: string | null }) {
   return message ? <ThemedText type="small" themeColor="danger" accessibilityLiveRegion="polite">{message}</ThemedText> : null;
 }
 
-export function MissingFlow({ title = 'Form unavailable' }: { title?: string }) {
+export function MissingFlow({ title = 'Form Unavailable' }: { title?: string }) {
   return (
     <FormPage title={title} footer={<AppButton label="Back to agents" onPress={() => router.dismissTo('/')} />}>
       <ThemedText type="heading">Start this action again</ThemedText>

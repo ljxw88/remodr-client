@@ -346,11 +346,22 @@ chromatic orb.
   being left refusing to go. A slide avoids that but costs 200-400ms that
   cannot be shortened from JavaScript.
 - The change of place is a cut; the arrival is not. Once the new screen is up it
-  settles into place over its own canvas — a 24dp step, gone in 300ms. Because
+  settles into place over its own canvas — a 16dp step, gone in 200ms. Because
   it plays *after* the swap there is only ever one screen on show, so it costs
   nothing in legibility and the change still reads as movement rather than a
-  jump cut. One definition, shared by the dock and by every pushed stack:
+  jump cut. One definition, shared by dock changes, nested page changes, and Back:
   `features/navigation/screen-entrance.ts`.
+- Forward navigation and replacements arrive from the right; Back arrives from
+  the left, including a stack uncovered by closing another workflow. The stack's
+  stable layout observes its active route key and focus, not form values or
+  keyboard events. It does not remount pages or discard their drafts.
+- Start stack arrivals, including returning to the dock, on the native opening
+  `transitionEnd` event, not JS focus. Ordinary dock tab switches animate their
+  committed content directly.
+  Even `animation: 'none'` swaps Android fragments asynchronously; starting sooner
+  moves the outgoing page and leaves the destination with almost no motion.
+- Interrupted arrivals stop before a new one starts. Hidden stacks reset their
+  offset, reduced motion skips the effect, and animations do not delay list rendering.
 - Never animate a whole screen's opacity on Android. Alpha on a view group is
   applied to each child in turn rather than to the finished picture, so a screen
   at less than full opacity is one whose own layers show through each other —

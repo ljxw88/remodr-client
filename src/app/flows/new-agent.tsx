@@ -23,7 +23,7 @@ export default function NewAgentPage() {
   const params = useLocalSearchParams<{ flowId?: string | string[] }>();
   const flowId = typeof params.flowId === 'string' ? params.flowId : undefined;
   const draft = useFlowDraft(flowId);
-  if (!flowId || draft?.kind !== 'new-agent') return <MissingFlow title="New agent" />;
+  if (!flowId || draft?.kind !== 'new-agent') return <MissingFlow title="New Agent" />;
   return <NewAgentForm flowId={flowId} draft={draft} />;
 }
 
@@ -95,7 +95,7 @@ function NewAgentForm({ flowId, draft }: { flowId: string; draft: NewAgentDraft 
   }
 
   return (
-    <FormPage title="New agent" busy={creating} footer={
+    <FormPage title="New Agent" busy={creating} footer={
       <>
         <FormError message={error ?? validation} />
         <AppButton label={creating ? 'Starting agent…' : 'Start agent'} disabled={creating || !!validation} onPress={() => void create()} />
