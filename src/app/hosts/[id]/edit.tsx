@@ -52,8 +52,8 @@ export default function EditServerScreen() {
         submitLabel="Save changes"
         onSubmit={async (input) => {
           await updateHost(host, { ...host, ...input });
-          router.dismissTo({ pathname: '/hosts/[id]', params: { id: host.id } });
         }}
+        onSaved={() => router.dismissTo({ pathname: '/hosts/[id]', params: { id: host.id } })}
       />
   );
 }

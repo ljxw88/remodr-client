@@ -51,7 +51,7 @@ export function FormPage({ title, children, footer, onBack = leaveForm, busy = f
       if (!focused || !scrollView || !input) return;
       // Native ScrollView's keyboard helper assumes a full-screen scroll view.
       // Measure this viewport instead, which already excludes header and footer.
-      scrollView.measureInWindow((_x, top, _width, height) => {
+      scrollView.getNativeScrollRef()?.measureInWindow((_x, top, _width, height) => {
         if (token !== revealGeneration.current || height <= 0 || input !== focusedInput.current) return;
         input.measureInWindow((_inputX, inputTop, _inputWidth, inputHeight) => {
           if (token !== revealGeneration.current || input !== focusedInput.current) return;

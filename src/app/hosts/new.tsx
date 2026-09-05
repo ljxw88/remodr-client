@@ -8,6 +8,8 @@ export default function NewHostScreen() {
         submitLabel="Save server"
         onSubmit={async (input) => {
           await hostRepository.create(input);
+        }}
+        onSaved={() => {
           if (router.canGoBack()) router.back();
           else router.replace('/servers');
         }}

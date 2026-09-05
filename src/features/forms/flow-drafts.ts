@@ -26,6 +26,12 @@ export type AgentSettingsDraft = {
   deviceId: string;
   agentId: string;
   provider: AgentProvider;
+  /**
+   * Snapshot of the session the form opened against, so applying can be blocked
+   * once that session has been replaced or its provider swapped underneath it.
+   * Optional, so hand-built and older draft fixtures stay valid.
+   */
+  providerSessionId?: string | null;
   initialTuning: Tuning;
   tuning: Tuning;
 };
@@ -34,6 +40,9 @@ export type RenameAgentDraft = {
   kind: 'rename-agent';
   deviceId: string;
   agentId: string;
+  /** See the matching fields on {@link AgentSettingsDraft}. */
+  provider?: AgentProvider;
+  providerSessionId?: string | null;
   initialName: string;
   name: string;
 };

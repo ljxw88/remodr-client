@@ -17,10 +17,11 @@ type Props = {
   initialValues?: Partial<HostFormFields>;
   submitLabel: string;
   onSubmit: (input: CreateHostInput) => Promise<void>;
+  onSaved?: () => void;
   footer?: ReactNode;
 };
 
-export function HostForm({ title = 'New server', initialValues, submitLabel, onSubmit, footer }: Props) {
+export function HostForm({ title = 'New server', initialValues, submitLabel, onSubmit, onSaved, footer }: Props) {
   const { width, fontScale } = useWindowDimensions();
   const stacked = width < 360 || fontScale > 1.3;
   const [fields, setFields] = useState<HostFormFields>({ ...DEFAULT_HOST_FORM, ...initialValues });
@@ -54,6 +55,7 @@ export function HostForm({ title = 'New server', initialValues, submitLabel, onS
     setSubmitting(true);
     try {
       await onSubmit(parsed.data);
+      if (mounted.current) onSaved?.();
     } catch (cause) {
       if (mounted.current) setError(toUserMessage(cause));
     } finally {
