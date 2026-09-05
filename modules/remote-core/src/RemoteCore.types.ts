@@ -33,7 +33,16 @@ export type NativeKnownHost = {
   fingerprint: string;
 };
 
+export type NativeConnectionServiceEligibility = {
+  eligible: boolean;
+  reason?: string;
+};
+
 export type RemoteCoreModuleEvents = {
+  onConnectionServiceChange: (params: {
+    active: boolean;
+    reason?: string;
+  }) => void;
   onSessionChange: (params: NativeSessionSnapshot) => void;
   onHerdrMessage: (params: {
     bridgeId: string;

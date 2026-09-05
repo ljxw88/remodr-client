@@ -1,0 +1,7 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <activity
+      android:name="com.remoteworkspace.remotecore.ServiceTestActivity"
+      android:exported="false" />
+  </application>
+</manifest>

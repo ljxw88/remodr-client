@@ -66,3 +66,8 @@ second; unchanged transcript snapshots are cached by remote file version.
 Closing the Android bridge or SSH connection never stops Herdr, closes panes,
 or terminates agents. Runtime and Copilot conversation state are reconstructed
 after reconnect.
+
+Connection ownership, durable command delivery, recovery UX, and Android
+background-service limits are documented in
+[connection resilience](connection-resilience.md). The client remains a
+snapshot-based attachment; it does not own the remote agent lifetime.

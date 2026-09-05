@@ -17,6 +17,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { hostRepository } from '@/services/host-repository';
 import { remoteClient } from '@/services/native-remote-client';
 import { toUserMessage } from '@/utils/user-error';
+import { disconnectDeviceRuntime, retryDeviceConnection } from '@/features/agents/connect-runtime';
 
 export default function HostDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -97,6 +98,7 @@ export default function HostDetailScreen() {
     setConnecting(true);
     try {
       await ensureHostConnected(target, acceptedFingerprint);
+      await retryDeviceConnection(target.id);
     } catch (error) {
       if (
         error instanceof RemoteOperationError &&
@@ -253,8 +255,7 @@ export default function HostDetailScreen() {
                   label="Disconnect"
                   variant="secondary"
                   onPress={() => {
-                    void remoteClient
-                      .disconnectHost(host.id)
+                    void disconnectDeviceRuntime(host.id)
                       .then(refreshSessions)
                       .catch((error) => {
                         Alert.alert('Could not disconnect', toUserMessage(error));

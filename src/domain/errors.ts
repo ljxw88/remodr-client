@@ -44,6 +44,7 @@ export function parseRemoteError(error: unknown): RemoteError {
     case 'ERR_AUTHENTICATION':
       return { type: 'authentication', message: 'Authentication failed.' };
     case 'ERR_NETWORK':
+    case 'ERR_SESSION':
       return { type: 'network', message: 'Could not reach the server.' };
     case 'ERR_TIMEOUT':
       return { type: 'timeout', message: 'The connection timed out.' };

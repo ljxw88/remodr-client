@@ -17,11 +17,17 @@ workspace as a filterable space, and can start Copilot, Claude, Codex, or
 OpenCode in a new tab inside the selected space. Herdr events refresh additions,
 removals, moves, and status changes from authoritative snapshots.
 
-Every saved device with a Keystore credential reconnects in the background when
-the tab shell starts, and each one keeps its own Herdr bridge and runtime.
+Every enabled saved device with a Keystore credential is supervised from the
+app root, and each one keeps its own Herdr bridge and runtime.
 Switching devices is therefore instant and never reloads a session. Connecting
 from Server status reuses the same deduplicated connection attempt and does not
 ask for its password again.
+
+Connection loss preserves the transcript and durable pending messages.
+Recovery uses per-device backoff and network/lifecycle signals rather than
+screen-specific retry buttons. See [connection recovery and delivery
+guarantees](docs/connection-resilience.md), including ambiguous-delivery and
+Android background-execution limits.
 
 Top-level navigation uses a custom floating glass dock that collapses to compact
 icons during downward scrolling and expands on upward scrolling or tab changes.

@@ -1,10 +1,16 @@
 import type { BridgeEvent, HerdrRuntimeState } from '@/domain/herdr';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  appendOptimisticUserMessage,
   HerdrRepository,
   reduceAgentStatus,
 } from '@/services/herdr-repository';
 import type { HerdrBridgeTransport } from '@/services/herdr-bridge-transport';
+import { ConnectionError } from '@/domain/connection-error';
+import { CommandOutbox } from '@/services/command-outbox';
+
+jest.mock('expo-crypto', () => ({
+  randomUUID: () => jest.requireActual<typeof import('node:crypto')>('node:crypto').randomUUID(),
+}));
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
   __esModule: true,
@@ -24,6 +30,7 @@ const runtime: HerdrRuntimeState = {
     {
       id: 'agent-1',
       provider: 'copilot',
+      providerSessionId: 'copilot-session-1',
       herdrSessionId: 'default',
       workspaceId: 'w1',
       workspaceName: 'mobile',
@@ -57,7 +64,7 @@ const hello = {
   bridgeVersion: '0.1.0',
   herdrVersion: '0.8.2',
   herdrProtocol: 20,
-  capabilities: {},
+  capabilities: { durableCommands: true },
 };
 
 type FakeTransport = HerdrBridgeTransport & {
@@ -76,8 +83,9 @@ function fakeTransport(snapshot?: HerdrRuntimeState): FakeTransport {
     }),
     start: jest.fn(async () => hello),
     stop: jest.fn(async () => undefined),
-    request: jest.fn(async (action: string) =>
-      action === 'runtime.snapshot' ? snapshot : undefined,
+    request: jest.fn(async (action: string, payload: { agentId?: string }) =>
+      action === 'runtime.snapshot' ? snapshot : action === 'agent.conversation'
+        ? { agentId: payload.agentId, provider: 'copilot', semantic: true, items: [] } : undefined,
     ),
     emit(event: BridgeEvent) {
       listeners.forEach((listener) => listener(event));
@@ -88,7 +96,10 @@ function fakeTransport(snapshot?: HerdrRuntimeState): FakeTransport {
 /** Builds a repository whose transports are chosen per device, in order. */
 function repositoryWith(transports: FakeTransport[]) {
   let index = 0;
-  return new HerdrRepository(() => transports[index++]);
+  return new HerdrRepository(() => transports[index++], new CommandOutbox({
+    getItem: async () => null,
+    setItem: async () => undefined,
+  }));
 }
 
 describe('Herdr runtime reducer', () => {
@@ -342,40 +353,152 @@ describe('HerdrRepository multi-device runtime', () => {
     expect(first.start).not.toHaveBeenCalled();
   });
 
-  it('automatically reconnects and retries when bridge is closed on sendMessage', async () => {
+  it('keeps the queued message after a dropped send and reuses its command ID', async () => {
     const { repository, first } = await connectTwoDevices();
-    const reconnectMock = jest.fn().mockResolvedValue(true);
-    repository.setReconnectHandler(reconnectMock);
+    const onFailure = jest.fn();
+    repository.setConnectionObserver(onFailure);
 
     first.request.mockClear();
-    // First request fails with bridge closed, retry succeeds
     first.request
-      .mockRejectedValueOnce(new Error('Herdr bridge is closed'))
-      .mockResolvedValueOnce({ ok: true });
+      .mockResolvedValueOnce({ agentId: 'agent-a1', provider: 'copilot', semantic: true, items: [] })
+      .mockRejectedValueOnce(new ConnectionError('ERR_BRIDGE_CLOSED', 'Closed'));
 
     await repository.sendMessage('agent-a1', 'Hello after background');
-
-    expect(reconnectMock).toHaveBeenCalledWith('device-1');
-    expect(first.request).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe('optimistic conversation messages', () => {
-  it('appends a user message without mutating the existing conversation', () => {
-    const conversation = {
-      agentId: 'agent-1',
-      provider: 'copilot' as const,
-      semantic: true,
-      items: [{ id: 'a1', kind: 'assistant_message' as const, markdown: 'Ready.' }],
-    };
-
-    const optimistic = appendOptimisticUserMessage(conversation, 'Run the tests.');
-
-    expect(conversation.items).toHaveLength(1);
-    expect(optimistic.items).toHaveLength(2);
-    expect(optimistic.items[1]).toMatchObject({
-      kind: 'user_message',
-      text: 'Run the tests.',
+    await repository.flushCommands('device-1');
+    const pending = repository.getPendingCommands()[0];
+    expect(pending.state).toBe('queued');
+    expect(repository.getConversation('agent-a1')?.items[0]).toMatchObject({
+      text: 'Hello after background', delivery: 'queued',
     });
+    expect(onFailure).toHaveBeenCalledWith('device-1', expect.objectContaining({ code: 'ERR_BRIDGE_CLOSED' }));
+
+    await repository.flushCommands('device-1');
+    const sends = first.request.mock.calls.filter((call) => call[0] === 'agent.send_message');
+    expect(sends).toHaveLength(2);
+    expect(sends.map((call) => call[2])).toEqual([pending.id, pending.id]);
+    expect(repository.getPendingCommands()[0].state).toBe('sent');
+  });
+
+  it('does not automatically retry a command with ambiguous delivery', async () => {
+    const { repository, first } = await connectTwoDevices();
+    first.request
+      .mockResolvedValueOnce({ agentId: 'agent-a1', provider: 'copilot', semantic: true, items: [] })
+      .mockRejectedValueOnce(new ConnectionError('COMMAND_UNCERTAIN', 'Review this message'));
+    await repository.sendMessage('agent-a1', 'Hello');
+    await repository.flushCommands('device-1');
+    expect(repository.getPendingCommands()[0].state).toBe('uncertain');
+    const count = first.request.mock.calls.length;
+    await repository.flushCommands('device-1');
+    expect(first.request.mock.calls).toHaveLength(count);
+  });
+
+  it('refreshing a remote snapshot does not erase a queued message', async () => {
+    const { repository } = await connectTwoDevices();
+    await repository.loadConversation('agent-a1');
+    await repository.sendMessage('agent-a1', 'Saved offline');
+    await repository.releaseDevice('device-1');
+    expect(repository.getConversation('agent-a1')?.items).toEqual([
+      expect.objectContaining({ kind: 'user_message', text: 'Saved offline', delivery: 'queued' }),
+    ]);
+  });
+
+  it('coalesces simultaneous conversation refreshes', async () => {
+    const { repository, first } = await connectTwoDevices();
+    first.request.mockClear();
+    await Promise.all([repository.loadConversation('agent-a1'), repository.loadConversation('agent-a1')]);
+    expect(first.request).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not consume an earlier identical user message as a new send', async () => {
+    const { repository, first } = await connectTwoDevices();
+    first.request.mockImplementation(async (action: string) => action === 'agent.conversation' ? {
+      agentId: 'agent-a1', provider: 'copilot', semantic: true,
+      items: [{ kind: 'user_message', id: 'old', text: 'Again' }],
+    } : { accepted: true });
+    await repository.sendMessage('agent-a1', 'Again');
+    await repository.flushCommands('device-1');
+    await repository.loadConversation('agent-a1');
+    expect(repository.getPendingCommands()).toEqual([
+      expect.objectContaining({ state: 'sent', text: 'Again', baselineIds: ['old'] }),
+    ]);
+    first.request.mockResolvedValue({
+      agentId: 'agent-a1', provider: 'copilot', semantic: true,
+      items: [{ kind: 'user_message', id: 'old', text: 'Again' },
+        { kind: 'user_message', id: 'new', text: 'Again' }],
+    });
+    await repository.loadConversation('agent-a1');
+    expect(repository.getPendingCommands()).toHaveLength(0);
+  });
+
+  it('does not send queued work to a changed host endpoint', async () => {
+    const { repository, first } = await connectTwoDevices();
+    await repository.sendMessage('agent-a1', 'For this server only');
+    await repository.cancelDeviceCommands('device-1');
+    first.request.mockClear();
+    await repository.flushCommands('device-1');
+    expect(first.request).not.toHaveBeenCalled();
+    const command = repository.getPendingCommands()[0];
+    expect(command.invalidated).toBe(true);
+    await expect(repository.retryCommand(command.id)).rejects.toThrow('device configuration changed');
+  });
+
+  it('rejects a conversation response from a previous attachment', async () => {
+    const { repository, first } = await connectTwoDevices();
+    let resolve!: (value: unknown) => void;
+    let began!: () => void;
+    const started = new Promise<void>((done) => { began = done; });
+    first.request.mockImplementation(() => {
+      began();
+      return new Promise((done) => { resolve = done; });
+    });
+    const request = repository.loadConversation('agent-a1');
+    await started;
+    await repository.releaseDevice('device-1');
+    resolve({ agentId: 'agent-a1', provider: 'copilot', semantic: true, items: [] });
+    await expect(request).rejects.toMatchObject({ code: 'ERR_BRIDGE_CLOSED' });
+  });
+
+  it('restores a cached conversation without requiring any live connection', async () => {
+    jest.mocked(AsyncStorage.getItem).mockResolvedValueOnce(JSON.stringify({
+      agentId: 'offline-agent', provider: 'copilot', semantic: true,
+      items: [{ kind: 'assistant_message', id: 'remote-1', markdown: 'Previously received' }],
+    }));
+    const transport = fakeTransport();
+    const repository = repositoryWith([transport]);
+    await repository.restoreConversation('offline-agent');
+    expect(repository.getConversation('offline-agent')?.items[0]).toMatchObject({ markdown: 'Previously received' });
+    expect(transport.request).not.toHaveBeenCalled();
+  });
+
+  it('does not dispatch a message discarded while its baseline is loading', async () => {
+    const { repository, first } = await connectTwoDevices();
+    let complete!: (value: unknown) => void;
+    let began!: () => void;
+    const started = new Promise<void>((resolve) => { began = resolve; });
+    first.request.mockImplementation((action: string) => {
+      if (action !== 'agent.conversation') return Promise.resolve({});
+      began();
+      return new Promise((resolve) => { complete = resolve; });
+    });
+    await repository.sendMessage('agent-a1', 'Cancel this');
+    const flushing = repository.flushCommands('device-1');
+    await started;
+    await repository.discardCommand(repository.getPendingCommands()[0].id);
+    complete({ agentId: 'agent-a1', provider: 'copilot', semantic: true, items: [] });
+    await flushing;
+    expect(repository.getPendingCommands()).toHaveLength(0);
+    expect(first.request.mock.calls.filter((call) => call[0] === 'agent.send_message')).toHaveLength(0);
+  });
+
+  it('does not queue or replay a live interrupt', async () => {
+    const { repository, first } = await connectTwoDevices();
+    await repository.interrupt('agent-a1');
+    await repository.releaseDevice('device-1');
+    await repository.connect('ssh-new', 'device-1');
+    await repository.flushCommands('device-1');
+    expect(first.request.mock.calls.filter((call) => call[0] === 'agent.interrupt')).toEqual([
+      ['agent.interrupt', { agentId: 'agent-a1' }],
+    ]);
+    expect(repository.getPendingCommands()).toHaveLength(0);
   });
 });

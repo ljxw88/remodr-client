@@ -16,10 +16,9 @@ class AppHostKeyVerifier(
     val fingerprint = sshSha256Fingerprint(key)
     lastFingerprint = fingerprint
     val stored = store.fingerprintFor(this.hostname, this.port)
-      ?: store.fingerprintFor(hostname, port)
     if (stored == null) {
       if (acceptedFingerprint != null && acceptedFingerprint == fingerprint) {
-        store.trust(hostname, port, fingerprint)
+        store.trust(this.hostname, this.port, fingerprint)
         return true
       }
       throw HostKeyUnknownException(fingerprint)

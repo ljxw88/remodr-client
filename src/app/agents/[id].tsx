@@ -16,7 +16,6 @@ import {
 import { MarkdownMessage } from '@/components/markdown/markdown-message';
 import { MessageText } from '@/components/markdown/markdown-theme';
 import { AppIcon } from '@/components/ui/app-icon';
-import { BorderBeam } from '@/components/ui/border-beam';
 import { GlassSurface } from '@/components/ui/glass-surface';
 import { Screen } from '@/components/ui/screen';
 import { ScrollEdgeFrame } from '@/components/ui/scroll-edge-frame';
@@ -37,6 +36,8 @@ import { AgentTuningSheet } from '@/features/agents/agent-tuning-sheet';
 import { HumanRequestBar } from '@/features/agents/human-request-bar';
 import { useAgentConversation, useHerdr } from '@/features/agents/use-herdr';
 import { useRevealedText } from '@/features/agents/use-revealed-text';
+import { CommandDelivery, ConnectionStatus } from '@/features/connection/connection-status';
+import { useConnectionSnapshot, useForeground, usePendingCommands } from '@/features/connection/use-connection';
 import {
   groupToolActivity,
   toolActivitySummary,
@@ -51,7 +52,9 @@ import { toUserMessage } from '@/utils/user-error';
 export default function AgentConversationScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const runtime = useHerdr();
-  const agent = runtime.runtime.agents.find((item) => item.id === id);
+  const agent = Object.values(runtime.devices)
+    .flatMap((device) => device.runtime.agents)
+    .find((item) => item.id === id);
   const agentId = agent?.id;
   const agentStatus = agent?.status;
   const conversation = useAgentConversation(id ?? '');
@@ -62,8 +65,15 @@ export default function AgentConversationScreen() {
   const ownerConnection = ownerDeviceId
     ? runtime.devices[ownerDeviceId]?.connection
     : undefined;
+  const ownerSnapshot = useConnectionSnapshot(ownerDeviceId);
+  const foreground = useForeground();
+  const commands = usePendingCommands();
+  const ownerConnected = ownerConnection === 'connected' &&
+    (!ownerSnapshot || ownerSnapshot.phase === 'connected');
   const [draft, setDraft] = useState('');
+  const [draftReadyFor, setDraftReadyFor] = useState<string | null>(null);
   const [conversationError, setConversationError] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [sending, setSending] = useState(false);
   const [composerHeight, setComposerHeight] = useState(0);
@@ -71,6 +81,20 @@ export default function AgentConversationScreen() {
   const [showActions, setShowActions] = useState(false);
   const [showTuning, setShowTuning] = useState(false);
   const listRef = useRef<FlatList<ConversationDisplayItem>>(null);
+  const sendingRef = useRef(false);
+  const draftRevision = useRef(0);
+  const refreshRef = useRef<Promise<void> | null>(null);
+  const requestId = conversation?.activeHumanRequest?.id;
+  const answerPending = commands.some((command) =>
+    command.agentId === id && command.action === 'human_request.answer' &&
+    command.payload.requestId === requestId,
+  );
+
+  function changeDraft(text: string) {
+    draftRevision.current++;
+    setDraft(text);
+    setSendError(null);
+  }
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -114,33 +138,58 @@ export default function AgentConversationScreen() {
     [conversation?.items],
   );
   const working = agentStatus === 'working';
-  const showWorking = sending || working || activeTool != null;
+  const showWorking = working || activeTool != null;
   const workingLabel = activeTool?.title
     ? `${activeTool.title}…`
     : `${agent ? providerLabel(agent.provider) : 'The agent'} is working`;
   const hasOpenRequest = conversation?.activeHumanRequest != null;
 
   useEffect(() => {
-    if (!id) {
-      return;
-    }
-    void herdrRepository
-      .loadDraft(id)
-      .then(setDraft)
-      .catch((error) => {
-        console.warn('[CONVERSATION] Could not load draft', error);
-      });
+    if (!id) return;
+    let cancelled = false;
+    void herdrRepository.restoreConversation(id).catch((error) => {
+      if (!cancelled) setConversationError(toUserMessage(error));
+    });
+    return () => { cancelled = true; };
   }, [id]);
 
   useEffect(() => {
-    if (!agentId) {
+    if (!id) {
       return;
     }
-    const refresh = () => {
-      void herdrRepository
+    let cancelled = false;
+    const revision = draftRevision.current;
+    void herdrRepository
+      .loadDraft(id)
+      .then((saved) => {
+        if (!cancelled && draftRevision.current === revision) setDraft(saved);
+        if (!cancelled) setDraftReadyFor(id);
+      })
+      .catch((error) => {
+        console.warn('[CONVERSATION] Could not load draft', error);
+        if (!cancelled) setSendError('Could not restore the saved draft. Existing saved text has not been replaced.');
+      });
+    return () => { cancelled = true; };
+  }, [id]);
+
+  useEffect(() => {
+    if (!agentId || !ownerConnected || !foreground) {
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const awaitingQuestion = agentStatus === 'blocked' && !hasOpenRequest;
+    const shouldPoll = agentStatus === 'working' || awaitingQuestion;
+    const interval = agent?.capabilities.streamingConversation ? 1_000 : 2_000;
+    const refresh = async () => {
+      // A status change may restart the effect while its last read is still live.
+      if (refreshRef.current) await refreshRef.current;
+      if (cancelled) return;
+      const request = herdrRepository
         .loadConversation(agentId)
-        .then(() => setConversationError(null))
+        .then(() => { if (!cancelled) setConversationError(null); })
         .catch((error) => {
+          if (cancelled) return;
           console.warn('[CONVERSATION] Could not load conversation', error);
           setConversationError(
             isBridgeUnavailable(error)
@@ -148,37 +197,28 @@ export default function AgentConversationScreen() {
               : toUserMessage(error),
           );
         });
+      refreshRef.current = request;
+      await request;
+      if (refreshRef.current === request) refreshRef.current = null;
+      if (!cancelled && shouldPoll) timer = setTimeout(() => void refresh(), interval);
     };
-    refresh();
-    /**
-     * Blocked is polled as well as working, but only until the question turns
-     * up. Blocked is Herdr noticing the pane is waiting on someone, which is
-     * when a question is being written into the session log — and it arrives a
-     * moment after the status does, so the single refresh on the status change
-     * usually lands too early and the question never appears until the screen
-     * is left and reopened.
-     *
-     * Once it has arrived there is nothing left to wait for: blocked means
-     * waiting on a person, so it can last hours, and polling a phone put down
-     * on an open question would never stop.
-     */
-    const awaitingQuestion = agentStatus === 'blocked' && !hasOpenRequest;
-    if (agentStatus === 'working' || awaitingQuestion) {
-      const interval = agent?.capabilities.streamingConversation ? 1_000 : 2_000;
-      const timer = setInterval(refresh, interval);
-      return () => clearInterval(timer);
-    }
+    void refresh();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [
     agent?.capabilities.streamingConversation,
     agentId,
     agentStatus,
     hasOpenRequest,
-    ownerConnection,
+    ownerConnected,
+    foreground,
     reloadToken,
   ]);
 
   useEffect(() => {
-    if (!id) {
+    if (!id || draftReadyFor !== id) {
       return;
     }
     const timer = setTimeout(() => {
@@ -192,7 +232,7 @@ export default function AgentConversationScreen() {
         console.warn('[CONVERSATION] Could not save draft', error);
       });
     };
-  }, [draft, id]);
+  }, [draft, draftReadyFor, id]);
 
   if (!agent) {
     return (
@@ -205,10 +245,20 @@ export default function AgentConversationScreen() {
 
   async function send() {
     const text = draft.trim();
-    if (!text || sending || !agent) {
+    if (!text || sendingRef.current || !agent) {
       return;
     }
+    if (requestId && herdrRepository.getPendingCommands().some((command) =>
+      command.agentId === agent.id && command.action === 'human_request.answer' &&
+      command.payload.requestId === requestId,
+    )) {
+      setSendError('An answer is already queued. Review its delivery status before answering again.');
+      return;
+    }
+    sendingRef.current = true;
+    const revision = draftRevision.current;
     setSending(true);
+    setSendError(null);
     try {
       if (conversation?.activeHumanRequest) {
         await herdrRepository.answerHumanRequest(
@@ -219,24 +269,17 @@ export default function AgentConversationScreen() {
       } else {
         await herdrRepository.sendMessage(agent.id, text);
       }
-      setDraft('');
+      if (draftRevision.current === revision) setDraft('');
       // The one scroll left in this screen, and the only one that is asked
       // for: sending is a statement that you want to watch the reply. On an
       // inverted list offset zero is the newest message, so unlike
       // `scrollToEnd` this cannot land halfway up a list still measuring
       // itself.
       listRef.current?.scrollToOffset({ offset: 0, animated: true });
-      setTimeout(() => {
-        void herdrRepository.loadConversation(agent.id).catch((error) => {
-          console.warn('[CONVERSATION] Could not refresh after send', error);
-        });
-      }, 500);
     } catch (error) {
-      Alert.alert(
-        'Could not send',
-        error instanceof Error ? error.message : 'The message was not delivered.',
-      );
+      setSendError(toUserMessage(error));
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   }
@@ -303,7 +346,8 @@ export default function AgentConversationScreen() {
           translucent fill and rim every chip and card in the app already uses.
         */}
         <View style={styles.flex}>
-          <AgentHeader agent={agent} />
+          <AgentHeader agent={agent} connected={ownerConnected} />
+          <ConnectionStatus deviceId={ownerDeviceId} agentId={agent.id} />
           <ScrollEdgeFrame
             inverted
             // The fade is what stops rows reading through the gaps between the
@@ -325,7 +369,7 @@ export default function AgentConversationScreen() {
                   <ConversationRow
                     item={item}
                     agent={agent}
-                    onEdit={(text) => setDraft(text)}
+                    onEdit={changeDraft}
                     streaming={index === 0 && showWorking}
                   />
                 )}
@@ -377,8 +421,12 @@ export default function AgentConversationScreen() {
                       <ThemedText type="small" themeColor="textMuted">
                         No conversation yet.
                       </ThemedText>
-                    ) : (
+                    ) : ownerConnected ? (
                       <ActivityIndicator color={Colors.accent} />
+                    ) : (
+                      <ThemedText type="small" themeColor="textMuted">
+                        Conversation will load when this device reconnects.
+                      </ThemedText>
                     )}
                   </View>
                 }
@@ -388,9 +436,12 @@ export default function AgentConversationScreen() {
         </View>
         <Composer
           value={draft}
-          onChangeText={setDraft}
+          onChangeText={changeDraft}
           onSend={() => void send()}
           sending={sending}
+          enqueueGuard={sendingRef}
+          answerPending={answerPending}
+          error={sendError}
           agentId={agent.id}
           request={conversation?.activeHumanRequest ?? null}
           onHeightChange={setComposerHeight}
@@ -419,7 +470,7 @@ export default function AgentConversationScreen() {
   );
 }
 
-function AgentHeader({ agent }: { agent: RemoteAgent }) {
+function AgentHeader({ agent, connected }: { agent: RemoteAgent; connected: boolean }) {
   const theme = useTheme();
   const statusColor =
     agent.status === 'working'
@@ -458,6 +509,9 @@ function AgentHeader({ agent }: { agent: RemoteAgent }) {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Stop current agent operation"
+              accessibilityHint={connected ? undefined : 'Reconnect before stopping this operation'}
+              accessibilityState={{ disabled: !connected }}
+              disabled={!connected}
               onPress={() => {
                 void herdrRepository.interrupt(agent.id).catch((error) => {
                   Alert.alert(
@@ -466,7 +520,7 @@ function AgentHeader({ agent }: { agent: RemoteAgent }) {
                   );
                 });
               }}
-              style={({ pressed }) => [styles.stop, { borderColor: theme.border }, pressed && styles.pressed]}>
+              style={({ pressed }) => [styles.stop, { borderColor: theme.border, opacity: connected ? 1 : 0.4 }, pressed && styles.pressed]}>
               <ThemedText type="caption" style={styles.stopText}>Stop</ThemedText>
             </Pressable>
           ) : null}
@@ -516,12 +570,13 @@ function ConversationRow({
   if (item.kind === 'user_message') {
     return (
       <Pressable
-        onLongPress={() =>
+        onLongPress={() => {
+          if (item.delivery && item.delivery !== 'sent') return;
           Alert.alert('Message', undefined, [
             { text: 'Cancel', style: 'cancel' },
             { text: 'Edit & resend', onPress: () => onEdit(item.text) },
-          ])
-        }
+          ]);
+        }}
         style={styles.userWrap}>
         <View
           style={[
@@ -534,6 +589,11 @@ function ConversationRow({
             {item.text}
           </ThemedText>
         </View>
+        <CommandDelivery
+          commandId={item.commandId}
+          delivery={item.delivery}
+          deliveryError={item.deliveryError}
+        />
       </Pressable>
     );
   }
@@ -853,6 +913,9 @@ function Composer({
   onChangeText,
   onSend,
   sending,
+  enqueueGuard,
+  answerPending,
+  error,
   agentId,
   request,
   onHeightChange,
@@ -866,6 +929,9 @@ function Composer({
   onChangeText: (text: string) => void;
   onSend: () => void;
   sending: boolean;
+  enqueueGuard: { current: boolean };
+  answerPending: boolean;
+  error: string | null;
   agentId: string;
   request: HumanRequest | null;
   onHeightChange: (height: number) => void;
@@ -887,7 +953,13 @@ function Composer({
         //
         // Keyed so a new question starts with a clean slate rather than
         // inheriting the last one's half-made selection.
-        <HumanRequestBar key={request.id} agentId={agentId} request={request} />
+        <HumanRequestBar
+          key={request.id}
+          agentId={agentId}
+          request={request}
+          enqueueing={sending}
+          enqueueGuard={enqueueGuard}
+        />
       ) : null}
       <View style={styles.cardWrapper}>
         <GlassSurface
@@ -922,10 +994,15 @@ function Composer({
               maxLength={20_000}
               value={value}
               onChangeText={onChangeText}
-              placeholder={request ? 'Write another answer…' : 'Build anything…'}
+              placeholder={answerPending ? 'Answer queued…' : request ? 'Write another answer…' : 'Build anything…'}
               placeholderTextColor={theme.placeholder}
               style={[styles.input, { color: theme.text }]}
             />
+            {error ? (
+              <ThemedText type="caption" themeColor="danger" accessibilityLiveRegion="polite">
+                {error}
+              </ThemedText>
+            ) : null}
 
             <View style={styles.cardBottom}>
               <View style={styles.pillsRow}>
@@ -950,20 +1027,20 @@ function Composer({
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Send"
-                disabled={!value.trim() || sending}
+                accessibilityState={{ disabled: !value.trim() || sending || answerPending }}
+                disabled={!value.trim() || sending || answerPending}
                 onPress={onSend}
                 style={({ pressed }) => [
                   styles.send,
                   {
-                    backgroundColor: value.trim() && !sending ? theme.accent : 'rgba(255, 255, 255, 0.08)',
+                    backgroundColor: value.trim() && !sending && !answerPending ? theme.accent : 'rgba(255, 255, 255, 0.08)',
                     opacity: pressed ? 0.75 : 1,
                   },
                 ]}>
-                <BorderBeam radius={18} active={!sending} />
                 <AppIcon
                   name={{ ios: 'arrow.up', android: 'arrow_upward', web: 'arrow_upward' }}
                   size={18}
-                  tintColor={value.trim() && !sending ? theme.onAccent : theme.textMuted}
+                  tintColor={value.trim() && !sending && !answerPending ? theme.onAccent : theme.textMuted}
                   fallback="↑"
                 />
               </Pressable>

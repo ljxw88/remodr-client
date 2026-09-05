@@ -8,13 +8,11 @@ import { DarkTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { Colors } from '@/constants/theme';
 
-import { autoConnectSavedHosts } from '@/features/connection/saved-host-connector';
-import { connectAgentRuntime } from '@/features/agents/connect-runtime';
-import { useHerdrAutoReconnect } from '@/features/agents/use-herdr-auto-reconnect';
+import { useConnectionLifecycle } from '@/features/connection/use-connection-lifecycle';
 import { AppBackground } from '@/components/ui/app-background';
 import { useStackScreenOptions } from '@/features/navigation/stack-screen-options';
 SplashScreen.preventAutoHideAsync();
@@ -37,7 +35,7 @@ const AbyssTheme = {
 };
 
 export default function RootLayout() {
-  useHerdrAutoReconnect();
+  useConnectionLifecycle();
   const stackOptions = useStackScreenOptions();
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
@@ -50,16 +48,6 @@ export default function RootLayout() {
       void SplashScreen.hideAsync();
     }
   }, [fontError, fontsLoaded]);
-
-  useEffect(() => {
-    if (Platform.OS === 'android') {
-      void autoConnectSavedHosts()
-        .then(() => connectAgentRuntime())
-        .catch((error) => {
-          console.warn('[SSH] Could not load saved hosts for auto-connect', error);
-        });
-    }
-  }, []);
 
   if (!fontsLoaded && !fontError) {
     return null;

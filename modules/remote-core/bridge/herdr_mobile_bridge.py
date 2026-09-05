@@ -7,6 +7,7 @@ stderr is reserved for diagnostics. The Herdr socket never leaves the server.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -14,6 +15,7 @@ import queue
 import re
 import socket
 import sqlite3
+import stat
 import sys
 import threading
 import time
@@ -72,6 +74,12 @@ REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 
 SUBSCRIPTION_RETRY_INITIAL = 0.25
 SUBSCRIPTION_RETRY_MAX = 2.0
+DURABLE_ACTIONS = frozenset(
+    ("agent.send_message", "human_request.answer", "agent.interrupt")
+)
+COMMAND_RESERVATION_SECONDS = 120
+COMMAND_MAX_ENTRIES = 10000
+COMMAND_MAX_RESPONSE_BYTES = 65536
 SUBSCRIPTIONS = (
     "workspace.created",
     "workspace.updated",
@@ -104,6 +112,299 @@ class BridgeError(Exception):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+class CommandLedger:
+    """Never reclaim command IDs: an abandoned reservation is not permission to retry."""
+
+    def __init__(self, scope: str) -> None:
+        self.scope = scope
+        self.owner = uuid.uuid4().hex
+        self.path = Path.home() / ".local/share/remote-workspace/commands.sqlite3"
+
+    @staticmethod
+    def _private(path: Path, directory: bool = False) -> None:
+        info = path.lstat()
+        expected = stat.S_ISDIR if directory else stat.S_ISREG
+        required_mode = 0o700 if directory else 0o600
+        reason = None
+        if stat.S_ISLNK(info.st_mode):
+            reason = "is a symbolic link; use a real, user-owned path"
+        elif not expected(info.st_mode):
+            reason = f"is not a {'directory' if directory else 'regular file'}"
+        elif info.st_uid != os.getuid():
+            reason = f"is owned by uid {info.st_uid}, expected uid {os.getuid()}"
+        elif stat.S_IMODE(info.st_mode) != required_mode:
+            reason = (
+                f"has mode {stat.S_IMODE(info.st_mode):04o}; "
+                f"requires {required_mode:04o}"
+            )
+        elif not directory and info.st_nlink != 1:
+            reason = f"has {info.st_nlink} hard links; requires a single private file"
+        if reason is not None:
+            raise BridgeError(
+                "COMMAND_STORE_UNAVAILABLE",
+                f"Command storage path '{path}' {reason}. "
+                "Repair this path without deleting existing command history.",
+            )
+
+    @staticmethod
+    def _prepare_directory(path: Path, private: bool) -> None:
+        path.mkdir(mode=0o700, exist_ok=True)
+        info = path.lstat()
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+            raise BridgeError(
+                "COMMAND_STORE_UNAVAILABLE",
+                f"Command storage path '{path}' is not a real directory "
+                "(symbolic links are refused). Repair the path before reconnecting.",
+            )
+        if info.st_uid != os.getuid():
+            raise BridgeError(
+                "COMMAND_STORE_UNAVAILABLE",
+                f"Command storage path '{path}' is owned by uid {info.st_uid}, "
+                f"expected uid {os.getuid()}. Repair ownership before reconnecting.",
+            )
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            opened = os.fstat(fd)
+            if (opened.st_dev, opened.st_ino, opened.st_uid) != (
+                info.st_dev, info.st_ino, os.getuid()
+            ):
+                raise BridgeError(
+                    "COMMAND_STORE_UNAVAILABLE",
+                    f"Command storage path '{path}' changed during validation; reconnect safely.",
+                )
+            # SFTP mkdirs inherits the server's umask (often 0002). Tighten only
+            # verified user-owned directories, never follow a link with chmod.
+            mode = stat.S_IMODE(opened.st_mode)
+            desired = 0o700 if private else mode & ~0o022
+            if mode != desired:
+                try:
+                    os.fchmod(fd, desired)
+                except OSError as error:
+                    raise BridgeError(
+                        "COMMAND_STORE_UNAVAILABLE",
+                        f"Cannot secure command storage directory '{path}' to "
+                        f"mode {desired:04o}: {error}. Repair permissions before reconnecting.",
+                    ) from error
+            current = path.lstat()
+            if (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino):
+                raise BridgeError(
+                    "COMMAND_STORE_UNAVAILABLE",
+                    f"Command storage path '{path}' changed while securing permissions.",
+                )
+            if current.st_uid != os.getuid() or stat.S_IMODE(current.st_mode) != desired:
+                raise BridgeError(
+                    "COMMAND_STORE_UNAVAILABLE",
+                    f"Command storage directory '{path}' could not be secured to "
+                    f"mode {desired:04o} for uid {os.getuid()}; repair it before reconnecting.",
+                )
+        finally:
+            os.close(fd)
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = None
+        lock_fd = None
+        try:
+            directory = self.path.parent
+            for parent in (directory.parent.parent, directory.parent, directory):
+                self._prepare_directory(parent, private=parent == directory)
+            self._private(directory, directory=True)
+            marker = directory / "commands.initialized"
+            initialize = False
+            try:
+                lock_fd = os.open(
+                    marker, os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_NOFOLLOW, 0o600
+                )
+                initialize = True
+                os.fsync(lock_fd)
+                directory_fd = os.open(directory, os.O_RDONLY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            except FileExistsError:
+                self._private(marker)
+                lock_fd = os.open(marker, os.O_RDWR | os.O_NOFOLLOW)
+            self._private(marker)
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise BridgeError("COMMAND_IN_PROGRESS", "Command storage is busy.")
+            # An existing empty or damaged database must not be silently initialized.
+            created = False
+            if initialize:
+                fd = os.open(
+                    self.path,
+                    os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW,
+                    0o600,
+                )
+                os.close(fd)
+                created = True
+            self._private(self.path)
+            for suffix in ("-journal", "-wal", "-shm"):
+                sidecar = Path(str(self.path) + suffix)
+                if sidecar.exists() or sidecar.is_symlink():
+                    self._private(sidecar)
+            connection = sqlite3.connect(
+                self.path.as_uri() + "?mode=rw", uri=True, timeout=0.2,
+                isolation_level=None,
+            )
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA synchronous=FULL")
+            connection.execute("PRAGMA fullfsync=ON")
+            connection.execute("PRAGMA max_page_count=16384")
+            connection.execute("BEGIN IMMEDIATE")
+            if created:
+                connection.execute(
+                    """CREATE TABLE commands (
+                    scope TEXT NOT NULL, command_id TEXT NOT NULL,
+                    fingerprint TEXT NOT NULL, state TEXT NOT NULL
+                    CHECK(state IN ('reserved','succeeded','failed','uncertain')),
+                    owner TEXT NOT NULL, pid INTEGER NOT NULL,
+                    created REAL NOT NULL, response TEXT,
+                    PRIMARY KEY(scope, command_id))"""
+                )
+                connection.execute("PRAGMA user_version=1")
+            elif connection.execute("PRAGMA user_version").fetchone()[0] != 1:
+                raise BridgeError(
+                    "COMMAND_STORE_UNAVAILABLE", "Command storage is not initialized."
+                )
+            if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+                raise BridgeError(
+                    "COMMAND_STORE_UNAVAILABLE", "Command storage is damaged."
+                )
+            connection.execute("COMMIT")
+            return connection
+        except (OSError, sqlite3.Error) as error:
+            if connection is not None:
+                connection.close()
+            raise self._store_error(error, self.path) from error
+        except BaseException:
+            if connection is not None:
+                connection.close()
+            raise
+        finally:
+            if lock_fd is not None:
+                os.close(lock_fd)
+
+    @staticmethod
+    def _store_error(error: Exception, path: Path | None = None) -> BridgeError:
+        if getattr(error, "sqlite_errorcode", None) == sqlite3.SQLITE_FULL:
+            return BridgeError("COMMAND_STORE_FULL", "Command storage has reached capacity.")
+        if isinstance(error, sqlite3.OperationalError) and (
+            "locked" in str(error).lower() or "busy" in str(error).lower()
+        ):
+            return BridgeError("COMMAND_IN_PROGRESS", "Command storage is busy.")
+        location = getattr(error, "filename", None) or path
+        detail = f" at '{location}'" if location is not None else ""
+        return BridgeError(
+            "COMMAND_STORE_UNAVAILABLE",
+            f"Command storage{detail} is unavailable: {error}. "
+            "Check ownership, permissions, and free space; preserve existing command history.",
+        )
+
+    @staticmethod
+    def _owner_alive(pid: int) -> bool:
+        if pid <= 0:
+            return False
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+
+    def _read(self, connection: sqlite3.Connection, command_id: str) -> dict[str, Any] | None:
+        row = connection.execute(
+            "SELECT * FROM commands WHERE scope=? AND command_id=?",
+            (self.scope, command_id),
+        ).fetchone()
+        if row is None:
+            return None
+        record = dict(row)
+        if record["state"] == "reserved" and (
+            not 0 <= time.time() - record["created"] < COMMAND_RESERVATION_SECONDS
+            or not self._owner_alive(record["pid"])
+        ):
+            connection.execute(
+                "UPDATE commands SET state='uncertain' WHERE scope=? AND command_id=?",
+                (self.scope, command_id),
+            )
+            record["state"] = "uncertain"
+        return record
+
+    def reserve(self, command_id: str, fingerprint: str) -> dict[str, Any] | None:
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            record = self._read(connection, command_id)
+            if record is not None:
+                if record["fingerprint"] != fingerprint:
+                    raise BridgeError(
+                        "COMMAND_ID_CONFLICT", "Command ID was used for different content."
+                    )
+            else:
+                count = connection.execute("SELECT count(*) FROM commands").fetchone()[0]
+                if count >= COMMAND_MAX_ENTRIES:
+                    raise BridgeError(
+                        "COMMAND_STORE_FULL", "Command storage is full; no IDs were evicted."
+                    )
+                connection.execute(
+                    "INSERT INTO commands VALUES (?, ?, ?, 'reserved', ?, ?, ?, NULL)",
+                    (self.scope, command_id, fingerprint, self.owner, os.getpid(), time.time()),
+                )
+            connection.execute("COMMIT")
+            return record
+        except (OSError, sqlite3.Error) as error:
+            raise self._store_error(error) from error
+        finally:
+            connection.close()
+
+    def status(self, command_id: str) -> dict[str, Any] | None:
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            record = self._read(connection, command_id)
+            connection.execute("COMMIT")
+            return record
+        except (OSError, sqlite3.Error) as error:
+            raise self._store_error(error) from error
+        finally:
+            connection.close()
+
+    def check_available(self) -> None:
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            # A read-only probe cannot establish that journal creation/commit works.
+            connection.execute("PRAGMA user_version=1")
+            connection.execute("COMMIT")
+        except (OSError, sqlite3.Error) as error:
+            raise self._store_error(error) from error
+        finally:
+            connection.close()
+
+    def finish(self, command_id: str, state: str, response: dict[str, Any]) -> None:
+        connection = self._connect()
+        try:
+            encoded = json.dumps(response, ensure_ascii=True, allow_nan=False)
+            if len(encoded.encode("utf-8")) > COMMAND_MAX_RESPONSE_BYTES:
+                raise BridgeError("COMMAND_UNCERTAIN", "Command result is too large to store.")
+            connection.execute("BEGIN IMMEDIATE")
+            result = connection.execute(
+                """UPDATE commands SET state=?, response=?
+                WHERE scope=? AND command_id=? AND owner=? AND state='reserved'""",
+                (state, encoded, self.scope, command_id, self.owner),
+            )
+            if result.rowcount != 1:
+                raise BridgeError("COMMAND_UNCERTAIN", "Command reservation is no longer owned.")
+            connection.execute("COMMIT")
+        except (OSError, sqlite3.Error) as error:
+            raise self._store_error(error) from error
+        finally:
+            connection.close()
 
 
 class Bridge:
@@ -146,8 +447,28 @@ class Bridge:
         self.conversation_cache: dict[
             str, tuple[tuple[int, int, int, int], dict[str, Any]]
         ] = {}
+        self.command_context = threading.local()
+        self.command_store_error: BridgeError | None = None
 
     def run(self) -> None:
+        capabilities = self._capabilities()
+        if self.command_store_error is not None:
+            error = self.command_store_error
+            self.write(
+                {
+                    "protocol": PROTOCOL,
+                    "type": "hello",
+                    "bridgeVersion": BRIDGE_VERSION,
+                    "herdrVersion": "unknown",
+                    "herdrProtocol": None,
+                    "runtimeReady": False,
+                    "capabilities": capabilities,
+                    "fatal": True,
+                    "error": {"code": error.code, "message": str(error)},
+                }
+            )
+            self.running = False
+            return
         subscription = threading.Thread(
             target=self._subscription_loop,
             name="herdr-events",
@@ -160,6 +481,7 @@ class Bridge:
 
         try:
             self._refresh_runtime()
+            capabilities = self._capabilities(check_store=False)
             herdr_version = self.runtime.get("herdrVersion", "unknown")
             self.write(
                 {
@@ -168,7 +490,8 @@ class Bridge:
                     "bridgeVersion": BRIDGE_VERSION,
                     "herdrVersion": herdr_version,
                     "herdrProtocol": self.runtime.get("herdrProtocol"),
-                    "capabilities": self._capabilities(),
+                    "runtimeReady": True,
+                    "capabilities": capabilities,
                 }
             )
             self.write_event("runtime.snapshot", self.runtime)
@@ -180,8 +503,10 @@ class Bridge:
                     "bridgeVersion": BRIDGE_VERSION,
                     "herdrVersion": "unknown",
                     "herdrProtocol": None,
-                    "capabilities": self._capabilities(),
+                    "runtimeReady": False,
+                    "capabilities": capabilities,
                     "warning": str(error),
+                    "error": {"code": "HERDR_UNAVAILABLE", "message": "Herdr is unavailable."},
                 }
             )
             self.write_event(
@@ -215,6 +540,10 @@ class Bridge:
             payload = message.get("payload") or {}
             if not isinstance(action, str) or not isinstance(payload, dict):
                 raise BridgeError("INVALID_REQUEST", "Invalid action or payload.")
+            if "commandId" in message:
+                response = self._durable_command(message["commandId"], action, payload)
+                self.write({**response, "id": request_id})
+                return
             result = self._dispatch(action, payload)
             self.write(
                 {
@@ -234,6 +563,20 @@ class Bridge:
             self._write_error(request_id, "BRIDGE_ERROR", "The bridge request failed.")
 
     def _dispatch(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if action == "bridge.ping":
+            return {"alive": True}
+        if action == "command.status":
+            command_id = self._command_id(payload.get("commandId"))
+            record = self._command_ledger().status(command_id)
+            result: dict[str, Any] = {
+                "commandId": command_id,
+                "state": "unknown" if record is None else (
+                    "in_progress" if record["state"] == "reserved" else record["state"]
+                ),
+            }
+            if record and record["response"]:
+                result["response"] = self._stored_response(record)
+            return result
         if action == "runtime.snapshot":
             self._refresh_runtime()
             return self.runtime
@@ -245,7 +588,7 @@ class Bridge:
             text = payload.get("text")
             if not isinstance(text, str) or not text.strip():
                 raise BridgeError("INVALID_MESSAGE", "Message cannot be empty.")
-            self._herdr_request(
+            self._herdr_mutation(
                 "agent.prompt",
                 {"target": agent["paneId"], "text": text},
             )
@@ -266,12 +609,147 @@ class Bridge:
             return self._answer_human_request(payload)
         if action == "agent.interrupt":
             agent = self._require_agent(payload)
-            self._herdr_request(
+            self._herdr_mutation(
                 "agent.send_keys",
                 {"target": agent["paneId"], "keys": ["ctrl-c"]},
             )
             return {"accepted": True}
         raise BridgeError("UNKNOWN_ACTION", f"Unsupported action: {action}")
+
+    @staticmethod
+    def _command_id(value: Any) -> str:
+        try:
+            if not isinstance(value, str) or str(uuid.UUID(value)) != value.lower():
+                raise ValueError
+            return value.lower()
+        except (ValueError, AttributeError):
+            raise BridgeError("INVALID_COMMAND_ID", "Command ID must be a canonical UUID.")
+
+    def _command_ledger(self) -> CommandLedger:
+        scope = json.dumps(
+            [os.getuid(), self.device_id, self.session_name, os.path.abspath(self.herdr_socket)],
+            separators=(",", ":"),
+        )
+        return CommandLedger(hashlib.sha256(scope.encode()).hexdigest())
+
+    @staticmethod
+    def _command_error(code: str, message: str) -> dict[str, Any]:
+        return {
+            "protocol": PROTOCOL, "type": "response", "ok": False,
+            "error": {"code": code, "message": message},
+        }
+
+    @staticmethod
+    def _stored_response(record: dict[str, Any]) -> dict[str, Any]:
+        try:
+            response = json.loads(record["response"])
+            if (
+                not isinstance(response, dict)
+                or response.get("protocol") != PROTOCOL
+                or response.get("type") != "response"
+                or not isinstance(response.get("ok"), bool)
+                or (response["ok"] and not isinstance(response.get("payload"), dict))
+                or (not response["ok"] and not isinstance(response.get("error"), dict))
+            ):
+                raise ValueError
+            return response
+        except (ValueError, TypeError):
+            raise BridgeError("COMMAND_STORE_UNAVAILABLE", "Stored command result is invalid.")
+
+    def _durable_command(
+        self, value: Any, action: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        command_id = self._command_id(value)
+        if action not in DURABLE_ACTIONS:
+            raise BridgeError(
+                "COMMAND_ACTION_UNSUPPORTED", "This action does not support durable commands."
+            )
+        try:
+            encoded = json.dumps(
+                [action, payload], sort_keys=True, separators=(",", ":"),
+                ensure_ascii=True, allow_nan=False,
+            )
+        except (ValueError, TypeError):
+            raise BridgeError("INVALID_REQUEST", "Command must contain valid JSON values.")
+        ledger = self._command_ledger()
+        record = ledger.reserve(command_id, hashlib.sha256(encoded.encode()).hexdigest())
+        if record is not None:
+            if record["state"] == "reserved":
+                raise BridgeError("COMMAND_IN_PROGRESS", "Command is still in progress.")
+            if record["state"] == "uncertain":
+                if record["response"]:
+                    return self._stored_response(record)
+                raise BridgeError(
+                    "COMMAND_UNCERTAIN", "Command may have been delivered; do not resend."
+                )
+            return self._stored_response(record)
+        self.command_context.active = True
+        self.command_context.side_effect = False
+        self.command_context.agent = None
+        try:
+            self._prepare_command(action, payload)
+            result = self._dispatch(action, payload)
+            response = {
+                "protocol": PROTOCOL, "type": "response", "ok": True, "payload": result,
+            }
+            state = "succeeded"
+        except Exception as error:
+            if self.command_context.side_effect:
+                state = "uncertain"
+                response = self._command_error(
+                    "COMMAND_UNCERTAIN", "Command may have been delivered; do not resend."
+                )
+            else:
+                state = "failed"
+                response = self._command_error(
+                    error.code if isinstance(error, BridgeError) else "BRIDGE_ERROR",
+                    str(error) if isinstance(error, BridgeError) else "Command validation failed.",
+                )
+        finally:
+            self.command_context.active = False
+            self.command_context.agent = None
+        try:
+            ledger.finish(command_id, state, response)
+        except Exception:
+            # Even a successful Herdr reply is not an ACK until it has been committed.
+            raise BridgeError(
+                "COMMAND_UNCERTAIN", "Command result could not be persisted; do not resend."
+            )
+        return response
+
+    def _prepare_command(self, action: str, payload: dict[str, Any]) -> None:
+        if "expectedProviderSessionId" in payload or "expectedPaneId" in payload:
+            expected = {
+                "providerSessionId": payload.get("expectedProviderSessionId"),
+                "paneId": payload.get("expectedPaneId"),
+            }
+            if "expectedProvider" in payload:
+                expected["provider"] = payload["expectedProvider"]
+        else:
+            expected = payload.get("precondition")
+        fields = ("providerSessionId", "paneId")
+        if not isinstance(expected, dict) or any(
+            not isinstance(expected.get(field), str) or not expected[field] for field in fields
+        ):
+            raise BridgeError(
+                "COMMAND_PRECONDITION_FAILED", "Provider session and pane identity are required."
+            )
+        self._refresh_runtime()
+        agent = self._require_agent(payload)
+        checked_fields = (*fields, "provider") if "provider" in expected else fields
+        if any(expected[field] != agent.get(field) for field in checked_fields):
+            raise BridgeError(
+                "COMMAND_PRECONDITION_FAILED", "The target provider session or pane has changed."
+            )
+        self.command_context.agent = agent
+        if action == "human_request.answer":
+            conversation = self._load_conversation(agent)
+            request = conversation.get("activeHumanRequest")
+            if not isinstance(request, dict) or request.get("id") != payload.get("requestId"):
+                raise BridgeError(
+                    "COMMAND_PRECONDITION_FAILED", "The question is no longer active."
+                )
+            self.pending_human_requests[request["id"]] = request
 
     def _answer_human_request(self, payload: dict[str, Any]) -> dict[str, Any]:
         request_id = payload.get("requestId")
@@ -307,7 +785,7 @@ class Bridge:
             self._answer_blocked_dialog(agent, request, selected_ids, text)
         else:
             try:
-                self._herdr_request(
+                self._herdr_mutation(
                     "agent.prompt",
                     {"target": agent["paneId"], "text": text},
                 )
@@ -324,9 +802,18 @@ class Bridge:
 
     def _send_keys(self, agent: dict[str, Any], keys: list[str]) -> None:
         if keys:
-            self._herdr_request(
+            self._herdr_mutation(
                 "agent.send_keys", {"target": agent["paneId"], "keys": keys}
             )
+
+    def _herdr_mutation(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        if getattr(self.command_context, "active", False):
+            agent = self.command_context.agent
+            if agent is None or params.get("target") != agent.get("paneId"):
+                raise BridgeError("COMMAND_PRECONDITION_FAILED", "Command target is not bound.")
+            self._require_agent({"agentId": agent["id"]})
+            self.command_context.side_effect = True
+        return self._herdr_request(method, params)
 
     def _answer_blocked_dialog(
         self,
@@ -387,6 +874,14 @@ class Bridge:
             agent = self.raw_agents.get(agent_id)
         if agent is None:
             raise BridgeError("AGENT_NOT_FOUND", "Agent is no longer available.")
+        bound = getattr(self.command_context, "agent", None)
+        if bound is not None:
+            fields = ("id", "provider", "providerSessionId", "paneId")
+            if any(bound.get(field) != agent.get(field) for field in fields):
+                raise BridgeError(
+                    "COMMAND_PRECONDITION_FAILED", "The command target has changed."
+                )
+            return bound
         return agent
 
     def _refresh_runtime(self) -> None:
@@ -1990,7 +2485,13 @@ class Bridge:
             raise BridgeError("INVALID_HERDR_RESPONSE", "Herdr result is invalid.")
         return result
 
-    def _capabilities(self) -> dict[str, Any]:
+    def _capabilities(self, *, check_store: bool = True) -> dict[str, Any]:
+        if check_store:
+            try:
+                self._command_ledger().check_available()
+                self.command_store_error = None
+            except BridgeError as error:
+                self.command_store_error = error
         availability = {
             item.get("provider"): item.get("available") is True
             for item in self.agent_catalog or []
@@ -2007,6 +2508,9 @@ class Bridge:
                 "fallback": True,
             }
         return {
+            "durableCommands": self.command_store_error is None,
+            "durableCommandsRequireSessionIdentity": True,
+            "durableInterruptReplay": False,
             "providers": list(SUPPORTED_PROVIDERS),
             "providerCapabilities": provider_capabilities,
             "humanRequests": True,

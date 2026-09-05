@@ -3,20 +3,18 @@ package com.remoteworkspace.remotecore
 import net.schmizz.sshj.SSHClient
 import net.schmizz.sshj.connection.channel.direct.Parameters
 import net.schmizz.sshj.sftp.FileMode
-import net.schmizz.sshj.sftp.OpenMode
 import net.schmizz.sshj.sftp.SFTPClient
 import net.schmizz.sshj.userauth.keyprovider.OpenSSHKeyFile
 import net.schmizz.sshj.userauth.password.PasswordUtils
 import net.schmizz.sshj.xfer.FileSystemFile
 import java.io.StringReader
-import java.security.MessageDigest
 import java.net.InetAddress
 import java.net.ServerSocket
-import java.util.EnumSet
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class SessionRecord(
   val sessionId: String,
@@ -24,10 +22,14 @@ data class SessionRecord(
   val client: SSHClient,
   val jumpChain: JumpChain?,
   var fingerprint: String?,
-  var status: String = "connected",
+  @Volatile var status: String = "connected",
 ) {
+  fun isLive(): Boolean = status == "connected" &&
+    client.isConnected && client.isAuthenticated && (jumpChain?.isLive() != false)
+
   fun close() {
-    runCatching { client.close() }
+    status = "disconnected"
+    closeSshClient(client)
     jumpChain?.close()
   }
 }
@@ -37,7 +39,7 @@ data class OpenedSsh(
   val jumpChain: JumpChain? = null,
 ) {
   fun close() {
-    runCatching { client.close() }
+    closeSshClient(client)
     jumpChain?.close()
   }
 }
@@ -46,9 +48,27 @@ class JumpChain(
   private val clients: List<AutoCloseable>,
   private val forwards: List<AutoCloseable>,
 ) : AutoCloseable {
+  fun isLive(): Boolean = clients.all {
+    it !is SSHClient || (it.isConnected && it.isAuthenticated)
+  }
+
   override fun close() {
     forwards.asReversed().forEach { forward -> runCatching { forward.close() } }
-    clients.asReversed().forEach { client -> runCatching { client.close() } }
+    clients.asReversed().forEach { client ->
+      if (client is SSHClient) closeSshClient(client) else runCatching { client.close() }
+    }
+  }
+}
+
+private data class DetachedSession(
+  val record: SessionRecord?,
+  val bridge: HerdrBridgeSession?,
+  val forwards: List<LocalForward>,
+) {
+  fun close() {
+    bridge?.close()
+    forwards.forEach { it.close() }
+    record?.close()
   }
 }
 
@@ -56,11 +76,17 @@ class SessionManager(
   private val knownHosts: KnownHostsStore,
   private val secrets: SecretStore,
 ) {
+  private val lifecycle = Any()
   private val sessions = ConcurrentHashMap<String, SessionRecord>()
-  private val sessionsByHost = ConcurrentHashMap<String, String>()
+  private val hostAttempts = AttemptRegistry<String, SessionRecord>(lifecycle)
+  private val bridgeAttempts = AttemptRegistry<String, HerdrBridgeSession>(lifecycle)
   private val forwards = ConcurrentHashMap<String, LocalForward>()
   private val bridges = ConcurrentHashMap<String, HerdrBridgeSession>()
-  private val io = Executors.newCachedThreadPool()
+  private val io = Executors.newCachedThreadPool { task ->
+    Thread(task, "remote-core-io").apply { isDaemon = true }
+  }
+  private val openingClients = ConcurrentHashMap.newKeySet<SSHClient>()
+  private val destroyed = AtomicBoolean(false)
 
   fun connect(
     hostId: String,
@@ -75,8 +101,13 @@ class SessionManager(
     acceptedFingerprint: String?,
     jumpHops: List<Map<String, Any?>>,
   ): Map<String, Any?> {
+    val (attempt, detached) = synchronized(lifecycle) {
+      if (destroyed.get()) throw SessionNotFoundException()
+      val attempt = hostAttempts.begin(hostId)
+      attempt to attempt.previous?.let { detachSessionLocked(it.sessionId) }
+    }
+    detached?.close()
     CryptoProvider.ensureInstalled()
-    disconnectHost(hostId)
     val sessionId = UUID.randomUUID().toString()
     var opened: OpenedSsh? = null
     return try {
@@ -110,7 +141,6 @@ class SessionManager(
       }
       opened = connection
       val client = connection.client
-      client.connection.keepAlive.keepAliveInterval = 30
       val fingerprint = knownHosts.fingerprintFor(hostname, port)
       val record = SessionRecord(
         sessionId,
@@ -120,11 +150,12 @@ class SessionManager(
         fingerprint,
         "connected",
       )
-      sessions[sessionId] = record
-      sessionsByHost.put(hostId, sessionId)?.let { replacedSessionId ->
-        if (replacedSessionId != sessionId) {
-          disconnect(replacedSessionId)
+      synchronized(lifecycle) {
+        if (destroyed.get() || !hostAttempts.publish(attempt, record)) {
+          throw SessionNotFoundException()
         }
+        sessions[sessionId] = record
+        opened = null
       }
       snapshot(record)
     } catch (error: Exception) {
@@ -134,36 +165,58 @@ class SessionManager(
   }
 
   fun disconnect(sessionId: String) {
-    bridges.values
-      .filter { it.sshSessionId == sessionId }
-      .forEach { stopHerdrBridge(it.id) }
-    forwards.keys.filter { it.startsWith(sessionId) }.forEach { closeForward(it) }
-    sessions.remove(sessionId)?.let { record ->
-      sessionsByHost.remove(record.hostId, sessionId)
-      record.close()
-    }
+    synchronized(lifecycle) { detachSessionLocked(sessionId) }.close()
   }
 
   fun disconnectHost(hostId: String) {
-    sessionsByHost[hostId]?.let { disconnect(it) }
+    val detached = synchronized(lifecycle) {
+      hostAttempts.invalidate(hostId)?.let { detachSessionLocked(it.sessionId) }
+    }
+    detached?.close()
   }
 
   fun getByHost(hostId: String): Map<String, Any?>? {
-    val id = sessionsByHost[hostId] ?: return null
-    return sessions[id]?.let { snapshot(it) }
+    val record = hostAttempts.current(hostId) ?: return null
+    if (!record.isLive()) {
+      // Synchronous JS snapshots must not block while SSH channels drain.
+      record.status = "disconnected"
+      if (!destroyed.get()) runCatching { io.execute { disconnect(record.sessionId) } }
+      return null
+    }
+    return snapshot(record)
   }
 
-  fun list(): List<Map<String, Any?>> = sessions.values.map { snapshot(it) }
+  fun list(): List<Map<String, Any?>> = sessions.values.mapNotNull { getByHost(it.hostId) }
 
   fun startHerdrBridge(
     sessionId: String,
     bridgeBytes: ByteArray,
     onMessage: (String, String) -> Unit,
+  ): Map<String, String> = try {
+    startHerdrBridgeSession(sessionId, bridgeBytes, onMessage)
+  } catch (error: Exception) {
+    throw mapSshOperationError(error) {
+      if (error is IllegalStateException && sessions[sessionId]?.isLive() != true) {
+        SessionNotFoundException()
+      } else {
+        HerdrBridgeException("Could not start or deploy Herdr bridge", error)
+      }
+    }
+  }
+
+  private fun startHerdrBridgeSession(
+    sessionId: String,
+    bridgeBytes: ByteArray,
+    onMessage: (String, String) -> Unit,
   ): Map<String, String> {
     val record = requireSession(sessionId)
-    bridges.values
-      .filter { it.sshSessionId == sessionId }
-      .forEach { stopHerdrBridge(it.id) }
+    val attempt = synchronized(lifecycle) {
+      if (destroyed.get() || sessions[sessionId] !== record) throw SessionNotFoundException()
+      bridgeAttempts.begin(sessionId).also { attempt ->
+        attempt.previous?.let { bridges.remove(it.id, it) }
+      }
+    }
+    attempt.previous?.close()
     val remotePath = deployHerdrBridge(record, bridgeBytes)
     val session = record.client.startSession()
     val command = try {
@@ -174,7 +227,7 @@ class SessionManager(
       )
     } catch (error: Exception) {
       runCatching { session.close() }
-      throw HerdrBridgeException("Could not launch Herdr bridge", error)
+      throw error
     }
     val bridgeId = UUID.randomUUID().toString()
     val bridge = HerdrBridgeSession(
@@ -184,23 +237,64 @@ class SessionManager(
       command,
       io,
       onMessage,
+      { closed ->
+        synchronized(lifecycle) {
+          if (bridges.remove(closed.id, closed)) bridgeAttempts.remove(sessionId, closed)
+        }
+      },
     )
-    bridges[bridgeId] = bridge
     return try {
-      mapOf("bridgeId" to bridgeId, "hello" to bridge.start())
+      synchronized(lifecycle) {
+        if (destroyed.get() || sessions[sessionId] !== record || !bridgeAttempts.publish(attempt, bridge)) {
+          throw BridgeClosedException("Herdr bridge was superseded")
+        }
+        bridges[bridgeId] = bridge
+      }
+      val hello = bridge.start()
+      synchronized(lifecycle) {
+        if (destroyed.get() || sessions[sessionId] !== record || !bridgeAttempts.isCurrent(attempt, bridge)) {
+          throw BridgeClosedException("Herdr bridge was superseded")
+        }
+      }
+      mapOf("bridgeId" to bridgeId, "hello" to hello)
     } catch (error: Exception) {
-      bridges.remove(bridgeId)
+      bridge.close()
       throw error
     }
   }
 
   fun requestHerdrBridge(bridgeId: String, requestJson: String): String {
-    val bridge = bridges[bridgeId] ?: throw HerdrBridgeException("Herdr bridge is not running")
+    val bridge = bridges[bridgeId] ?: throw BridgeClosedException("Herdr bridge is not running")
     return bridge.request(requestJson)
   }
 
   fun stopHerdrBridge(bridgeId: String) {
-    bridges.remove(bridgeId)?.close()
+    val bridge = synchronized(lifecycle) {
+      bridges.remove(bridgeId)?.also { bridgeAttempts.remove(it.sshSessionId, it) }
+    }
+    bridge?.close()
+  }
+
+  fun close() {
+    val detached = synchronized(lifecycle) {
+      if (!destroyed.compareAndSet(false, true)) return
+      sessions.keys.toList().map(::detachSessionLocked)
+    }
+    detached.forEach { it.close() }
+    forwards.keys.toList().forEach(::closeForward)
+    openingClients.forEach(::closeSshClient)
+    io.shutdown()
+    if (!io.awaitTermination(5, TimeUnit.SECONDS)) io.shutdownNow()
+  }
+
+  private fun detachSessionLocked(sessionId: String): DetachedSession {
+    val record = sessions.remove(sessionId)
+    if (record != null) hostAttempts.remove(record.hostId, record)
+    val bridge = bridgeAttempts.invalidate(sessionId)
+    if (bridge != null) bridges.remove(bridge.id, bridge)
+    val detachedForwards = forwards.values.filter { it.sessionId == sessionId }
+    detachedForwards.forEach { forwards.remove(it.id, it) }
+    return DetachedSession(record, bridge, detachedForwards)
   }
 
   fun exec(sessionId: String, command: String): Map<String, Any?> {
@@ -291,7 +385,17 @@ class SessionManager(
       destHost,
       destPort,
     )
-    forwards[tunnelId] = forward
+    val published = synchronized(lifecycle) {
+      if (destroyed.get() || sessions[sessionId] !== record) false
+      else {
+        forwards[tunnelId] = forward
+        true
+      }
+    }
+    if (!published) {
+      forward.close()
+      throw SessionNotFoundException()
+    }
     return mapOf(
       "id" to tunnelId,
       "bindHost" to bindHost,
@@ -302,7 +406,8 @@ class SessionManager(
   }
 
   fun closeForward(tunnelId: String) {
-    forwards.remove(tunnelId)?.close()
+    val forward = synchronized(lifecycle) { forwards.remove(tunnelId) }
+    forward?.close()
   }
 
   fun listForwards(sessionId: String): List<Map<String, Any?>> {
@@ -323,60 +428,20 @@ class SessionManager(
   }
 
   private fun deployHerdrBridge(record: SessionRecord, bridgeBytes: ByteArray): String {
-    val hash = MessageDigest.getInstance("SHA-256")
-      .digest(bridgeBytes)
-      .joinToString("") { "%02x".format(it) }
     record.client.newSFTPClient().use { sftp ->
       val home = sftp.canonicalize(".")
       val directory = "$home/.local/share/remote-workspace"
-      val bridgePath = "$directory/herdr_mobile_bridge.py"
-      val hashPath = "$directory/herdr_mobile_bridge.sha256"
-      val installedHash = readRemoteText(sftp, hashPath)
-      if (installedHash?.trim() != hash) {
-        runCatching { sftp.mkdirs(directory) }
-        writeRemoteBytes(sftp, bridgePath, bridgeBytes)
-        writeRemoteBytes(sftp, hashPath, hash.toByteArray(Charsets.UTF_8))
-        sftp.chmod(bridgePath, 448)
-      }
-      return bridgePath
-    }
-  }
-
-  private fun readRemoteText(sftp: SFTPClient, path: String): String? {
-    val attributes = sftp.statExistence(path) ?: return null
-    if (attributes.size > 4096) {
-      return null
-    }
-    sftp.open(path, EnumSet.of(OpenMode.READ)).use { file ->
-      val bytes = ByteArray(attributes.size.toInt())
-      var offset = 0
-      while (offset < bytes.size) {
-        val read = file.read(offset.toLong(), bytes, offset, bytes.size - offset)
-        if (read <= 0) {
-          break
-        }
-        offset += read
-      }
-      return bytes.copyOf(offset).toString(Charsets.UTF_8)
-    }
-  }
-
-  private fun writeRemoteBytes(sftp: SFTPClient, path: String, bytes: ByteArray) {
-    sftp.open(
-      path,
-      EnumSet.of(OpenMode.WRITE, OpenMode.CREAT, OpenMode.TRUNC),
-    ).use { file ->
-      var offset = 0
-      while (offset < bytes.size) {
-        val length = minOf(32768, bytes.size - offset)
-        file.write(offset.toLong(), bytes, offset, length)
-        offset += length
-      }
+      return deployBridge(directory, bridgeBytes, SftpBridgeDeploymentStore(sftp))
     }
   }
 
   private fun requireSession(sessionId: String): SessionRecord {
-    return sessions[sessionId] ?: throw SessionNotFoundException()
+    val record = sessions[sessionId] ?: throw SessionNotFoundException()
+    if (destroyed.get() || !record.isLive()) {
+      disconnect(sessionId)
+      throw SessionNotFoundException()
+    }
+    return record
   }
 
   private fun snapshot(record: SessionRecord): Map<String, Any?> {
@@ -426,6 +491,8 @@ class SessionManager(
             hopCred,
             hopCredentialType,
             hopAccepted,
+            verifiedHostname = hopHost,
+            verifiedPort = hopPort,
           )
         } else {
           openClient(
@@ -438,6 +505,8 @@ class SessionManager(
             hopCred,
             hopCredentialType,
             hopAccepted,
+            verifiedHostname = hopHost,
+            verifiedPort = hopPort,
           )
         }
         clients += client
@@ -462,12 +531,14 @@ class SessionManager(
           credentialId,
           credentialType,
           acceptedFingerprint,
+          verifiedHostname = hostname,
+          verifiedPort = port,
         ),
         jumpChain = JumpChain(clients.toList(), chainForwards.toList()),
       )
     } catch (error: Exception) {
       chainForwards.asReversed().forEach(LocalForward::close)
-      clients.asReversed().forEach { client -> runCatching { client.close() } }
+      clients.asReversed().forEach(::closeSshClient)
       throw error
     }
   }
@@ -482,12 +553,15 @@ class SessionManager(
     credentialId: String?,
     credentialType: String?,
     acceptedFingerprint: String?,
+    verifiedHostname: String = hostname,
+    verifiedPort: Int = port,
   ): SSHClient {
-    val client = SSHClient()
-    val verifier = AppHostKeyVerifier(knownHosts, hostname, port, acceptedFingerprint)
+    if (destroyed.get()) throw SessionNotFoundException()
+    val client = resilientSshClient()
+    openingClients.add(client)
+    val verifier = AppHostKeyVerifier(knownHosts, verifiedHostname, verifiedPort, acceptedFingerprint)
     client.addHostKeyVerifier(verifier)
     try {
-      client.connectTimeout = 15000
       client.connect(hostname, port)
       val storedSecret = credentialId?.let(secrets::get)
       val secretPassword = password ?: storedSecret.takeIf { credentialType != "privateKey" }
@@ -506,10 +580,13 @@ class SessionManager(
         secretPassword != null -> client.authPassword(username, secretPassword)
         else -> throw AuthenticationException()
       }
+      if (destroyed.get()) throw SessionNotFoundException()
       return client
     } catch (error: Exception) {
-      runCatching { client.close() }
+      closeSshClient(client)
       throw error
+    } finally {
+      openingClients.remove(client)
     }
   }
 
@@ -552,29 +629,8 @@ class SessionManager(
   }
 
   private fun mapConnectError(error: Exception): Exception {
-    findCause<HostKeyUnknownException>(error)?.let { return it }
-    findCause<HostKeyMismatchException>(error)?.let { return it }
-    findCause<CryptoProviderException>(error)?.let { return it }
-    findCause<AuthenticationException>(error)?.let { return it }
-    findCause<java.net.SocketTimeoutException>(error)?.let { return TimeoutException() }
-    findCause<net.schmizz.sshj.userauth.UserAuthException>(error)?.let {
-      return AuthenticationException()
-    }
-    findCause<java.net.UnknownHostException>(error)?.let { return NetworkException() }
-    findCause<java.net.ConnectException>(error)?.let { return NetworkException() }
-    return SshConnectionException()
+    return mapSshOperationError(error) { SshConnectionException() }
   }
-}
-
-private inline fun <reified T : Throwable> findCause(error: Throwable): T? {
-  var current: Throwable? = error
-  while (current != null) {
-    if (current is T) {
-      return current
-    }
-    current = current.cause
-  }
-  return null
 }
 
 class LocalForward(

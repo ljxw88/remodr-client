@@ -7,6 +7,7 @@ import {
 } from '@/domain/herdr';
 import { createId } from '@/utils/create-id';
 import { getRemoteCoreNativeModule } from '@/services/native-remote-client';
+import { classifyConnectionError, ConnectionError } from '@/domain/connection-error';
 
 export class HerdrBridgeRequestError extends Error {
   constructor(
@@ -26,21 +27,7 @@ export class HerdrBridgeRequestError extends Error {
  * rejected" string. Callers care about the condition, not which layer noticed.
  */
 export function isBridgeUnavailable(error: unknown): boolean {
-  if (error instanceof HerdrBridgeRequestError) {
-    return error.code === 'BRIDGE_NOT_STARTED' || error.code === 'BRIDGE_CLOSED';
-  }
-  if (error instanceof Error) {
-    const msg = error.message.toLowerCase();
-    return (
-      /bridge is not running/i.test(msg) ||
-      /bridge is closed/i.test(msg) ||
-      /bridge closed/i.test(msg) ||
-      /bridge disconnected/i.test(msg) ||
-      /channel is closed/i.test(msg) ||
-      /broken pipe/i.test(msg)
-    );
-  }
-  return false;
+  return classifyConnectionError(error).retryable;
 }
 
 export class HerdrBridgeTransport {
@@ -48,12 +35,15 @@ export class HerdrBridgeTransport {
   private subscription: { remove(): void } | null = null;
   private listeners = new Set<(event: BridgeEvent) => void>();
   private bufferedMessages: { bridgeId: string; message: string }[] = [];
+  private generation = 0;
 
   async start(sessionId: string): Promise<BridgeHello> {
     await this.stop();
+    const generation = this.generation;
     const native = getRemoteCoreNativeModule();
     try {
       this.subscription = native.addListener('onHerdrMessage', (event) => {
+        if (generation !== this.generation) return;
         const payload = event as unknown as { bridgeId: string; message: string };
         if (!this.bridgeId) {
           this.bufferedMessages.push(payload);
@@ -64,8 +54,20 @@ export class HerdrBridgeTransport {
         }
       });
       const started = await native.startHerdrBridge(sessionId);
+      if (generation !== this.generation) {
+        await native.stopHerdrBridge(started.bridgeId);
+        throw new ConnectionError('ERR_BRIDGE_CLOSED', 'Bridge connection was cancelled.');
+      }
       this.bridgeId = started.bridgeId;
       const hello = bridgeHelloSchema.parse(JSON.parse(started.hello));
+      if (hello.fatal) {
+        throw new HerdrBridgeRequestError(
+          hello.error?.code ?? 'BRIDGE_CONFIGURATION', hello.error?.message ?? hello.warning ?? 'The bridge needs attention.',
+        );
+      }
+      if (hello.runtimeReady === false) {
+        throw new ConnectionError('HERDR_UNAVAILABLE', hello.error?.message ?? 'Herdr is unavailable.');
+      }
       for (const event of this.bufferedMessages) {
         if (event.bridgeId === this.bridgeId) {
           this.publish(event.message);
@@ -75,7 +77,7 @@ export class HerdrBridgeTransport {
       return hello;
     } catch (error) {
       try {
-        await this.stop();
+        if (generation === this.generation) await this.stop();
       } catch (cleanupError) {
         console.warn('[HERDR_BRIDGE] Could not clean up failed bridge start', cleanupError);
       }
@@ -88,22 +90,35 @@ export class HerdrBridgeTransport {
     return () => this.listeners.delete(listener);
   }
 
-  async request<T>(action: string, payload: Record<string, unknown>): Promise<T> {
+  async request<T>(
+    action: string,
+    payload: Record<string, unknown>,
+    commandId?: string,
+  ): Promise<T> {
     if (!this.bridgeId) {
       throw new HerdrBridgeRequestError('BRIDGE_NOT_STARTED', 'Herdr bridge is not running.');
     }
+    const generation = this.generation;
+    const id = createId();
     const request = JSON.stringify({
       protocol: 1,
-      id: createId(),
+      id,
       type: 'request',
       action,
       payload,
+      ...(commandId ? { commandId } : {}),
     });
     const raw = await getRemoteCoreNativeModule().requestHerdrBridge(
       this.bridgeId,
       request,
     );
     const response = bridgeResponseSchema.parse(JSON.parse(raw));
+    if (generation !== this.generation) {
+      throw new ConnectionError('ERR_BRIDGE_CLOSED', 'Response belongs to a closed connection.');
+    }
+    if (response.id !== id) {
+      throw new ConnectionError('INVALID_RESPONSE', 'Bridge response ID does not match the request.');
+    }
     if (!response.ok) {
       throw new HerdrBridgeRequestError(
         response.error?.code ?? 'BRIDGE_ERROR',
@@ -114,6 +129,7 @@ export class HerdrBridgeTransport {
   }
 
   async stop(): Promise<void> {
+    this.generation++;
     const bridgeId = this.bridgeId;
     this.bridgeId = null;
     this.bufferedMessages = [];

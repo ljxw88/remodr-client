@@ -17,6 +17,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { hostRepository } from '@/services/host-repository';
 import { remoteClient } from '@/services/native-remote-client';
 import { toUserMessage } from '@/utils/user-error';
+import { retryDeviceConnection } from '@/features/agents/connect-runtime';
 
 export default function ConnectScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -40,6 +41,7 @@ export default function ConnectScreen() {
     setBusy(true);
     try {
       await connectHost(host, secret, { saveSecret, acceptedFingerprint });
+      await retryDeviceConnection(host.id);
       refreshSessions();
       router.dismissTo({ pathname: '/hosts/[id]', params: { id: host.id } });
     } catch (error) {

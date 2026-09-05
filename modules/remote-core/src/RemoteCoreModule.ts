@@ -2,6 +2,7 @@ import { NativeModule, requireNativeModule } from 'expo';
 
 import type {
   NativeCommandResult,
+  NativeConnectionServiceEligibility,
   NativeKnownHost,
   NativeRemoteFile,
   NativeSessionSnapshot,
@@ -10,6 +11,10 @@ import type {
 } from './RemoteCore.types';
 
 declare class RemoteCoreModule extends NativeModule<RemoteCoreModuleEvents> {
+  /** Does not request notification permission; the caller owns the permission UX. */
+  getConnectionServiceEligibility(): Promise<NativeConnectionServiceEligibility>;
+  /** Starts only with a resumed Activity. Returns actual service state, not SSH health. */
+  setConnectionService(active: boolean, label: string): Promise<boolean>;
   connect(options: Record<string, unknown>): Promise<NativeSessionSnapshot>;
   disconnect(sessionId: string): Promise<void>;
   disconnectHost(hostId: string): Promise<void>;

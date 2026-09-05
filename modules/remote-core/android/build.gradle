@@ -14,6 +14,9 @@ android {
       assets.exclude 'test_*.py', '__pycache__/**'
     }
   }
+  androidResources {
+    ignoreAssetsPatterns.addAll(['test_*', '__pycache__', '*.pyc', 'README.md'])
+  }
   defaultConfig {
     versionCode 1
     versionName "0.1.0"

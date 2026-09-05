@@ -221,6 +221,9 @@ export const conversationItemSchema = z.discriminatedUnion('kind', [
   conversationBaseSchema.extend({
     kind: z.literal('user_message'),
     text: z.string(),
+    commandId: z.string().optional(),
+    delivery: z.enum(['queued', 'sending', 'sent', 'failed', 'uncertain']).optional(),
+    deliveryError: z.string().optional(),
   }),
   conversationBaseSchema.extend({
     kind: z.literal('assistant_message'),
@@ -277,6 +280,9 @@ export const bridgeHelloSchema = z.object({
   herdrProtocol: z.number().nullable(),
   capabilities: z.record(z.string(), z.unknown()),
   warning: z.string().optional(),
+  runtimeReady: z.boolean().optional(),
+  fatal: z.boolean().optional(),
+  error: z.object({ code: z.string(), message: z.string() }).optional(),
 });
 export type BridgeHello = z.infer<typeof bridgeHelloSchema>;
 

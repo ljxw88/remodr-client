@@ -1,5 +1,5 @@
-import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { router } from 'expo-router';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -34,6 +34,7 @@ import {
   useDockScrollHandler,
 } from '@/features/navigation/floating-dock';
 import { useHostSession } from '@/features/connection/use-host-session';
+import { ConnectionStatus } from '@/features/connection/connection-status';
 import { useHosts } from '@/features/hosts/use-hosts';
 import { useTheme } from '@/hooks/use-theme';
 import { herdrRepository } from '@/services/herdr-repository';
@@ -54,13 +55,6 @@ export default function AgentsScreen() {
   const selectedDeviceId = state.selectedDeviceId ?? state.runtime.deviceId ?? null;
   const selectedHost = hosts.find((host) => host.id === selectedDeviceId);
   const connected = state.connection === 'connected';
-  const busy = [
-    'connecting',
-    'authenticating',
-    'starting_bridge',
-    'synchronizing',
-    'reconnecting',
-  ].includes(state.connection);
   const spaces = state.runtime.workspaces;
   const activeSpaceId =
     selectedSpaceId && spaces.some((space) => space.id === selectedSpaceId)
@@ -97,17 +91,6 @@ export default function AgentsScreen() {
     return result.filter((section) => section.agents.length > 0);
   }, [activeSpaceId, spaces, visibleAgents]);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (state.connection !== 'disconnected' && state.connection !== 'error') {
-        return;
-      }
-      void connectAgentRuntime().catch((error) => {
-        console.warn('[HERDR_RUNTIME] Could not connect', error);
-      });
-    }, [state.connection]),
-  );
-
   const canCreateAgent = connected && spaces.length > 0;
   const canCreateSpace = connected && selectedHost != null;
   const compactHeader = width < 375;
@@ -122,18 +105,9 @@ export default function AgentsScreen() {
     if (herdrRepository.isDeviceConnected(deviceId)) {
       return;
     }
-    const stillSelected = () =>
-      herdrRepository.getSnapshot().selectedDeviceId === deviceId;
     void connectAgentRuntime(deviceId)
-      .then((connectedDevice) => {
-        if (!connectedDevice && stillSelected()) {
-          router.push({ pathname: '/connect/[id]', params: { id: deviceId } });
-        }
-      })
       .catch((error) => {
-        if (stillSelected()) {
-          Alert.alert('Could not connect device', toUserMessage(error));
-        }
+        console.warn('[CONNECTION] Could not select device connection', error);
       });
   }
 
@@ -257,6 +231,8 @@ export default function AgentsScreen() {
         </View>
       ) : null}
 
+      <ConnectionStatus deviceId={selectedDeviceId} />
+
       {hostsLoading ? (
         <View style={styles.center}>
           <ActivityIndicator color={theme.accent} />
@@ -266,10 +242,8 @@ export default function AgentsScreen() {
         </View>
       ) : !selectedHost ? (
         <EmptyState message={hosts.length === 0 ? 'No devices' : 'Select a device'} />
-      ) : !connected && !busy ? (
-        <EmptyState message={`${selectedHost.name} is offline`} />
       ) : spaces.length === 0 ? (
-        <EmptyState message="No spaces" />
+        <EmptyState message={connected ? 'No spaces' : 'Waiting for this device’s spaces'} />
       ) : sections.length === 0 ? (
         <EmptyState message={activeSpaceId ? 'No agents in this space' : 'No agents'} />
       ) : (

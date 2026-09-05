@@ -81,6 +81,14 @@ describe('host lifecycle', () => {
     );
   });
 
+  it('stops retries against the previous endpoint when a host address changes', async () => {
+    const deps = dependencies();
+    await updateHost(host, { ...host, hostname: 'new.example.com' }, deps);
+    expect(deps.invalidateHostConnection).toHaveBeenCalledWith(host.id);
+    expect(deps.disconnectHost).toHaveBeenCalledWith(host.id);
+    expect(deps.deleteSecret).not.toHaveBeenCalled();
+  });
+
   it('keeps the saved credential when the metadata update fails', async () => {
     const deps = dependencies();
     deps.updateHost.mockRejectedValue(new Error('storage unavailable'));

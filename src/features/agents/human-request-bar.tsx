@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -7,6 +7,8 @@ import { GlassSurface, glassRim } from '@/components/ui/glass-surface';
 import { Radius, Spacing } from '@/constants/theme';
 import type { HumanRequest } from '@/domain/herdr';
 import { answerBodyFor, answerOptions } from '@/features/agents/human-request';
+import { CommandDelivery } from '@/features/connection/connection-status';
+import { usePendingCommands } from '@/features/connection/use-connection';
 import { useTheme } from '@/hooks/use-theme';
 import { herdrRepository } from '@/services/herdr-repository';
 import { toUserMessage } from '@/utils/user-error';
@@ -14,6 +16,8 @@ import { toUserMessage } from '@/utils/user-error';
 type Props = {
   agentId: string;
   request: HumanRequest;
+  enqueueing?: boolean;
+  enqueueGuard?: { current: boolean };
 };
 
 /**
@@ -29,11 +33,11 @@ type Props = {
  * that as the prompt — so a question the options do not cover can always be
  * answered in words instead.
  */
-export function HumanRequestBar({ agentId, request }: Props) {
+export function HumanRequestBar({ agentId, request, enqueueing = false, enqueueGuard }: Props) {
   const theme = useTheme();
   const [selected, setSelected] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState(false);
+  const [acknowledged, setAcknowledged] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /**
@@ -41,18 +45,35 @@ export function HumanRequestBar({ agentId, request }: Props) {
    * a frame in which a second tap still sees the old value. Answering twice
    * sends the agent a second prompt it never asked for.
    */
-  const inFlight = useRef(false);
+  const localInFlight = useRef(false);
+  const inFlight = enqueueGuard ?? localInFlight;
+  const commands = usePendingCommands();
+  const command = commands.find((entry) =>
+    entry.agentId === agentId && entry.action === 'human_request.answer' &&
+    entry.payload.requestId === request.id,
+  );
+  const sent = acknowledged || command?.state === 'sent';
 
   const options = answerOptions(request);
-  // The bar goes on standing until the bridge marks the request resolved,
-  // which is the agent's schedule and not ours — a poll interval at best.
-  // Without this latch the buttons are live again for that whole window, and
-  // a second tap either injects a duplicate prompt or is refused as an empty
-  // answer, depending on whether a re-parse landed in between.
-  const locked = sending || sent;
+  const locked = sending || enqueueing || sent || command != null;
+
+  useEffect(() => {
+    const observe = () => {
+      if (herdrRepository.getPendingCommands().some((entry) =>
+        entry.agentId === agentId && entry.action === 'human_request.answer' &&
+        entry.payload.requestId === request.id && entry.state === 'sent',
+      )) setAcknowledged(true);
+    };
+    observe();
+    return herdrRepository.subscribeCommands(observe);
+  }, [agentId, request.id]);
 
   async function answer(optionIds: string[]) {
-    if (inFlight.current || optionIds.length === 0) {
+    if (inFlight.current || locked || optionIds.length === 0 ||
+      herdrRepository.getPendingCommands().some((entry) =>
+        entry.agentId === agentId && entry.action === 'human_request.answer' &&
+        entry.payload.requestId === request.id,
+      )) {
       return;
     }
     inFlight.current = true;
@@ -64,22 +85,12 @@ export function HumanRequestBar({ agentId, request }: Props) {
         request.id,
         answerBodyFor(request, optionIds),
       );
-      setSent(true);
     } catch (cause) {
       setError(toUserMessage(cause));
+    } finally {
       inFlight.current = false;
       setSending(false);
-      return;
     }
-    // The answer is away. A refresh that fails after that is the poll's
-    // problem to retry, and reporting it here would read as the answer
-    // having failed when it did not.
-    try {
-      await herdrRepository.loadConversation(agentId);
-    } catch (cause) {
-      console.warn('[CONVERSATION] Could not refresh after answering', cause);
-    }
-    setSending(false);
   }
 
   function choose(optionId: string) {
@@ -115,7 +126,10 @@ export function HumanRequestBar({ agentId, request }: Props) {
               fallback="?"
             />
             <ThemedText type="label" style={{ color: theme.accent }}>
-              {sent ? 'ANSWER SENT' : request.multiSelect ? 'CHOOSE ANY' : 'NEEDS YOUR INPUT'}
+              {sent ? 'ANSWER SENT'
+                : command?.state === 'failed' || command?.state === 'uncertain' ? 'REVIEW ANSWER'
+                  : command ? 'ANSWER QUEUED'
+                    : request.multiSelect ? 'CHOOSE ANY' : 'NEEDS YOUR INPUT'}
             </ThemedText>
           </View>
 
@@ -183,11 +197,28 @@ export function HumanRequestBar({ agentId, request }: Props) {
               <ThemedText type="smallBold" style={{ color: theme.onAccent }}>
                 {sent
                   ? 'Answer sent'
+                  : command?.state === 'failed' || command?.state === 'uncertain'
+                    ? 'Review answer'
+                  : command
+                    ? 'Answer queued'
                   : selected.length > 0
                     ? `Send ${selected.length} selected`
                     : 'Select an answer'}
               </ThemedText>
             </Pressable>
+          ) : null}
+
+          {command ? (
+            <CommandDelivery
+              commandId={command.id}
+              delivery={command.state}
+              deliveryError={command.error}
+              discardLabel="Discard answer and choose again"
+              onDiscard={() => {
+                setAcknowledged(false);
+                setError(null);
+              }}
+            />
           ) : null}
 
           {error ? (
