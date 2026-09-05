@@ -1,21 +1,26 @@
-# ADR 004: Secure credential storage
+# ADR 004: Initial credential-storage boundary
+
+Status: superseded by [ADR 007](007-known-hosts-and-secrets.md).
+
+[Decision index](README.md) | [Current security guide](../security.md)
 
 ## Context
 
-Passwords, keys, passphrases, and API tokens cannot live in plaintext app storage.
+The initial host-management phase needed saved metadata before implementing
+login and native secret storage.
 
-## Decision
+## Decision at that stage
 
-Persist host metadata without secrets. Future secrets use Android Keystore-backed encryption and are referenced by id.
+Keep credentials out of host JSON. Plan for Keystore-backed storage referenced
+by an opaque credential ID rather than storing passwords or private keys with
+the host record.
 
-## Reasons
+## Subsequent implementation
 
-AsyncStorage, SQLite, and JSON files are not credential stores.
+Login and encrypted secret storage now exist. ADR 007 selects
+`EncryptedSharedPreferences` backed by Android Keystore and persistent SSH host
+verification. The original statement that login secrets were out of scope
+applied only to the initial phase.
 
-## Consequences
-
-Phase 1 has an auth-type placeholder only. Login secrets are out of scope.
-
-## Rules
-
-Never commit secrets. Never log decrypted credentials.
+The boundary remains: metadata stores and conversation caches are not
+credential stores. Never commit or log decrypted credentials.

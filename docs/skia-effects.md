@@ -1,70 +1,65 @@
 # Skia visual effects
 
-Practical notes for building shader-backed effects on Android with
-`@shopify/react-native-skia`. Written after building the liquid glass
-**New agent** button; see
-[ADR 011](adr/011-skia-visual-effects.md) for why Skia rather than the
-alternatives.
+[Documentation index](README.md) | [Decision](adr/011-skia-visual-effects.md)
 
-Most of the cost in that work was not the shader maths. It was the handful of
-constraints below, each of which silently produces a plausible-looking wrong
-result.
+Use Skia for the existing decorative controls, not for ordinary chat surfaces.
+The current dependency is `@shopify/react-native-skia` 2.6.2; confirm it in
+[`package.json`](../package.json) when changing an API.
 
-## Before starting
+## Implemented components
 
-**Design prompts from Framer, Figma or the web do not port.** They assume a
-DOM: CSS `backdrop-filter`, SVG `feTurbulence`/`feDisplacementMap` over the
-backdrop, WebGL/GLSL, `ResizeObserver`, `requestAnimationFrame`. None of that
-exists here. Translate each capability before agreeing to a design:
+| Source | Use |
+| --- | --- |
+| [`liquid-glass-button.tsx`](../src/features/agents/liquid-glass-button.tsx) | New Agent/New Space control with glow, refraction and a metal orb |
+| [`liquid-glass.tsx`](../src/components/ui/liquid-glass.tsx) | Rounded-rectangle shader for refraction, dispersion and sheen |
+| [`chromatic-metal.tsx`](../src/components/ui/chromatic-metal.tsx) | Shader-backed metal appearance |
+| [`liquid-glass-rim.tsx`](../src/components/ui/liquid-glass-rim.tsx) | Selection material for fixed-size controls |
+| [`use-shader-clock.ts`](../src/hooks/use-shader-clock.ts) | Focus/foreground-aware animation clock |
 
-| Web technique | Android equivalent |
-|---|---|
-| SVG filter on the backdrop | Skia `BackdropFilter` |
-| `feTurbulence` / `feDisplacementMap` | `Turbulence` / `DisplacementMap`, or a runtime shader |
-| GLSL fragment shader | SkSL runtime shader |
-| `ResizeObserver` × DPR | `onLayout` |
-| `requestAnimationFrame` | Reanimated frame callback |
-| CSS `filter: blur()` behind an element | `Blur` image filter inside the canvas |
+The chat composer uses `GlassSurface` with a native border and backdrop blur.
+It has no Skia-measured panel or animated rim. Its height changes as the draft
+grows; a separately measured decorative canvas can lag that resize.
 
-Not available at all: `expo-glass-effect` is iOS 26+ and renders a plain view
-on Android. Shiki-style WASM tooling cannot run on Hermes.
+## Translating web designs
 
-## The four constraints that shape every design
+| Web technique | Available approach here |
+| --- | --- |
+| Backdrop refraction | Skia `BackdropFilter`, but only for content drawn in the same canvas |
+| Turbulence/displacement | Skia filters or a runtime shader |
+| GLSL fragment shader | Port the calculation to SkSL |
+| `ResizeObserver` | Measure a React Native wrapper or use the installed Skia sizing API |
+| Animation frame loop | Reanimated frame callback feeding shader uniforms |
+| Blur behind native views | `expo-blur` with a valid target, not a Skia backdrop filter |
 
-**1. A backdrop filter only sees its own canvas.** It reads what that `<Canvas>`
-has already painted, never the React Native views behind it. Anything the
-effect must distort has to be drawn earlier in the same canvas. Splitting the
-effect and its backdrop across two canvases, or putting a React Native view
-underneath, yields a filter with nothing to work on.
+Apple's `expo-glass-effect` path does not supply native Liquid Glass on Android.
+A web `backdrop-filter` or SVG displacement demo cannot directly sample native
+views in this project.
 
-**2. A dark canvas has nothing to refract.** Displacement over flat colour is
-invisible. On the near-black canvas the glass only reads because a glow is
-drawn beneath it specifically to be bent. Budget for that content.
+## Canvas composition
 
-**3. Filter chains cannot do edge falloff.** `DisplacementMap`'s `scale` is one
-scalar for the whole pass, so distortion cannot be strong at the rim and absent
-in the centre. Anything edge-weighted — refraction, dispersion, "splay" — needs
-a runtime shader with a signed distance field giving a per-pixel edge distance.
+A Skia backdrop filter reads what its canvas has already painted. Draw the
+source, apply the clipped filter, then draw sharp foreground details. Splitting
+source and effect across canvases does not create a native-view backdrop.
 
-**4. Canvases default to the P3 colour space.** Hex constants written into SkSL
-render more saturated than the same hex in a React Native view. Pass
-`colorSpace="srgb"` when shader colour must match surrounding UI.
+Displacement over a flat color produces no visible refraction. The existing
+hero control supplies a glow for the shader to distort. It does not refract
+the surrounding React Native transcript.
 
-## SkSL rules worth memorising
+The installed Canvas defaults to P3. Existing effects explicitly pass
+`colorSpace="srgb"` to match surrounding React Native colors.
 
-Verified by compiling test programs, not inferred.
+## Shader conventions
 
-| Rule | Notes |
-|---|---|
-| `half4 main(float2 fragCoord)` | No `void main()`, no `gl_FragColor`, no `sk_FragCoord` |
-| No `while` loops | `for` with a constant bound only |
-| No `%` on integers | Use `mod()` |
-| **No non-constant array indexing** | Stricter than WebGL 1. Even a local array with a runtime index fails |
-| Shaders return premultiplied colour | Multiply RGB by A yourself for translucent output |
-| `image.eval(coord)` | Not `texture()` or `sample()` |
+- Runtime effects use `half4 main(float2 fragCoord)`.
+- Shader-child sampling uses `image.eval(coord)`.
+- Return premultiplied color for translucent output and preserve sampled alpha
+  where the effect must not paint over the rest of the canvas.
+- Use compile-time loop bounds for gradient ramps and avoid relying on dynamic
+  array indexing. Recheck shader compiler support on the actual target before
+  introducing a new construct.
+- Compile with `Skia.RuntimeEffect.Make` and handle its null result explicitly.
 
-The array rule bites whenever a shader takes a gradient. Sample a ramp by
-looping a constant number of times and accumulating a weight per stop:
+The current gradient-ramp pattern uses a constant `STOPS`:
 
 ```glsl
 half3 ramp(float t) {
@@ -72,106 +67,51 @@ half3 ramp(float t) {
   half3 c = half3(0.0);
   for (int i = 0; i < STOPS; i++) {
     float w = max(0.0, 1.0 - abs(x - float(i)));
-    c += u_stops[i] * half(w);   // constant index inside an unrolled loop
+    c += u_stops[i] * half(w);
   }
   return c;
 }
 ```
 
-## Mistakes that produce plausible-looking wrong results
+The liquid-glass shader uses a rounded-rectangle signed distance field for
+edge falloff. Its normal points outward, but the bend samples inward to avoid
+pulling the surrounding background into the rim. Channel dispersion stays
+small. The existing sheen uses `abs(n.y)` to light both horizontal edges.
 
-Every one of these shipped before being caught by looking closely at a
-screenshot. None of them error.
+For rim animation, transform the gradient rather than rotating the stroked
+shape itself.
 
-**Refracting outwards.** The SDF gradient points *out* of the shape, so bending
-along it samples pixels from outside and drags the surrounding canvas in as a
-dark rim. Sample towards the centre instead — which is also what a lens does.
-The symptom reads as the fill being misaligned rather than as a shading bug.
+## Sizing and animation
 
-**Rotating the shape instead of the gradient.** Wrapping a stroked shape in a
-transformed `<Group>` rotates the geometry, so the outline stops matching the
-element. Skia gradients accept their own `transform`; rotate the gradient and
-leave the shape alone.
+Current components measure a plain `View` wrapper and size an absolute Canvas
+from that measurement. Keep padding on an inner content view so the canvas
+matches the outer border. Do not assume a web-style DPR calculation or the
+deprecated Canvas `onLayout` behaves like wrapper layout.
 
-**Lighting one edge only.** A highlight keyed on `-n.y` lifts the top edge and
-biases the whole body's luminance upwards, which also reads as an offset. Use
-`abs(n.y)` unless the asymmetry is deliberate.
+`useShaderClock` has a stable frame callback, accumulates
+`timeSincePreviousFrame`, and clamps gaps to 64 ms. It pauses when disabled,
+unfocused, or backgrounded. Use shared values/derived uniforms instead of React
+state updates for every frame.
 
-**Splitting colour channels too far.** Sampling R, G and B at widely separated
-ramp positions lands them on different luminances, and metal turns into a
-rainbow. Keep the split small so the channels stay neighbours and only fringe
-at band edges.
+Clip filters to the required area. Use `opaque` only when the entire canvas
+really has an opaque background; applying it to transparent control overlays
+changes compositing. Avoid continuously running clocks for hidden controls.
 
-## Animation
+## Dependencies and iteration
 
-Drive uniforms from a Reanimated shared value through `useDerivedValue`, never
-from React state — state re-renders the tree every frame.
+Use `npx expo install @shopify/react-native-skia` when changing the dependency
+so Expo can select its compatible version. The current project relies on the
+Expo preset rather than a custom Babel plugin configuration.
 
-**`useFrameCallback` re-registers whenever its callback identity changes, and
-re-registering restarts its internal timer.** An inline closure is a new
-identity on every render, so any re-render of the host screen rewinds the
-animation to zero. Two habits avoid this permanently:
+Skia itself is [included in SDK 57 Expo Go](https://docs.expo.dev/versions/v57.0.0/sdk/skia/).
+The remodr app still requires a development build because of its local
+`RemoteCore` module.
 
-- keep the callback identity stable;
-- accumulate `timeSincePreviousFrame` rather than reading `timeSinceFirstFrame`,
-  so neither a re-render nor a pause can rewind the clock. Clamp long gaps so
-  resuming does not jump.
+Inspect representative states on an Android target: light/dark parts of the
+gradient, different control sizes, selection, screen blur, and backgrounding.
+Compare frames for continuity and watch for unexpected resets; identical
+screenshots alone do not prove an animation reset because motion may be paused
+or the sampled image may be unchanged.
 
-`useShaderClock` in `src/hooks/` does both and pauses on blur and background.
-Prefer it to Skia's `useClock`, which runs forever.
-
-Note that React Compiler's `react-hooks/immutability` rule rejects mutating a
-shared value that is also declared as a hook dependency. Shared values are
-stable containers, so simply leave them out of the dependency list.
-
-## Cost control
-
-- Pass `opaque` on the canvas. It avoids the alpha-blend path and sidesteps a
-  surface leak affecting non-opaque canvases.
-- Always `clip` a backdrop filter to the region that needs it. It forces a
-  save layer, and unclipped it re-processes everything drawn beneath.
-- Stop the clock when the effect is disabled, off-screen, or backgrounded. A
-  frame callback requests a frame every vsync indefinitely, keeping the GPU
-  awake and blocking the display dropping to a lower refresh rate.
-- Runtime shader image filters ignore device pixel ratio and soften their
-  input. Supersample only if the result looks soft; it multiplies fill cost.
-
-## Setup
-
-Expo SDK 57 pins `@shopify/react-native-skia` at 2.6.2 — install with
-`npx expo install` so that version is used. No config plugin and no Metro
-changes are needed. `babel-preset-expo` auto-injects
-`react-native-worklets/plugin`, so **do not** create a `babel.config.js` to add
-it manually; doing so runs the plugin twice. A development build is required;
-Skia cannot run in Expo Go.
-
-## Iterating on a shader
-
-Screenshots beat reasoning for this work — every mistake above was found by
-looking, not by thinking harder.
-
-1. Add a temporary preview route rendering the component in each state.
-2. Build once (`npx expo run:android`), then rely on fast refresh.
-3. `adb exec-out screencap -p > shot.png`, then `sips -c H W --cropOffset T L`
-   and `sips -Z 900` to zoom. Subtle rim artefacts are invisible at 1×.
-4. To prove an animation is running rather than resetting, capture two frames a
-   fixed interval apart *after the same trigger*. Identical frames mean a reset;
-   advanced frames mean it is continuous.
-5. Delete the preview route before committing.
-
-Watch logcat for `ReactNativeJS` errors while iterating: a failed SkSL compile
-throws at `Skia.RuntimeEffect.Make`, which returns `null` rather than raising a
-useful message on its own.
-
-## Sizing a canvas
-
-Measure a plain `View` wrapper, not the `Canvas`. Skia's `Canvas` accepts
-`onLayout` but ignores it under Fabric, where it is deprecated in favour of
-`onSize`. A canvas that never learns its size renders nothing, which looks
-identical to a shader that compiled but drew nothing.
-
-A canvas laid over a control with `position: absolute` is inset by that
-control's padding, because Yoga positions absolute children against the
-parent's padding box. Keep padding on an inner content view so the canvas can
-trace the control's actual edge — `LiquidGlassButton` and `LiquidGlassRim`
-both do this.
+Keep temporary previews and screenshots out of the committed app. Follow
+[development checks](development.md#checks) for native dependency changes.

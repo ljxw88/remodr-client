@@ -1,101 +1,64 @@
-# ADR 012: One frosted glass material
+# ADR 012: Shared frosted material
+
+Status: accepted; the current rim uses a native border, not an overlay.
+
+[Decision index](README.md) | [Color tokens](../../COLOR.md)
 
 ## Context
 
-The interface had accumulated four ways of drawing the same idea. Chips and
-cards used opaque greys (`backgroundElement`, `glassStrong`). The dock and the
-chat composer used `expo-blur` with a hardcoded `rgba(25,27,32,0.82)` fill.
-Sheets used a flat `chrome` grey. Each was tuned against the flat near-black
-canvas the app used to have.
-
-Once the canvas became an indigo-to-black gradient, those surfaces stopped
-agreeing with each other. An opaque grey plate reads as a hole punched in the
-gradient near the top of a screen and as nothing at all near the bottom, so the
-same chip looked like two different controls depending on where it sat.
-
-Two facts about `expo-blur` on Android shaped the options:
-
-- A `BlurView` can only sample the subtree of a `BlurTargetView`. The canvas
-  gradient was rendered at the root, outside every target, so the dock and
-  composer were blurring transparent pixels. That is why the dock needed a
-  hardcoded opaque fill to look like anything.
-- A `BlurView` nested inside the target it samples makes that target's
-  RenderNode contain itself. Android recurses through
-  `RenderNode::prepareTreeImpl` until the native stack overflows and the
-  process dies with SIGSEGV. There is no JS error and no red box.
+Independent opaque fills and blur settings produced inconsistent surfaces over
+the app's gradient. Android blur also requires explicit target/consumer
+placement: a consumer sampling its own enclosing target can recurse in native
+rendering and crash the process.
 
 ## Decision
 
-One material, expressed by one component: `GlassSurface`, with `GlassRim` for
-pressables that need the material without an extra layout node.
+Use [`GlassSurface`](../../src/components/ui/glass-surface.tsx) and its exported
+`glassRim` style helper for ordinary surfaces.
 
-The material has two families, chosen by what is behind the surface:
+| Tone | Intended position | Material |
+| --- | --- | --- |
+| `panel` | Directly on the canvas | Low-alpha fill and native rim |
+| `chrome` | Over scrolling content | Backdrop blur plus tint when a target is available |
 
-- **Panel** — on the canvas. A translucent white fill, a hairline rim, and a
-  clipped specular top edge. No blur.
-- **Chrome** — floating over scrolling content. A live backdrop blur through
-  `BlurBackdropTarget`, plus a light fill.
+Without a target, chrome uses an opaque, window-aligned `CanvasFill` with a
+light tint. That fallback hides underlying text; it does not provide real blur.
+Skia hero/selection effects remain separate, scoped controls.
 
-Surface fills are white at low alpha rather than opaque grey, so a single token
-works at both ends of the gradient.
+## Implementation constraints
 
-`BlurBackdropTarget` renders its own copy of the canvas gradient, and frosted
-chrome is always rendered as its sibling.
+`BlurBackdropTarget` includes the background gradient so the sampled subtree
+has a complete backdrop. A `BlurView` must stay outside its own sampled target.
+The tab shell provides a target for the dock. The agents stack opts in through
+`RouteStack blurBackdrop`, and `ScrollEdgeFrame` provides the transcript target
+when one is not already overhead.
 
-## Rationale
+The implementation uses `dimezisBlurViewSdk31Plus`. Android versions below API
+31 use that method's non-blur fallback; do not describe all Android versions
+as having identical blur.
 
-- Panels have nothing behind them but a smooth gradient. A blur pass there
-  spends a frame to produce a picture indistinguishable from a plain fill, so
-  the cost buys nothing. The glassiness comes from the rim and the highlight.
-- Repointing `Colors.glass` and `Colors.glassStrong` to white alphas converted
-  roughly twenty-five call sites without touching them, because they already
-  referenced the tokens rather than literals.
-- Duplicating the gradient inside the blur target costs one more fully covered
-  `LinearGradient`. Hoisting all chrome to a root sibling position would have
-  meant a portal, and moving the target to the root would have put every
-  `BlurView` inside it — the crash.
+`glassRim` returns `borderWidth`, `borderColor`, and `borderTopColor`. A native
+border follows a resizing view without waiting for a separately measured
+canvas or overlay. The old instruction to prefer overlay rims is superseded.
 
-## Consequences
+Padding for an absolutely positioned decorative child belongs on an inner
+content view. `CanvasFill` aligns duplicated gradients with the window; a
+gradient restarted below a header would create a seam.
 
-Frosted chrome must be a sibling of `BlurBackdropTarget`, which constrains
-screen layout: content goes inside the target, bars go beside it.
-
-React Native modals render in their own window and cannot reach a blur target,
-so sheets stay opaque. Confirmed again by trying it: a `BlurView` inside a
-sheet blurs nothing, and the translucent fill it needs lets the transcript
-underneath read straight through the panel.
-
-An opaque sheet still reads as the same material by being built the same way —
-the canvas at its darkest with `glassStrong` laid over it, under the usual rim.
-Composited that lands on the colour a real glass panel would, because that is
-what a real one is sitting on down there. `Colors.chrome` was the earlier
-answer and was a flat slab a shade off everything around it.
-
-The scroll edge fade keeps its gradient-only treatment on Android. It sits over
-the rows it softens, so it cannot be a sibling of the content it would blur.
-
-On Android `intensity` sets the tint alpha *and* the blur radius, so the two
-cannot be tuned independently without `blurReductionFactor`.
-
-Translucent fills unmask anything drawn behind them. Two long-standing details
-only became visible once the fills stopped being opaque: every surface's drop
-shadow, which Android draws behind the view and which now reads as a dark band
-inside the glass, and any absolutely positioned overlay inside a padded
-surface, which Yoga insets by that padding. Both had been there all along.
+Sheets use an opaque panel in their modal window. They do not sample a target
+from the underlying app window. Android scroll-edge treatment is a gradient
+fade, not cropped backdrop blur.
 
 ## Rules
 
-- Use `GlassSurface` or `GlassRim`. Do not hand-roll a translucent fill plus a
-  border.
-- Never nest a `BlurView` inside the blur target it samples.
-- Keep surface fills as white alphas, so they work at both ends of the canvas.
-- Draw rims and highlights as overlays, not `borderWidth`, so they survive a
-  blur tint and do not consume a caller's padding.
-- Clip the specular highlight to the corner radius.
-- Blur only where something is behind the surface worth blurring.
-- Give glass no `elevation` and no shadow. It shows through.
-- Keep padding off any view that has absolutely positioned children, including
-  Skia canvases; put it on an inner content view instead.
-- Offset a duplicated canvas by its distance from the window top, so it
-  continues the gradient instead of restarting it.
-- Never put `onLayout` on a `BlurTargetView`; measure from a child.
+- Use the shared component/helper rather than duplicating ordinary materials.
+- Keep blur targets and consumers in the correct relationship; do not nest
+  opportunistic targets.
+- Keep fades below floating controls. Their declaration order already places
+  them over the scrollable content; do not add a redundant raised z-index.
+- Do not add elevation/drop shadows to translucent glass surfaces.
+- Measure a plain wrapper/child rather than putting layout measurement on the
+  blur target.
+- Retest the whole transcript when changing stack animation: outgoing-target
+  blanking was observed with animated dismissal. Current stacks use
+  `animation: 'none'` and entrance motion inside the destination.

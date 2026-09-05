@@ -1,21 +1,29 @@
 # ADR 002: Native remote core
 
+Status: accepted; implemented.
+
+[Decision index](README.md) | [Current architecture](../architecture.md)
+
 ## Context
 
-SSH, SFTP, tunnels, and credentials need a mature native implementation.
+SSH, SFTP, port forwards, and credential handling need a native implementation
+behind a typed application API.
 
 ## Decision
 
-Own those concerns in a Kotlin `remote-core` module behind typed TypeScript interfaces. Use a library such as SSHJ. Do not invent cryptography.
-
-## Reasons
-
-React Native should call `RemoteClient`, not sockets or ciphers.
+Own those resources in the local Kotlin
+[`remote-core` module](../../modules/remote-core/), using SSHJ rather than
+implementing an SSH protocol or cryptography layer in JavaScript.
 
 ## Consequences
 
-Phase 1 defines the boundary but does not implement the module.
+This is no longer a placeholder boundary. The module owns authenticated SSH
+clients, jump chains, bridge channels, file operations, local forwards, known
+hosts, encrypted secrets, and the foreground service.
 
-## Rules
+The TypeScript supervisor owns recovery policy; native code owns resource
+lifetime and fences obsolete connection attempts. Typed errors cross the Expo
+boundary. See [connection resilience](../connection-resilience.md) for lifecycle
+details and [security](../security.md) for trust/storage requirements.
 
-Do not scatter SSHJ calls through feature UI. Implement only what the current milestone needs.
+UI code calls the typed client or feature services, not SSHJ or raw sockets.

@@ -1,16 +1,27 @@
 # Connection recovery and message delivery
 
+[Documentation index](README.md) | [Decision](adr/015-connection-recovery.md) |
+[Bridge contract](../modules/remote-core/bridge/README.md)
+
 ## Ownership
 
-The connection is an attachment to remote work, not the owner of that work.
-Herdr owns panes and agents; closing SSH never intentionally stops them.
-A failed connection does not prove that the server is still running, so the UI
-must not promise that it is.
+Herdr owns remote panes and agents. Closing a mobile SSH attachment does not
+intentionally terminate them, but a disconnected client cannot confirm the
+server is still running.
 
 `ConnectionSupervisor` owns recovery for each device. `connect-runtime.ts`
 adapts it to saved hosts, SSH, and `HerdrRepository`. The root lifecycle hook
 supplies network/app-state signals. Screens observe state; they do not start
 their own retry timers.
+
+| Source | Responsibility |
+| --- | --- |
+| [`connection-supervisor.ts`](../src/features/connection/connection-supervisor.ts) | Retry, probe deadlines, ownership, and lifecycle policy |
+| [`connect-runtime.ts`](../src/features/agents/connect-runtime.ts) | Host/SSH/repository adapter and explicit connection preferences |
+| [`use-connection-lifecycle.ts`](../src/features/connection/use-connection-lifecycle.ts) | Network/foreground signals and confirmed service activity |
+| [`command-outbox.ts`](../src/services/command-outbox.ts) | Serialized local command persistence |
+| [`herdr-repository.ts`](../src/services/herdr-repository.ts) | Snapshots, pending overlays, dispatch and reconciliation |
+| [`connection-status.tsx`](../src/features/connection/connection-status.tsx) | Non-modal connection and message-delivery status |
 
 Only explicit selection changes the selected device. Retrying one host cannot
 move a conversation to another host. Explicit disconnect disables automatic
@@ -25,8 +36,7 @@ own resources, never a newer attachment.
 Bridge deployment uses a verified, content-addressed launch file and a unique
 staging upload. Atomic publication is used where supported; otherwise only the
 fully verified private staging file is executed. The old shared checksum file
-is not authoritative, so an interrupted upload cannot permanently cache a
-truncated executable.
+is not authoritative; native code verifies the installed contents before reuse.
 
 ## Detecting and recovering from a drop
 
@@ -46,8 +56,22 @@ truncated executable.
   `isConnected === false` pauses attempts; unknown reachability is not offline.
 
 Connections can still fail during radio changes, Doze, OEM power management,
-server restarts, or process death. Recovery and durable state are the guarantees,
-not an immortal socket.
+server restarts, or process death. Recovery preserves usable state where
+storage is available; it does not keep every socket alive indefinitely.
+
+Current timing defaults are implementation values, not network guarantees:
+
+| Setting | Value | Owner |
+| --- | --- | --- |
+| Acknowledged SSH keepalive | 10 seconds, count 3 | `SshPolicy.kt` |
+| Foreground/eligible-background health interval | 15 seconds | `connection-supervisor.ts` |
+| Health-probe deadline | 10 seconds | `connection-supervisor.ts` |
+| Stable connection before retry-count reset | 10 seconds | `connection-supervisor.ts` |
+| Bridge hello wait | 15 seconds | `HerdrBridgeSession.kt` |
+| Bridge request deadline | 35 seconds | `HerdrBridgeSession.kt` |
+
+OS suspension can delay client timers. A probe tests runtime synchronization,
+not just whether the bridge process can answer a ping.
 
 ## Durable sends
 
@@ -74,7 +98,7 @@ a reconnection workaround.
 
 There is an unavoidable boundary: sending `agent.prompt` to Herdr and committing
 the bridge ledger are not one transaction. If the bridge dies between those
-steps, the outcome is **uncertain**, not safely retryable. Automatic replay stops
+steps, the outcome is uncertain, not safely retryable. Automatic replay stops
 for that command and later commands to the same agent. The user can inspect the
 conversation; the client does not claim exactly-once execution.
 
@@ -87,7 +111,7 @@ conversation; the client does not claim exactly-once execution.
 | `uncertain` | It may have executed; do not automatically submit it again |
 
 Delivery has a 24-hour client queue horizon and a 200-entry local bound. Expiry
-never means “send with a new ID.” A full/corrupt/unwritable queue preserves the
+never means "send with a new ID." A full/corrupt/unwritable queue preserves the
 draft and surfaces an error. Do not clear corrupt storage to make startup look
 successful.
 
@@ -110,6 +134,8 @@ identical repeated messages are not mistaken for one another.
 
 Events accelerate updates; they are not an ordered durable replay stream.
 This implementation does not add a server daemon or a `since_seq` protocol.
+Foreground refresh cadence and the absence of synthetic typing are documented
+in [Markdown rendering](markdown-rendering.md).
 
 ## Background operation
 
@@ -130,9 +156,17 @@ development app after native or NetInfo changes.
 ## UX
 
 Queued-message status is immediate. Brief connection blips do not interrupt
-reading or typing. Longer outages progressively show a small status, then a
-non-modal banner, then an optional reconnect-now control. Fatal trust or
-authentication problems link to the server controls instead of retrying forever.
+reading or typing. The current status component uses this progression:
+
+| Disconnected duration | UI |
+| --- | --- |
+| Under 10 seconds | No outage banner; pending-message status still appears |
+| 10-40 seconds | Small connection/network status |
+| 40 seconds or longer | Non-modal reconnect notice |
+| 2 minutes or longer | Notice includes an optional Reconnect now action |
+
+Fatal trust/authentication errors bypass that delay and link to server
+controls. Uncertain delivery is distinct from a definite send failure.
 
 Never clear/dim the transcript, steal keyboard focus, or repeatedly show an
 error dialog for transient network failures. Ambiguous delivery and local

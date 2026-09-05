@@ -164,7 +164,7 @@ All of them go through `SheetModal` and `SheetPanel`.
 
 ### Elevated surfaces
 
-All of them go through `GlassSurface`, or `GlassRim` when a `Pressable` needs
+All of them go through `GlassSurface`, or `glassRim` when a `Pressable` needs
 the material without an extra layout node. Do not hand-roll a translucent fill
 plus a border; see [`COLOR.md`](COLOR.md) for the tokens.
 
@@ -294,7 +294,7 @@ chromatic orb.
 
 - Assistant content sits directly on the canvas for maximum reading space.
 - User messages use compact right-aligned dark bubbles.
-- Open at the newest item and follow sent messages, streaming chunks, tool
+- Open at the newest item and follow sent messages, received reply updates, tool
   updates, and assistant responses automatically.
 - Group every tool call within a user turn into one thin, expandable line:
   `Worked for 20m (6 tool calls)`.
@@ -375,12 +375,11 @@ chromatic orb.
   until pushes became cuts — with `animation: 'none'` the blank lasts one
   frame, which is why the chat can carry a target again. Reintroducing a stack
   animation brings the bug back with it.
-- Never set `zIndex` to order something that declaration order already orders.
-  React Native maps `zIndex` onto Android's `translationZ`, which lifts a view
-  in the *window* rather than among its siblings, so it sails over floating
-  chrome in a completely different part of the tree. A `zIndex: 10` on the
-  scroll edge fade painted the closing dissolve across the composer and the
-  dock, shading both off into the canvas from the middle down.
+- Do not add `zIndex` where declaration order already gives the required
+  ordering. The scroll edge fade belongs above the rows and below floating
+  controls. React Native's Android `setZIndex` updates view-group drawing order;
+  it is not a window-global `translationZ`. Inspect the complete composition
+  when changing layering so a fade cannot dim the composer or dock.
 - Press-scale belongs to controls that stand alone on the canvas. A row that
   fills its card edge to edge must not scale: shrinking it pulls the pressed
   highlight inwards and leaves the card showing down both sides.

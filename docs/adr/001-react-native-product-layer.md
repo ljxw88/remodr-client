@@ -1,21 +1,26 @@
 # ADR 001: React Native product layer
 
+Status: accepted; implemented.
+
+[Decision index](README.md) | [Current architecture](../architecture.md)
+
 ## Context
 
-The product is Android-first remote server management with a rich UI and future native SSH.
+The product needed an Android interface for remote server and agent workflows,
+with a native boundary for SSH and credentials.
 
 ## Decision
 
-Use React Native, TypeScript, Expo SDK 57, Expo Router, and a development build. Do not target Expo Go.
-
-## Reasons
-
-The UI can move quickly while native code owns SSH and credentials.
+Use React Native, TypeScript, Expo SDK 57, Expo Router, and a development build.
+Keep product screens in TypeScript and native transport details out of them.
 
 ## Consequences
 
-The app requires a custom native build. Product screens stay in TypeScript.
+The shipped product is an Android conversation client with supporting server
+tools, not an interactive terminal. `RemoteCore` requires a custom native build;
+Expo Go cannot run the complete app.
 
-## Rules
-
-Do not replace Expo or React Native. Do not put SSH protocol details in UI code.
+The tab shell uses headless Expo Router components and a custom dock. It is
+not a native tab-bar implementation. Exact versions and build commands belong
+in [`package.json`](../../package.json) and the
+[development guide](../development.md).

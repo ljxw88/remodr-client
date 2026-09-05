@@ -1,60 +1,47 @@
-# ADR 009: Assistant markdown rendering
+# ADR 009: Assistant Markdown rendering
+
+Status: accepted; received snapshots now render without simulated typing.
+
+[Decision index](README.md) | [Current rendering guide](../markdown-rendering.md)
 
 ## Context
 
-Agent replies arrive as markdown and were rendered by a hand-written parser
-that supported only fenced code, inline code, links, headings, and flat
-bullets. Bold, italic, tables, blockquotes, nested lists, and heading levels
-leaked raw markers into the transcript. Code blocks had no language, no
-highlighting, and no copy action.
+The original limited parser exposed Markdown markers and lacked table,
+code-highlighting, and copy affordances. Agent transcripts can contain
+incomplete syntax while an output file is still being written.
 
-Content streams in chunk by chunk, so a message is re-rendered many times and
-is frequently observed mid-token with an unterminated fence or emphasis run.
-
-`react-native-markdown-display`, the long-standing default, carries a "no
-longer actively maintained" notice and points at
-`react-native-enriched-markdown`, a native Fabric renderer. That renderer has
-the better streaming story but exposes styling and callbacks only, with no
-custom node renderers, which rules out per-line `diff` colouring.
+The product also needs custom code-block chrome and per-line diff colors.
+A renderer exposing only styling callbacks would not satisfy those node-level
+requirements.
 
 ## Decision
 
-Parse with `react-native-marked` through its `useMarkdown` hook and render into
-React Native primitives with a project-owned `Renderer` subclass. Highlight
-code with `prism-react-renderer`. Repair partial markdown with `remend`.
-Render `diff` fences with a dedicated component rather than a grammar.
-
-Keep the parser on the JS thread. Do not adopt a native markdown renderer.
-
-## Reasons
-
-- Custom node renderers are required for diff colouring and code-block chrome.
-- Everything maps to `<Text>`/`<View>`, so the existing theme tokens apply
-  directly and no second styling system enters the codebase.
-- `remend` is a zero-dependency string-to-string repair step, so it stays
-  useful even if the renderer is replaced later.
-- Prism tokenises without a DOM and compiles under Hermes. Shiki cannot: its
-  JavaScript engine emits ES2024 `v`-flag regexes that Hermes rejects.
+Use `react-native-marked` through `useMarkdown`, a project-owned `Renderer`
+subclass, `prism-react-renderer` for code, and `remend` for partial inline
+syntax. Render diff lines through a dedicated component. Keep parsing on the
+JavaScript thread.
 
 ## Consequences
 
-Parsing and highlighting run on the JS thread and re-run on every streaming
-update. Long messages re-parse in full per chunk.
+Message blocks use React Native primitives and the existing theme. The plain
+container avoids nesting a Markdown `FlatList` inside the transcript list.
+Parsing still processes the full string on changed content.
 
-`react-native-marked` requires `react-native-svg`, and the copy action requires
-`expo-clipboard`, so both are native additions that need an app rebuild.
+`MarkdownMessage` and its parser configuration are memoized. The renderer
+assigns counter-based keys and does not guarantee node identity across changed
+parses.
 
-Jest needs `transformIgnorePatterns` and `moduleNameMapper` entries for the ESM
-dependencies. Metro needs neither.
+The bridge reads transcript snapshots rather than ephemeral provider token
+events. History and newly received text display immediately; no typewriter
+effect replays completed output.
 
-LaTeX is not rendered.
+LaTeX is not rendered. Images use text placeholders, and only HTTP/HTTPS links
+are interactive. The [current guide](../markdown-rendering.md) owns limits,
+language support, and extension instructions.
 
 ## Rules
 
-- Render through the `useMarkdown` hook, never the `Markdown` component; the
-  component nests a `FlatList` inside the transcript's `FlatList`.
-- Keep `markdownStyles` and the renderer instance referentially stable. The
-  hook memoises the parse on those identities.
-- Give every node a key, and rewind `resetKeys` before each parse.
-- Degrade unknown languages and oversized blocks to plain text. Never let a
-  highlighting failure block a message.
+- Use `useMarkdown`, not a nested list component.
+- Keep parser options stable and give generated elements keys.
+- Fall back to plain text when syntax highlighting is unavailable.
+- Do not describe snapshot animation as genuine token streaming.

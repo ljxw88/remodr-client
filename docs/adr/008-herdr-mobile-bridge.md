@@ -1,38 +1,39 @@
 # ADR 008: Herdr mobile bridge
 
+Status: accepted; extended by [010](010-multi-device-herdr-runtime.md) and
+[015](015-connection-recovery.md).
+
+[Decision index](README.md) | [Current integration](../herdr-mobile-architecture.md)
+
 ## Context
 
-The Android application needs a chatbot-like interface for coding agents
-managed by Herdr without exposing Herdr or terminal controls over the network.
+The Android app needs semantic conversations for Herdr-managed coding agents
+without adding a public Herdr endpoint or a mobile terminal.
 
 ## Decision
 
-Bundle a standard-library Python bridge and deploy it through the existing SFTP
-channel to `~/.local/share/remote-workspace/`. Launch it through a non-PTY SSH
-exec channel. Use versioned NDJSON on stdin/stdout and keep Herdr on its local
-Unix socket.
+Bundle a standard-library Python bridge, deploy it through SFTP, and launch it
+through a non-PTY SSH exec channel. Use protocol-versioned NDJSON on
+stdin/stdout while Herdr remains accessible through its local Unix socket.
 
-Herdr protocol 20 supplies runtime identity and status. Provider adapters
-supply semantic conversation items. GitHub Copilot uses its structured
-`events.jsonl`; unsupported/unavailable adapters fall back conservatively to
-`agent.read`.
-
-## Reasons
-
-- SSH remains the only network boundary.
-- Android does not depend on Herdr's raw schema.
-- Existing agents survive mobile disconnects.
-- Provider failures remain isolated.
+Herdr supplies runtime identity/status. Provider adapters supply semantic
+conversation items when their transcript format can be decoded. Otherwise,
+return an explicit `agent.read` compatibility view.
 
 ## Consequences
 
-The native module owns bridge process and request timeouts. React Native sees
-only normalized agents, conversations, tools, requests, and runtime state.
+Android and product UI depend on normalized models rather than raw Herdr
+schemas. Native code owns channel lifetime and request deadlines.
+
+The current deployment uses verified content-addressed files under
+`~/.local/share/remote-workspace/`, not a mutable script guarded only by a
+separate checksum. Durable commands and handshake readiness are specified in
+the [bridge contract](../../modules/remote-core/bridge/README.md).
 
 ## Rules
 
-- Never allocate a PTY for the bridge.
-- Never expose a generic shell action in the bridge protocol.
-- Never print diagnostics to bridge stdout.
-- Never infer semantic messages when only terminal output is available.
-- Never stop Herdr or an agent when the mobile client disconnects.
+- Do not allocate a PTY or expose a generic shell action in the bridge.
+- Keep diagnostics off stdout.
+- Do not infer semantic messages from raw terminal output.
+- Disconnecting the mobile client must not stop Herdr or its agents.
+- Preserve journal history across bridge upgrades and reconnects.

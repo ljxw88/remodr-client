@@ -1,176 +1,118 @@
-# Physical Android development with Tailscale
+# Physical Android development
 
-remodr uses two independent connections during development:
+[Documentation index](README.md) | [Build instructions](development.md)
+
+A development installation uses two independent connections:
 
 ```text
-App SSH traffic  -> Tailscale -> remote server
-JavaScript bundle -> USB ADB  -> Metro on the development Mac
+App SSH traffic   -> LAN, public SSH, or VPN -> remote server
+JavaScript bundle -> USB ADB                -> Metro on the development machine
 ```
 
-Keep Tailscale enabled on the Android phone. Routing Metro through USB avoids
-VPN routing, Wi-Fi isolation, and firewall issues while preserving access to
-servers on the tailnet.
+USB routing for Metro avoids relying on the phone's Wi-Fi/VPN path for the
+JavaScript bundle. If your SSH host is on a tailnet, keep Tailscale connected
+on the phone. Tailscale is a deployment choice, not an app requirement.
 
-## Prerequisites
+## USB setup
 
-- Install the Android development build, not Expo Go.
-- Enable Developer options and USB debugging on the phone.
-- Connect the phone by USB and approve its debugging prompt.
-- Install the project dependencies with `npm install`.
+Install the development build using the [build guide](development.md), enable
+USB debugging, and approve the computer's debugging prompt.
 
-Confirm that ADB can see the phone:
+From the repository root, list available devices and select the phone:
 
 ```bash
 adb devices -l
+export ANDROID_SERIAL=YOUR_DEVICE_SERIAL
+adb -s "$ANDROID_SERIAL" reverse tcp:8081 tcp:8081
+npx expo start --dev-client --localhost
 ```
 
-The current test phone appears as:
+Replace `YOUR_DEVICE_SERIAL` with the identifier reported by `adb devices`.
+Open **remodr** and select the development server at
+`http://127.0.0.1:8081` in its launcher.
 
-```text
-R3GL70CQ5KA  device  model:SM_F971B
-```
-
-## Recommended workflow: Tailscale plus USB Metro
-
-1. Keep Tailscale enabled on the phone.
-2. Forward the phone's local port `8081` to Metro through USB:
-
-   ```bash
-   adb -s R3GL70CQ5KA reverse tcp:8081 tcp:8081
-   ```
-
-3. Start Metro in development-client mode:
-
-   ```bash
-   npx expo start --dev-client --localhost
-   ```
-
-4. Open the installed **remodr** development app.
-
-The app can now connect to a server by its Tailscale address while loading its
-JavaScript bundle from `http://127.0.0.1:8081`.
-
-Check the active forwarding rule with:
+Check the forwarding rule with:
 
 ```bash
-adb -s R3GL70CQ5KA reverse --list
+adb -s "$ANDROID_SERIAL" reverse --list
 ```
 
-Expected output:
+The result should include `tcp:8081 tcp:8081`. Recreate the rule after unplugging
+USB, restarting ADB, or rebooting the device. Qualify ADB commands when more than
+one emulator/phone is attached.
 
-```text
-UsbFfs tcp:8081 tcp:8081
-```
+## Updating the installed app
 
-ADB reverse rules are temporary. Run the `adb reverse` command again after
-reconnecting USB, restarting ADB, or rebooting the phone.
-
-## Rebuild after native changes
-
-Metro can update TypeScript and JavaScript, but it cannot add Kotlin modules to
-an installed binary. Rebuild and reinstall after changing `app.json`, upgrading
-Expo, adding a native dependency, or changing `modules/remote-core`:
+Metro applies JavaScript changes but cannot add native modules or replace the
+bundled Python bridge. Rebuild/reinstall after native dependencies, Kotlin,
+bridge assets, or native app configuration change:
 
 ```bash
 npx expo run:android --device
 ```
 
-Select `SM_F971B` when prompted. If the APK has already been built, it can also
-be installed directly:
+If the APK has already been built, install it without clearing app data:
 
 ```bash
-adb -s R3GL70CQ5KA install -r \
+adb -s "$ANDROID_SERIAL" install -r \
   android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Then restart Metro:
+The application ID remains `com.anonymous.remoteworkspace` after the remodr
+rename. Display branding, deep-link scheme, and installation identity are
+different settings; see [app identity](development.md#app-identity).
 
-```bash
-npx expo start --dev-client --localhost -c
-```
+## Wireless Metro
 
-## Wireless fallback over Tailscale
-
-When USB is unavailable, Metro can be reached through the Mac's Tailscale
-address. Start Metro so it listens beyond localhost:
+When USB is unavailable, run Metro on a reachable interface:
 
 ```bash
 npx expo start --dev-client --lan
 ```
 
-In the development launcher, connect to:
+Open `http://YOUR_DEVELOPMENT_MACHINE_ADDRESS:8081` in the app's development
+launcher. The phone must be able to reach that address and the host firewall
+must allow the connection.
 
-```text
-http://<mac-tailscale-ip>:8081
-```
-
-Find the Mac address with:
+For Tailscale, obtain the development machine's tailnet address with:
 
 ```bash
 tailscale ip -4
 ```
 
-For the current development Mac, that address is `100.90.20.12`. The wireless
-path requires both devices to be on the same tailnet and the Mac firewall to
-allow Metro on port `8081`.
+Use the reported address, not an address copied from another developer's setup.
+An emulator's host alias, `10.0.2.2`, is not the development machine's address
+on a physical phone.
 
 ## Troubleshooting
 
-### No development build is installed
+| Symptom | Action |
+| --- | --- |
+| No development build is installed | Run `npx expo run:android --device`; starting Metro alone does not install an app |
+| `RemoteCore` or another native module is missing | Rebuild and reinstall; Expo Go cannot load the local module |
+| Development launcher is open instead of the product UI | Select a reachable Metro URL; this is not proof of an SSH failure |
+| Metro loads but servers do not connect | Inspect the SSH endpoint, host trust, saved credentials, VPN, and inline connection status |
+| SSH works but the bundle does not load | Inspect ADB reverse, the Metro process, and port 8081 routing |
+| More than one target is attached | Use `adb -s "$ANDROID_SERIAL"` for each operation |
 
-```text
-CommandError: No development build (...) for this project is installed.
-```
-
-`npx expo start` starts Metro but does not install the native app. Run:
-
-```bash
-npx expo run:android --device
-```
-
-Do not open this project in Expo Go because `RemoteCore` is a local native
-Android module.
-
-### Cannot find native module `RemoteCore`
-
-The installed development app is stale or the project was opened in Expo Go.
-Rebuild and reinstall the development app, then clear Metro's cache:
-
-```bash
-npx expo run:android --device
-npx expo start --dev-client --localhost -c
-```
-
-### Blank or white screen
-
-If the foreground activity is
-`expo.modules.devlauncher.launcher.DevLauncherActivity`, the launcher has not
-initialized the React Native bundle. Recreate the USB tunnel and restart the
-app:
-
-```bash
-adb -s R3GL70CQ5KA reverse tcp:8081 tcp:8081
-adb -s R3GL70CQ5KA shell am force-stop com.anonymous.remoteworkspace
-npx expo start --dev-client --localhost
-```
-
-Verify Metro locally:
+Useful local checks:
 
 ```bash
 curl http://127.0.0.1:8081/status
+adb -s "$ANDROID_SERIAL" reverse --list
+adb -s "$ANDROID_SERIAL" shell am force-stop com.anonymous.remoteworkspace
 ```
 
-The expected response is:
+Metro's status response is `packager-status:running`. A cache clear
+(`npx expo start --dev-client --localhost -c`) can help stale bundle state,
+but it cannot update native code. Avoid multiple Metro processes competing for
+the same port.
 
-```text
-packager-status:running
-```
+## Mobile recovery checks
 
-### More than one Android target is connected
-
-When an emulator and phone are both connected, qualify every ADB command with
-the phone serial:
-
-```bash
-adb -s R3GL70CQ5KA <command>
-```
+Use a disposable agent when exercising airplane mode, Wi-Fi/cellular changes,
+screen-off behavior, or process restarts. Follow the
+[connection checklist](connection-resilience.md#failure-injection-checklist).
+Emulator success does not establish physical radio roaming or OEM battery
+behavior. A foreground-service notification does not guarantee uninterrupted
+network or JavaScript execution under Doze.

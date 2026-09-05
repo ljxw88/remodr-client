@@ -22,8 +22,10 @@ near-black sooner, which keeps more of a screen neutral; raise it to carry the
 indigo further down. Keep the last colour equal to `Colors.background` so the
 foot of the gradient matches anything painted with the flat canvas colour.
 
-Rendered once behind the navigator by `src/components/ui/app-background.tsx`.
-Screens and stacks are transparent on purpose — see `DESIGN.md`.
+`src/components/ui/app-background.tsx` renders the gradient at the root and in
+routes/blur targets that need their own opaque backdrop. `CanvasFill` aligns
+those copies with the window. Transparent headers read through to the route's
+canvas, not to the preceding screen; see `DESIGN.md`.
 
 ### The fade at the bottom of scrolling content
 
@@ -49,7 +51,7 @@ different colour reads as a grey band, which is what happened when the canvas
 became a gradient while these values still assumed flat near-black.
 
 Consumed by `src/components/ui/scroll-edge-frame.tsx`, which builds the CSS
-gradient strings from these values. Applied on the Agents list and the agent
+gradient strings from these values. Applied to tab scrollables and the agent
 conversation screen.
 
 ### The frosted surfaces
@@ -97,8 +99,8 @@ export const GlassMaterial = {
 - **More blur without a darker bar**: on Android `intensity` drives the tint
   alpha *and* the blur radius, so raising it for more blur also smokes the
   surface over. Lower `blurReductionFactor` instead — radius is
-  `intensity / blurReductionFactor`. Keep the result at or under 25; the
-  underlying Dimezis BlurView clamps above that.
+  `intensity / blurReductionFactor`. Existing settings use a radius near 25;
+  check the selected Android backend's limits before increasing it.
 - **A darker or lighter chrome tint**: swap `tint` for another
   `systemNNNMaterialDark` value. Their alpha multipliers are listed in
   `expo-blur`'s `TintStyle.kt`; `ultraThin` is 0.55, `thin` 0.70, `dark` 0.69.
@@ -109,9 +111,8 @@ band inside the surface's own edges — the effect looks like a second rectangle
 floating in the glass. If a surface needs to feel lifted, raise its fill or its
 rim rather than adding a shadow back.
 
-`Colors.chrome` is separate again. Sheets and menus render in their own window
-and cannot blur the app behind them, so that one is opaque — tinted toward the
-canvas indigo so it still looks related.
+`SheetPanel` renders an opaque base with the shared glass tint and rim in its
+modal window. It does not sample the underlying app's blur target.
 
 ### The accent, text, and surfaces
 
@@ -157,5 +158,5 @@ any JavaScript runs, so it cannot read `Colors`. Keep it equal to
   near-black.
 - Brand colours for third-party providers are the one accepted exception, and
   belong beside the icon that uses them.
-- Do not hand-roll a frosted surface. Use `GlassSurface`, or `GlassRim` when a
+- Do not hand-roll a frosted surface. Use `GlassSurface`, or `glassRim` when a
   `Pressable` needs the material without an extra layout node.

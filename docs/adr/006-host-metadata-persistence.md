@@ -1,21 +1,29 @@
 # ADR 006: Host metadata persistence
 
+Status: accepted.
+
+[Decision index](README.md) | [Current security guide](../security.md)
+
 ## Context
 
-Phase 1 needs saved hosts that survive restart, without credentials.
+Saved hosts must survive app restarts without embedding credentials in their
+metadata.
 
 ## Decision
 
-Store a versioned JSON document of `HostProfile` records through a `HostRepository`. The current adapter is AsyncStorage.
-
-## Reasons
-
-A repository hides storage so SQLite or files can replace AsyncStorage later. Zod validates reads and writes and drops unknown secret-like fields.
+Store a versioned JSON document through `HostRepository`. The implementation is
+[`JsonHostRepository`](../../src/services/json-host-repository.ts) over
+AsyncStorage. Zod schemas in [`hosts.ts`](../../src/domain/hosts.ts) validate
+records and exclude unknown fields.
 
 ## Consequences
 
-Host lists are local-only. Storage is unencrypted, which is acceptable because no secrets are written.
+Metadata remains local and unencrypted. It includes endpoint and authentication
+method information, an optional `credentialId`, grouping/favorite fields,
+jump-host IDs, and timestamps. These fields can still be sensitive even though
+they contain no password/private-key material.
 
-## Rules
-
-Do not persist passwords, keys, or tokens. Keep writes limited to the host metadata schema.
+Repository writes are serialized. Credential persistence and host trust are
+separate native concerns defined by [ADR 007](007-known-hosts-and-secrets.md).
+Connection-setting changes must also invalidate old connection attempts and
+queued commands; see [ADR 015](015-connection-recovery.md).

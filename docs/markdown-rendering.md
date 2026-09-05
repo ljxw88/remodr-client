@@ -1,170 +1,125 @@
-# Assistant markdown rendering
+# Assistant Markdown rendering
 
-How `assistant_message` content is turned into native views. See
-[ADR 009](adr/009-assistant-markdown-rendering.md) for why this shape was
-chosen.
+[Documentation index](README.md) | [Decision](adr/009-assistant-markdown-rendering.md)
 
-## Pipeline
+`MarkdownMessage` renders the latest `assistant_message.markdown` value as
+native React Native views:
 
 ```text
-item.markdown (latest received snapshot, rendered in full)
-    ↓ clamp to 100k chars
-    ↓ remend()                    repair unterminated emphasis / inline code
-    ↓ useMarkdown(value, {...})   marked lexer → Parser → ReactNode[]
-    ↓ ChatMarkdownRenderer        per-node overrides
-<View style={gap: 16}>            plain container, no list
+received Markdown string
+    -> clamp to 100,000 characters
+    -> remend partial-syntax repair
+    -> react-native-marked useMarkdown
+    -> ChatMarkdownRenderer
+    -> View containing native message blocks
 ```
 
-Entry point is `MarkdownMessage`, used once in
-`src/app/agents/[id].tsx` for `kind === 'assistant_message'`.
-
-## Files
+## Source map
 
 | File | Responsibility |
-|---|---|
-| `markdown-message.tsx` | Public component. Clamping, `remend`, hook wiring |
-| `renderer.tsx` | `Renderer` subclass: `code`, `table`, key management |
-| `code-block.tsx` | Fence chrome: language label, copy, scroll, diff branch |
-| `syntax.ts` | Language aliases, shell grammar, Prism tokenisation |
-| `diff.ts` | Classifies diff lines into added/removed/hunk/meta/context |
-| `markdown-theme.ts` | `MarkedStyles`, syntax palette, diff palette, layout |
+| --- | --- |
+| [`markdown-message.tsx`](../src/components/markdown/markdown-message.tsx) | Memoized public component, length cap, repair and parser setup |
+| [`renderer.tsx`](../src/components/markdown/renderer.tsx) | Custom code/table/link/image rendering and generated node keys |
+| [`code-block.tsx`](../src/components/markdown/code-block.tsx) | Language label, copy action, scrolling, and diff rendering |
+| [`syntax.ts`](../src/components/markdown/syntax.ts) | Prism grammars, aliases, shell registration, highlighting limit |
+| [`diff.ts`](../src/components/markdown/diff.ts) | Added/removed/hunk/meta/context line classification |
+| [`markdown-theme.ts`](../src/components/markdown/markdown-theme.ts) | Message typography, block spacing, syntax and diff colors |
+| [`conversation-refresh.ts`](../src/features/agents/conversation-refresh.ts) | Visible-chat polling cadence and shared in-flight gate |
 
-Dependencies: `react-native-marked` (parser + base renderer),
-`prism-react-renderer` (tokeniser), `remend` (stream repair),
-`expo-clipboard` (copy), `react-native-svg` (peer of `react-native-marked`).
+The chat calls `MarkdownMessage` directly for assistant rows. There is no
+client-side typewriter timer or prefix slicing.
 
-## Upstream behaviour worked around
+## Snapshots and live output
 
-These are deliberate overrides, not preference. Removing them reintroduces real
-bugs.
+The bridge reads provider transcript files. It does not subscribe to Copilot's
+ephemeral `assistant.message_delta` token events. Some providers/log formats
+make completed messages available only at the end; the app displays those
+whole instead of simulating their generation.
 
-**Node keys.** The stock `Renderer` keys nodes with a `github-slugger` instance
-that is never reset, so identical markdown yields different keys on every
-parse. During streaming that remounts the whole message each chunk.
-`ChatMarkdownRenderer.getKey` uses a counter and `resetKeys()` rewinds it
-immediately before each parse, so an unchanged prefix keeps its keys.
+The focused, foreground, connected chat refreshes every 1-2 seconds while
+working or discovering an unanswered question. It refreshes every 3 seconds
+when idle/done, including while a question is already visible. This catches
+final file writes that follow a done-status event. Reads are serialized across
+effect restarts and stop when the chat loses focus, backgrounds, or disconnects.
 
-**Table width.** `getTableWidthArr` assigns *every* column
-`windowWidth * 1.3 / 3` regardless of column count, so any table with three or
-more columns overflows and is clipped with no way to scroll. `table()` sizes
-columns to the available width (floor `MIN_TABLE_COLUMN`, 112dp) and wraps the
-result in a horizontal `ScrollView`.
+The repository skips unchanged transcript writes/publications. Component
+memoization avoids reparsing unchanged Markdown. Changed text is still parsed
+as a full string on the JavaScript thread; this is not incremental parsing.
 
-**Table key.** `table()` is the only base renderer method that emits no key.
-It is cloned with one. `markdown-message.test.ts` fails if a key warning
-returns.
+True token streaming would need a provider event transport. The
+[Copilot SDK streaming guide](https://github.com/github/copilot-sdk/blob/main/docs/features/streaming-events.md)
+describes that separate API.
 
-**`FlatList` nesting.** The default `Markdown` component renders its blocks
-into a `FlatList`. The transcript in `agents/[id].tsx` is already a `FlatList`,
-so that would nest virtualised lists. The `useMarkdown` hook returns
-`ReactNode[]` instead, which is why the container is a plain `View`.
+## Rendering behavior
 
-**Light-mode defaults.** `getStyles` flattens user styles last, so anything not
-overridden in `markdownStyles` keeps a light default. Headings ship a bottom
-border, links and inline code ship `fontStyle: italic`. All are explicitly
-reset.
+`useMarkdown` returns blocks for a plain `View`. Do not replace it with the
+library's `Markdown` component inside the chat: that component creates another
+`FlatList` inside the transcript list.
 
-## Streaming
+The renderer instance and parser options are memoized. `getKey()` assigns
+counter-based keys, including a key for the table wrapper. Node identity is not
+guaranteed across changed parses. Unchanged-message memoization and explicit keys
+should not be confused with incremental reconciliation.
 
-There is no client-side typewriter/reveal timer. Saved history, re-opened rows,
-and fresh snapshots render all received text immediately. `MarkdownMessage` is
-memoized so runtime/status updates do not reparse unchanged replies.
+Tables size columns from available width, with a 112dp minimum, and scroll
+horizontally when necessary. Code blocks also scroll horizontally and offer a
+copy action.
 
-The bridge reads provider transcript files; that is not the Copilot SDK's live
-`assistant.message_delta` event stream. A provider may persist only completed
-messages, so a reply can arrive whole. Do not manufacture token streaming from
-that completed text. True token streaming would require a separate provider
-event transport; see the [Copilot SDK streaming documentation](https://github.com/github/copilot-sdk/blob/main/docs/features/streaming-events.md).
+Only HTTP/HTTPS links are interactive. Other URI schemes render as text.
+Images render an `[Image: ...]` placeholder using alt/title text; transcript
+images do not mount network image components.
 
-While a chat is focused, foreground and connected, `conversation-refresh.ts`
-serializes refreshes (1-2 seconds while working, 3 seconds when idle/done).
-Idle refreshes are intentional: Herdr can report completion before the final
-transcript write. Leaving the screen, backgrounding, or disconnecting stops
-the loop. A status change shares the previous in-flight request rather than
-starting overlapping requests.
+`remend` repairs partial inline syntax:
 
-`remend` repairs inline syntax so partial tokens never show raw markers:
+| Input during an update | Display |
+| --- | --- |
+| `This is **bold` | Bold text without exposed delimiter markers |
+| `` Run `npm inst `` | Inline code while the closing delimiter is missing |
+| An unclosed fenced block | Code through the end of the current message |
 
-| Mid-stream input | Rendered |
-|---|---|
-| `This is **bold` | **bold** |
-| `` Run `npm inst `` | `npm inst` |
+Unclosed fences already have defined Markdown behavior; repair does not need
+to invent a closing fence. Math repair is disabled because there is no math
+renderer and `$` is common in shell output.
 
-Unterminated fences need no repair: CommonMark specifies that an unclosed fence
-runs to end of document, so `marked` already emits a complete `code` token.
-`remend` deliberately leaves fences and partial tables alone.
+## Extending the renderer
 
-`katex` and `inlineKatex` are disabled — there is no math renderer, and `$` is
-common in shell output.
+- Add language aliases and labels in `syntax.ts`. Check `resolveLanguage()`
+  against the installed Prism bundle instead of assuming a grammar exists.
+  Shell is registered by the project; diff rendering has a separate path.
+- Blocks longer than `MAX_HIGHLIGHT_LENGTH` (20,000 characters), unknown
+  grammars, or highlighting failures render without syntax tokenization.
+- Change transcript text size through `MessageText` in `markdown-theme.ts`.
+  User bubbles use the same base typography.
+- Change block rhythm through `blockStyles.container.gap` and the existing
+  heading styles rather than independent margins in every renderer method.
+- Match the installed `Renderer` interface when overriding a node and assign
+  a key to generated elements.
 
-Cost: the full string is re-lexed on every chunk, on the JS thread. Acceptable
-for typical replies; if long transcripts start to jank, throttle updates at the
-call site rather than parsing incrementally.
+## Deliberate limits
 
-## Extending
+LaTeX is not rendered. `$E = mc^2$` and `$$...$$` remain text; ordinary Markdown
+escaping can remove the backslashes from `\(x^2\)`. Supporting mathematical
+layout would require a tokenizer/renderer design, not just enabling a repair
+option.
 
-**Add a language.** Prism bundles 53 grammars. Check
-`resolveLanguage('name')`; if it returns `null` the block renders as plain
-text. Map spellings in `ALIASES`, add a display name to `LABELS`. `bash`,
-`java`, and `diff` are *not* bundled — `shell` is registered manually in
-`registerShell()`, and `diff` is handled by `diff.ts`.
+Diff fences color lines by change type. They do not tokenize code within each
+diff line. Message content beyond the 100,000-character rendering cap is not
+displayed by `MarkdownMessage`.
 
-**Change how large a message reads.** `MessageText` in `markdown-theme.ts` is
-the one place. Everything else in a message is sized against it, headings
-included, and the user's own bubble uses it directly so both sides of a
-conversation match. It sits a step below the app's body size: a transcript is
-long-form, so fitting more of a sentence on a line is worth more here than
-matching the chrome around it.
-
-**Change syntax colours.** `SyntaxColors` in `markdown-theme.ts` maps ten
-roles. Prism token types map to roles through `ROLES`; unmapped types fall back
-to `plain`.
-
-**Override a node.** Add a method to `ChatMarkdownRenderer` matching
-`RendererInterface`. Always assign `key={this.getKey()}`. Call `super` and
-`cloneElement` when you only need to adjust the stock output.
-
-**Change block rhythm.** Spacing comes from `blockStyles.container.gap`, not
-per-block margins. Headings add `marginTop` on top of it.
-
-## Not supported
-
-**LaTeX.** Verified behaviour, not a crash:
-
-| Input | Rendered |
-|---|---|
-| `$E = mc^2$` | `$E = mc^2$` verbatim |
-| `$$\frac{a}{b}$$` | verbatim, as a paragraph |
-| `\(x^2\)` | `(x^2)` — markdown strips the backslashes |
-
-Adding it means a tokenizer extension for `$`/`$$` plus a renderer that draws
-fractions, radicals, and scripts from React Native primitives. No maintained
-pure-JS React Native math renderer currently exists;
-`react-native-enriched-markdown` supports it natively via RaTeX. Agent replies
-about code rarely contain math, so this is a deliberate gap.
-
-**Images.** `marked` parses them and the base renderer handles them, but remote
-image loading in transcripts has not been reviewed.
-
-**Per-line syntax highlighting inside diffs.** Diff lines are coloured by
-change type only; the code within a line is not tokenised.
-
-## Testing
+## Checks
 
 ```bash
-npx jest src/components/markdown --runInBand
+npm test -- --runInBand src/components/markdown \
+  src/features/agents/conversation-refresh.test.ts \
+  src/features/agents/conversation-display.test.ts \
+  src/services/herdr-repository.test.ts
 ```
 
-`syntax.test.ts` and `diff.test.ts` cover pure logic.
-`markdown-message.test.ts` renders through `react-test-renderer` and asserts on
-the resulting text, including streaming repair, unterminated fences, and the
-absence of key warnings.
+Tests cover Markdown output, incomplete syntax, image/link policy, long saved
+replies, unchanged-message parsing, stale activity, serialized refreshes and
+late final output. The test filename pattern is `src/**/*.test.ts`, so renderer
+tests use `createElement` rather than JSX. Read `toJSON()` after `act()` returns.
 
-Tests are `.ts`, not `.tsx`, because `testMatch` is `src/**/*.test.ts`; they use
-`createElement` rather than JSX. Call `toJSON()` *after* `act()` returns, not
-inside the callback, or the tree reads back empty.
-
-Jest needs configuration that Metro does not: `marked`, `github-slugger`,
-`html-entities`, `@jsamr/*`, and `svg-parser` ship ESM and are added to
-`transformIgnorePatterns`; `remend` is ESM-only with no `require` condition and
-is mapped directly to its `dist`; `global.css` is stubbed via `jest/`.
+Jest's ESM transforms, `remend` mapping, and CSS stub are configured in
+[`package.json`](../package.json). Do not copy that test configuration into Metro
+without a separate runtime need.

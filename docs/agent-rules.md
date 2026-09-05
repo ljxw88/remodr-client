@@ -1,23 +1,33 @@
-# Agent rules
+# Contributor rules
 
-1. Inspect existing code before changing it.
-2. Implement the smallest coherent slice for the current phase.
-3. Do not add an interactive terminal. Persist credentials only through the Android Keystore-backed store.
-4. Do not replace Expo, React Native, or TypeScript.
-5. Do not add dependencies unless the current milestone needs them.
-6. Keep UI on React Native primitives. No large design system.
-7. Map native errors to typed application errors. Never show raw stack traces.
-8. Run TypeScript, tests, and Android builds that cover the change.
-9. Do not claim a feature works if it was not verified.
-10. Web and Framer designs do not port directly. Translate each technique to a
-    React Native equivalent before agreeing to a design, and build shader
-    effects with Skia following [`skia-effects.md`](skia-effects.md).
-11. Verify visual work from device screenshots, not from reasoning. Shader
-    mistakes render plausibly rather than failing.
-12. Use `GlassSurface` or the `glassRim` style for any frosted surface. Never
-    hand-roll a translucent fill plus a border, and never nest a `BlurView`
-    inside the blur target it samples — that is a native stack overflow, not a
-    layout bug.
-13. Surface a failed fetch and give it a way to run again. An empty list that
-    cannot tell "nothing here" from "the request failed" strands the user, and
-    an effect keyed only on an id never retries once the transport comes up.
+[Documentation index](README.md)
+
+These rules apply to agent-assisted changes as well as manual changes.
+
+1. Read the relevant code and [SDK 57 documentation](https://docs.expo.dev/versions/v57.0.0/)
+   before changing an Expo API. Installed package versions are in `package.json`.
+2. Make a coherent change within the requested scope. Preserve existing user
+   work and do not replace Expo, React Native, or TypeScript.
+3. Keep SSH, host verification, and secret handling behind the native boundary.
+   Do not add an interactive terminal or a generic bridge shell action.
+4. Keep recovery in the per-device supervisor. Respect explicit disconnect,
+   fatal authentication/trust errors, and the owning device of each request.
+5. Preserve drafts, cached transcripts, and durable command IDs across retries.
+   Never automatically replay a command whose side effect is uncertain.
+6. Use React Native primitives and shared controls. Add dependencies only when
+   the requested behavior needs them.
+7. Use `GlassSurface`/`glassRim` for ordinary surfaces. Keep blur consumers
+   outside their sampled target; follow the [glass decision](adr/012-frosted-glass-material.md).
+8. Use [Skia guidance](skia-effects.md) for shader controls. Do not apply
+   canvas-measured decorative rims to the resizing composer.
+9. Render received message text immediately. Do not animate cached history or
+   describe transcript polling as a live token event stream.
+10. Surface errors according to their meaning. Transient connection loss belongs
+    in automatic recovery and inline status, not repeated modal dialogs.
+11. Do not log credentials, raw prompts, or full bridge request objects.
+    Consult [security](security.md) before changing storage or diagnostic output.
+12. Use targeted existing [checks](development.md#checks). Inspect visual changes
+    on a device; distinguish emulator results from physical-device evidence.
+13. Update the current guide when behavior changes and annotate affected ADRs.
+    Documentation-only changes need factual and link/path review, not unrelated
+    tests or builds.
