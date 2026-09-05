@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Herdr mobile bridge.
 
-stdin/stdout use Remote Workspace protocol 1 as NDJSON.
+stdin/stdout use remodr protocol 1 as NDJSON.
 stderr is reserved for diagnostics. The Herdr socket never leaves the server.
 """
 

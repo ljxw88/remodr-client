@@ -1,4 +1,4 @@
-# Remote Workspace
+# remodr
 
 Android frontend for coding agents managed by Herdr on a remote development
 server.
@@ -31,6 +31,13 @@ Android background-execution limits.
 
 Top-level navigation uses a custom floating glass dock that collapses to compact
 icons during downward scrolling and expands on upward scrolling or tab changes.
+
+## App identity
+
+The display name is **remodr**. The existing Android application ID, deep-link
+scheme, storage keys, and Expo project link are retained so upgrades preserve
+saved servers, credentials, and build-service configuration. The GitHub repository
+is [ljxw88/remodr-client](https://github.com/ljxw88/remodr-client).
 
 ## Current remote compatibility
 

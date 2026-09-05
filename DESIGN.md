@@ -1,6 +1,6 @@
-# Remote Workspace — Dark Mobile Design
+# remodr — Dark Mobile Design
 
-Remote Workspace is an always-dark, conversation-first Android client for
+remodr is an always-dark, conversation-first Android client for
 remote coding agents. It uses a calm near-black canvas, restrained violet
 accents, and soft depth to make complex remote workflows feel native on a
 phone. The interface borrows proven hierarchy from modern finance and chat

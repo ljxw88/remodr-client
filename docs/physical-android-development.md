@@ -1,6 +1,6 @@
 # Physical Android development with Tailscale
 
-Remote Workspace uses two independent connections during development:
+remodr uses two independent connections during development:
 
 ```text
 App SSH traffic  -> Tailscale -> remote server
@@ -45,7 +45,7 @@ R3GL70CQ5KA  device  model:SM_F971B
    npx expo start --dev-client --localhost
    ```
 
-4. Open the installed **Remote Workspace** development app.
+4. Open the installed **remodr** development app.
 
 The app can now connect to a server by its Tailscale address while loading its
 JavaScript bundle from `http://127.0.0.1:8081`.
@@ -174,4 +174,3 @@ the phone serial:
 ```bash
 adb -s R3GL70CQ5KA <command>
 ```
-

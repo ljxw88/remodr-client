@@ -219,7 +219,7 @@ class ConnectionService : Service() {
     }
     return Notification.Builder(this, CHANNEL)
       .setSmallIcon(R.drawable.ic_connection)
-      .setContentTitle("Remote Workspace")
+      .setContentTitle(applicationInfo.loadLabel(packageManager))
       .setContentText(label.take(100).ifBlank { "Syncing remote sessions and queued messages" })
       .setStyle(Notification.BigTextStyle().bigText(
         "${label.take(100).ifBlank { "Syncing remote sessions and queued messages" }}. " +
