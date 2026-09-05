@@ -1,4 +1,4 @@
-# remodr
+# Remodr
 
 Android client for conversations with coding agents managed by Herdr on remote
 development servers.
@@ -38,6 +38,7 @@ Start at the [documentation index](docs/README.md).
 | USB Metro, physical phones, and Tailscale | [Physical Android development](docs/physical-android-development.md) |
 | Component ownership | [Architecture](docs/architecture.md) |
 | Creation, selection, settings and mobile keyboards | [Page workflows](docs/form-workflows.md) |
+| Icon artwork, platform exports and regeneration | [App branding](docs/app-branding.md) |
 | Server requirements and provider support | [Herdr integration](docs/herdr-mobile-architecture.md) |
 | Reconnect, durable messages, and background limits | [Connection resilience](docs/connection-resilience.md) |
 | Credentials, host verification, and persisted data | [Security](docs/security.md) |
@@ -45,7 +46,7 @@ Start at the [documentation index](docs/README.md).
 
 ## App identity
 
-The display name is **remodr**. Existing installation, storage, deep-link, and
+The display name is **Remodr**. Existing installation, storage, deep-link, and
 Expo project identifiers are retained for upgrade compatibility. See
 [app identity](docs/development.md#app-identity) before changing them.
 

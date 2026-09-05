@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "remodr",
+    "name": "Remodr",
     "slug": "sparminal",
     "version": "1.0.0",
     "backgroundColor": "#08090B",
@@ -13,7 +13,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#08090B",
+        "backgroundColor": "#3544D8",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"

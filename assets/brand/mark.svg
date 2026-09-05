@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="porcelain" x1="170" y1="72" x2="350" y2="450" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset=".45" stop-color="#F7F9FF"/>
+      <stop offset="1" stop-color="#D8E0FF"/>
+    </linearGradient>
+  </defs>
+  <path transform="translate(-20 0)" fill="url(#porcelain)" fill-rule="evenodd"
+    d="M156 72H276C350 72 396 111 396 180C396 226 374 260 336 278L418 407C427 421 417 440 400 440H344L250 292H202V416C202 429 191 440 178 440H156C143 440 132 429 132 416V104C132 86 140 72 156 72ZM202 140V224H272C307 224 326 209 326 183C326 155 307 140 272 140H202Z"/>
+</svg>

@@ -1,4 +1,4 @@
-# remodr documentation
+# Remodr documentation
 
 These guides describe the checked-in implementation. Architecture decision
 records (ADRs) explain why it has that shape; their context is historical, not
@@ -17,6 +17,7 @@ a list of unfinished milestones.
 | Change message formatting or snapshot rendering | [Markdown rendering](markdown-rendering.md) |
 | Work on shader effects | [Skia effects](skia-effects.md) |
 | Change creation, selection, settings, or keyboard behavior | [Page workflows](form-workflows.md) |
+| Change the app icon or display branding | [App branding](app-branding.md) |
 | Make a code change with an agent | [Contributor rules](agent-rules.md) |
 | Find the rationale for an architectural choice | [ADR index](adr/README.md) |
 

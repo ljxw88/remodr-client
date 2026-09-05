@@ -2,7 +2,7 @@
 
 [Documentation index](README.md)
 
-remodr is an Android conversation client for coding agents managed by Herdr.
+Remodr is an Android conversation client for coding agents managed by Herdr.
 React Native owns the interface, Kotlin owns SSH resources, and a deployed
 Python bridge translates Herdr/provider data into the app's models. The product
 has no interactive terminal.

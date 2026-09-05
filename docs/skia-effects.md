@@ -104,7 +104,7 @@ so Expo can select its compatible version. The current project relies on the
 Expo preset rather than a custom Babel plugin configuration.
 
 Skia itself is [included in SDK 57 Expo Go](https://docs.expo.dev/versions/v57.0.0/sdk/skia/).
-The remodr app still requires a development build because of its local
+The Remodr app still requires a development build because of its local
 `RemoteCore` module.
 
 Inspect representative states on an Android target: light/dark parts of the
