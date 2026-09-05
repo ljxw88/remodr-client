@@ -1,4 +1,4 @@
-import type { ConversationItem } from '@/domain/herdr';
+import type { AgentStatus, ConversationItem } from '@/domain/herdr';
 
 export type ToolActivityItem = Extract<ConversationItem, { kind: 'tool_activity' }>;
 
@@ -9,6 +9,18 @@ export type ToolActivityGroup = {
 };
 
 export type ConversationDisplayItem = ConversationItem | ToolActivityGroup;
+
+export function currentToolActivity(
+  items: ConversationItem[], status: AgentStatus | undefined,
+): ToolActivityItem | undefined {
+  if (status !== 'working') return undefined;
+  for (let index = items.length - 1; index >= 0; index--) {
+    const item = items[index];
+    if (item.kind === 'user_message') return undefined;
+    if (item.kind === 'tool_activity' && item.state === 'running') return item;
+  }
+  return undefined;
+}
 
 export function groupToolActivity(
   items: ConversationItem[],

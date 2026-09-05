@@ -1,4 +1,4 @@
-import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useIsFocused, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -35,11 +35,12 @@ import { AgentActionsSheet } from '@/features/agents/agent-actions-sheet';
 import { AgentTuningSheet } from '@/features/agents/agent-tuning-sheet';
 import { HumanRequestBar } from '@/features/agents/human-request-bar';
 import { useAgentConversation, useHerdr } from '@/features/agents/use-herdr';
-import { useRevealedText } from '@/features/agents/use-revealed-text';
+import { conversationRefreshInterval, startConversationRefresh } from '@/features/agents/conversation-refresh';
 import { CommandDelivery, ConnectionStatus } from '@/features/connection/connection-status';
 import { useConnectionSnapshot, useForeground, usePendingCommands } from '@/features/connection/use-connection';
 import {
   groupToolActivity,
+  currentToolActivity,
   toolActivitySummary,
   type ConversationDisplayItem,
   type ToolActivityGroup,
@@ -67,6 +68,7 @@ export default function AgentConversationScreen() {
     : undefined;
   const ownerSnapshot = useConnectionSnapshot(ownerDeviceId);
   const foreground = useForeground();
+  const focused = useIsFocused();
   const commands = usePendingCommands();
   const ownerConnected = ownerConnection === 'connected' &&
     (!ownerSnapshot || ownerSnapshot.phase === 'connected');
@@ -125,20 +127,8 @@ export default function AgentConversationScreen() {
     () => groupToolActivity(conversation?.items ?? []).reverse(),
     [conversation?.items],
   );
-  const activeTool = useMemo(
-    () =>
-      [...(conversation?.items ?? [])]
-        .reverse()
-        .find(
-          (
-            item,
-          ): item is Extract<ConversationItem, { kind: 'tool_activity' }> =>
-            item.kind === 'tool_activity' && item.state === 'running',
-        ),
-    [conversation?.items],
-  );
+  const activeTool = currentToolActivity(conversation?.items ?? [], agentStatus);
   const working = agentStatus === 'working';
-  const showWorking = working || activeTool != null;
   const workingLabel = activeTool?.title
     ? `${activeTool.title}…`
     : `${agent ? providerLabel(agent.provider) : 'The agent'} is working`;
@@ -173,40 +163,25 @@ export default function AgentConversationScreen() {
   }, [id]);
 
   useEffect(() => {
-    if (!agentId || !ownerConnected || !foreground) {
+    if (!agentId || !ownerConnected || !foreground || !focused) {
       return;
     }
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const awaitingQuestion = agentStatus === 'blocked' && !hasOpenRequest;
-    const shouldPoll = agentStatus === 'working' || awaitingQuestion;
-    const interval = agent?.capabilities.streamingConversation ? 1_000 : 2_000;
-    const refresh = async () => {
-      // A status change may restart the effect while its last read is still live.
-      if (refreshRef.current) await refreshRef.current;
-      if (cancelled) return;
-      const request = herdrRepository
-        .loadConversation(agentId)
-        .then(() => { if (!cancelled) setConversationError(null); })
-        .catch((error) => {
-          if (cancelled) return;
-          console.warn('[CONVERSATION] Could not load conversation', error);
-          setConversationError(
-            isBridgeUnavailable(error)
-              ? 'Not connected to this agent’s device.'
-              : toUserMessage(error),
-          );
-        });
-      refreshRef.current = request;
-      await request;
-      if (refreshRef.current === request) refreshRef.current = null;
-      if (!cancelled && shouldPoll) timer = setTimeout(() => void refresh(), interval);
-    };
-    void refresh();
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
+    return startConversationRefresh({
+      interval: conversationRefreshInterval(
+        agentStatus, hasOpenRequest, agent?.capabilities.streamingConversation === true,
+      ),
+      inFlight: refreshRef,
+      refresh: () => herdrRepository.loadConversation(agentId),
+      onSuccess: () => setConversationError(null),
+      onError: (error) => {
+        console.warn('[CONVERSATION] Could not load conversation', error);
+        setConversationError(
+          isBridgeUnavailable(error)
+            ? 'Not connected to this agent’s device.'
+            : toUserMessage(error),
+        );
+      },
+    });
   }, [
     agent?.capabilities.streamingConversation,
     agentId,
@@ -214,6 +189,7 @@ export default function AgentConversationScreen() {
     hasOpenRequest,
     ownerConnected,
     foreground,
+    focused,
     reloadToken,
   ]);
 
@@ -305,7 +281,7 @@ export default function AgentConversationScreen() {
            */
           headerRight: () => (
             <View style={styles.headerActions}>
-              {showWorking ? (
+              {working ? (
                 <ActivityIndicator
                   size="small"
                   color={Colors.accent}
@@ -365,12 +341,11 @@ export default function AgentConversationScreen() {
                 keyboardDismissMode="on-drag"
                 data={displayItems}
                 keyExtractor={(item) => item.id}
-                renderItem={({ item, index }) => (
+                renderItem={({ item }) => (
                   <ConversationRow
                     item={item}
                     agent={agent}
                     onEdit={changeDraft}
-                    streaming={index === 0 && showWorking}
                   />
                 )}
                 showsVerticalScrollIndicator={false}
@@ -530,36 +505,14 @@ function AgentHeader({ agent, connected }: { agent: RemoteAgent; connected: bool
   );
 }
 
-/**
- * Split out so the reveal hook only ever runs for a message, never for the
- * tool rows and banners that share `ConversationRow`.
- */
-function AssistantMessageRow({
-  markdown,
-  streaming,
-}: {
-  markdown: string;
-  streaming: boolean;
-}) {
-  const revealed = useRevealedText(markdown, streaming);
-  return (
-    <View style={styles.assistantMessage}>
-      <MarkdownMessage>{revealed}</MarkdownMessage>
-    </View>
-  );
-}
-
 function ConversationRow({
   item,
   agent,
   onEdit,
-  streaming = false,
 }: {
   item: ConversationDisplayItem;
   agent: RemoteAgent;
   onEdit: (text: string) => void;
-  /** Only the newest message, and only while the agent is still writing. */
-  streaming?: boolean;
 }) {
   const theme = useTheme();
 
@@ -599,7 +552,11 @@ function ConversationRow({
   }
 
   if (item.kind === 'assistant_message') {
-    return <AssistantMessageRow markdown={item.markdown} streaming={streaming} />;
+    return (
+      <View style={styles.assistantMessage}>
+        <MarkdownMessage>{item.markdown}</MarkdownMessage>
+      </View>
+    );
   }
 
   if (item.kind === 'tool_activity') {

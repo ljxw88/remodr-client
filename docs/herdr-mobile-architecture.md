@@ -57,9 +57,12 @@ Agent creation uses the server's `server.agent_manifests` catalog followed by
 Workspace, tab, pane, worktree, and agent-detection events always trigger a
 fresh `session.snapshot`, keeping additions and removals authoritative.
 
-Copilot `assistant.message` chunk events are reconciled by message ID for
-streaming updates. Only the visible working conversation refreshes every
-second; unchanged transcript snapshots are cached by remote file version.
+Copilot `assistant.message` chunk records are reconciled by message ID for
+snapshot updates. The focused, foreground conversation refreshes every 1-2
+seconds while working and every 3 seconds when idle/done, so a final transcript
+write following the done-status event is not missed. Unchanged transcript
+snapshots are cached by remote file version. Received text is displayed
+immediately; no simulated typing is applied to saved replies.
 
 ## Process ownership
 

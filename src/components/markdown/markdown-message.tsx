@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { useWindowDimensions, View } from 'react-native';
 import { useMarkdown } from 'react-native-marked';
 import remend from 'remend';
@@ -16,7 +16,7 @@ const REMEND_OPTIONS = {
   inlineKatex: false,
 } as const;
 
-export function MarkdownMessage({ children }: { children: string }) {
+export const MarkdownMessage = memo(function MarkdownMessage({ children }: { children: string }) {
   const { width } = useWindowDimensions();
   /**
    * Memoised because `useMarkdown` keys its parser on the renderer's identity
@@ -45,4 +45,4 @@ export function MarkdownMessage({ children }: { children: string }) {
   }
 
   return <View style={blockStyles.container}>{elements}</View>;
-}
+});

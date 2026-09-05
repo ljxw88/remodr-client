@@ -469,10 +469,15 @@ export class HerdrRepository {
     const raw = await this.requestForAgent(agentId, 'agent.conversation', { agentId });
     const conversation = conversationSchema.parse(raw);
     if (device.generation !== generation) throw new ConnectionError('ERR_BRIDGE_CLOSED', 'Stale conversation response.');
-    this.rawConversations.set(agentId, conversation);
-    await AsyncStorage.setItem(CONVERSATION_PREFIX + agentId, JSON.stringify(conversation));
+    const serialized = JSON.stringify(conversation);
+    const changed = serialized !== JSON.stringify(this.rawConversations.get(agentId));
+    if (changed) {
+      await AsyncStorage.setItem(CONVERSATION_PREFIX + agentId, serialized);
+      if (device.generation !== generation) throw new ConnectionError('ERR_BRIDGE_CLOSED', 'Stale conversation response.');
+      this.rawConversations.set(agentId, conversation);
+    }
     await this.reconcileCommands(conversation);
-    this.publishConversations();
+    if (changed) this.publishConversations();
     return this.getConversation(agentId) ?? conversation;
   }
 

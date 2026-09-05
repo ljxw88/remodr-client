@@ -2,6 +2,7 @@ import { createElement } from 'react';
 import TestRenderer, { type ReactTestRendererJSON } from 'react-test-renderer';
 
 import { MarkdownMessage } from '@/components/markdown/markdown-message';
+import { ChatMarkdownRenderer } from '@/components/markdown/renderer';
 
 type Json = ReactTestRendererJSON | ReactTestRendererJSON[] | null;
 
@@ -49,6 +50,40 @@ function findNodes(
 }
 
 describe('MarkdownMessage', () => {
+  it('shows long historical replies immediately rather than typing a prefix', () => {
+    const reply = `${'Previously completed output. '.repeat(300)}END_OF_SAVED_REPLY`;
+    expect(textOf(render(reply))).toBe(reply);
+  });
+
+  it('shows hydrated history and new snapshots in full on the render that receives them', () => {
+    let instance!: TestRenderer.ReactTestRenderer;
+    TestRenderer.act(() => {
+      instance = TestRenderer.create(createElement(MarkdownMessage, null, ''));
+    });
+    for (const text of ['Saved history', 'Saved history and a new paragraph', 'A rewritten final reply']) {
+      TestRenderer.act(() => instance.update(createElement(MarkdownMessage, null, text)));
+      expect(textOf(instance.toJSON())).toBe(text);
+    }
+    TestRenderer.act(() => instance.unmount());
+  });
+
+  it('does not reparse unchanged message text when its parent updates', () => {
+    const parse = jest.spyOn(ChatMarkdownRenderer.prototype, 'paragraph');
+    let instance!: TestRenderer.ReactTestRenderer;
+    try {
+      TestRenderer.act(() => {
+        instance = TestRenderer.create(createElement(MarkdownMessage, null, 'Unchanged message'));
+      });
+      const calls = parse.mock.calls.length;
+      expect(calls).toBeGreaterThan(0);
+      TestRenderer.act(() => instance.update(createElement(MarkdownMessage, null, 'Unchanged message')));
+      expect(parse).toHaveBeenCalledTimes(calls);
+    } finally {
+      TestRenderer.act(() => instance.unmount());
+      parse.mockRestore();
+    }
+  });
+
   it('renders inline emphasis without leaking markers', () => {
     const text = textOf(render('Run **now** and _later_ and ~~never~~.'));
 

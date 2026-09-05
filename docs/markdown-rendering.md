@@ -7,7 +7,7 @@ chosen.
 ## Pipeline
 
 ```text
-item.markdown (string, grows during streaming)
+item.markdown (latest received snapshot, rendered in full)
     ↓ clamp to 100k chars
     ↓ remend()                    repair unterminated emphasis / inline code
     ↓ useMarkdown(value, {...})   marked lexer → Parser → ReactNode[]
@@ -65,6 +65,23 @@ border, links and inline code ship `fontStyle: italic`. All are explicitly
 reset.
 
 ## Streaming
+
+There is no client-side typewriter/reveal timer. Saved history, re-opened rows,
+and fresh snapshots render all received text immediately. `MarkdownMessage` is
+memoized so runtime/status updates do not reparse unchanged replies.
+
+The bridge reads provider transcript files; that is not the Copilot SDK's live
+`assistant.message_delta` event stream. A provider may persist only completed
+messages, so a reply can arrive whole. Do not manufacture token streaming from
+that completed text. True token streaming would require a separate provider
+event transport; see the [Copilot SDK streaming documentation](https://github.com/github/copilot-sdk/blob/main/docs/features/streaming-events.md).
+
+While a chat is focused, foreground and connected, `conversation-refresh.ts`
+serializes refreshes (1-2 seconds while working, 3 seconds when idle/done).
+Idle refreshes are intentional: Herdr can report completion before the final
+transcript write. Leaving the screen, backgrounding, or disconnecting stops
+the loop. A status change shares the previous in-flight request rather than
+starting overlapping requests.
 
 `remend` repairs inline syntax so partial tokens never show raw markers:
 

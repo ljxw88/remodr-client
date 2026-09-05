@@ -1,10 +1,29 @@
 import type { ConversationItem } from '@/domain/herdr';
 import {
   groupToolActivity,
+  currentToolActivity,
   toolActivitySummary,
 } from '@/features/agents/conversation-display';
 
 describe('conversation display', () => {
+  const staleTool: ConversationItem = {
+    id: 'old-tool', kind: 'tool_activity', title: 'Reading files', state: 'running',
+  };
+
+  it('never treats a stale tool record as activity in a finished session', () => {
+    expect(currentToolActivity([staleTool], 'done')).toBeUndefined();
+    expect(currentToolActivity([staleTool], 'idle')).toBeUndefined();
+  });
+
+  it('does not reuse a running tool from an earlier turn', () => {
+    expect(currentToolActivity([
+      staleTool, { id: 'new-turn', kind: 'user_message', text: 'Next question' },
+    ], 'working')).toBeUndefined();
+    expect(currentToolActivity([
+      { id: 'current-turn', kind: 'user_message', text: 'Read files' }, staleTool,
+    ], 'working')).toBe(staleTool);
+  });
+
   it('groups all tool activity in one user turn', () => {
     const items: ConversationItem[] = [
       { id: 'u1', kind: 'user_message', text: 'Fix it.' },

@@ -409,6 +409,33 @@ describe('HerdrRepository multi-device runtime', () => {
     expect(first.request).toHaveBeenCalledTimes(1);
   });
 
+  it('does not rewrite or republish an unchanged polled transcript', async () => {
+    const { repository } = await connectTwoDevices();
+    await repository.loadConversation('agent-a1');
+    const previous = repository.getConversation('agent-a1');
+    const listener = jest.fn();
+    const unsubscribe = repository.subscribeConversations(listener);
+    jest.mocked(AsyncStorage.setItem).mockClear();
+    await repository.loadConversation('agent-a1');
+    expect(repository.getConversation('agent-a1')).toBe(previous);
+    expect(listener).not.toHaveBeenCalled();
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it('retries an unchanged response after a cache write failure', async () => {
+    const { repository, first } = await connectTwoDevices();
+    await repository.loadConversation('agent-a1');
+    first.request.mockResolvedValue({
+      agentId: 'agent-a1', provider: 'copilot', semantic: true,
+      items: [{ kind: 'assistant_message', id: 'reply', markdown: 'Latest output' }],
+    });
+    jest.mocked(AsyncStorage.setItem).mockRejectedValueOnce(new Error('storage unavailable'));
+    await expect(repository.loadConversation('agent-a1')).rejects.toThrow('storage unavailable');
+    await repository.loadConversation('agent-a1');
+    expect(repository.getConversation('agent-a1')?.items[0]).toMatchObject({ markdown: 'Latest output' });
+  });
+
   it('does not consume an earlier identical user message as a new send', async () => {
     const { repository, first } = await connectTwoDevices();
     first.request.mockImplementation(async (action: string) => action === 'agent.conversation' ? {
