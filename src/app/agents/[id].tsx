@@ -1022,7 +1022,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.one,
-    paddingHorizontal: Spacing.two + Spacing.half,
+    paddingHorizontal: Spacing.two,
     paddingVertical: 2,
     borderBottomWidth: 0,
   },
@@ -1069,7 +1069,7 @@ const styles = StyleSheet.create({
   messages: {
     flexGrow: 1,
     gap: Spacing.three,
-    paddingHorizontal: Spacing.two + Spacing.half,
+    paddingHorizontal: Spacing.two,
     paddingTop: Spacing.two,
     paddingBottom: Spacing.two,
   },
