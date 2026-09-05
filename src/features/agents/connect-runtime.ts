@@ -9,6 +9,11 @@ import { remoteClient } from '@/services/native-remote-client';
 
 const SELECTED_DEVICE_KEY = 'remote-workspace.herdr.selected-device';
 
+// Wire proactive reconnect handler into HerdrRepository if supported
+if (typeof herdrRepository.setReconnectHandler === 'function') {
+  herdrRepository.setReconnectHandler((deviceId) => connectAgentRuntime(deviceId));
+}
+
 /** One in-flight attempt per device, so devices never block each other. */
 const attempts = new Map<string, Promise<boolean>>();
 
@@ -78,6 +83,7 @@ export async function connectAgentRuntime(deviceId?: string): Promise<boolean> {
     if (herdrRepository.isDeviceConnected(host.id)) {
       return true;
     }
+    attempts.delete(host.id);
     return connectDevice(host);
   }
 

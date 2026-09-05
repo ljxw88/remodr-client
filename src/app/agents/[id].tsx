@@ -4,12 +4,13 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  KeyboardAvoidingView,
+  Keyboard,
   Platform,
   Pressable,
   StyleSheet,
   TextInput,
   View,
+  type KeyboardEvent,
 } from 'react-native';
 
 import { MarkdownMessage } from '@/components/markdown/markdown-message';
@@ -66,9 +67,31 @@ export default function AgentConversationScreen() {
   const [reloadToken, setReloadToken] = useState(0);
   const [sending, setSending] = useState(false);
   const [composerHeight, setComposerHeight] = useState(0);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [showActions, setShowActions] = useState(false);
   const [showTuning, setShowTuning] = useState(false);
   const listRef = useRef<FlatList<ConversationDisplayItem>>(null);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const onShow = (e: KeyboardEvent) => {
+      setKeyboardHeight(e.endCoordinates.height);
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    };
+    const onHide = () => {
+      setKeyboardHeight(0);
+    };
+
+    const showSub = Keyboard.addListener(showEvent, onShow);
+    const hideSub = Keyboard.addListener(hideEvent, onHide);
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
   /**
    * Newest first, because the transcript renders inverted. Offset zero is then
    * the newest message, so opening a conversation lands at the bottom by
@@ -263,10 +286,7 @@ export default function AgentConversationScreen() {
           ),
         }}
       />
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}>
+      <View style={styles.flex}>
         {/*
           No blur backdrop on this screen, deliberately.
 
@@ -284,21 +304,21 @@ export default function AgentConversationScreen() {
         */}
         <View style={styles.flex}>
           <AgentHeader agent={agent} />
-          {runtime.connection !== 'connected' ? (
-            <GlassSurface style={styles.banner}>
-              <ThemedText type="small">Reconnecting</ThemedText>
-            </GlassSurface>
-          ) : null}
           <ScrollEdgeFrame
             inverted
             // The fade is what stops rows reading through the gaps between the
             // composer's stacked panels, so it has to reach as far as they do.
-            bottomHeight={Math.max(ScrollEdgeFade.bottomHeight, composerHeight)}>
+            bottomHeight={Math.max(
+              ScrollEdgeFade.bottomHeight,
+              composerHeight + keyboardHeight,
+            )}>
             {(edge) => (
               <FlatList
                 {...edge}
                 ref={listRef}
                 inverted
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
                 data={displayItems}
                 keyExtractor={(item) => item.id}
                 renderItem={({ item, index }) => (
@@ -334,7 +354,9 @@ export default function AgentConversationScreen() {
                 // pending question, the working row and a wrapped draft all
                 // change its height, and a fixed spacer lets it cover the
                 // newest message.
-                ListHeaderComponent={<View style={{ height: composerHeight }} />}
+                ListHeaderComponent={
+                  <View style={{ height: composerHeight + keyboardHeight }} />
+                }
                 ListEmptyComponent={
                   <View style={styles.empty}>
                     {conversationError ? (
@@ -376,8 +398,9 @@ export default function AgentConversationScreen() {
           tuning={agent.tuning}
           tunable={supportsTuning(agent.provider)}
           onOpenTuning={() => setShowTuning(true)}
+          keyboardOffset={keyboardHeight}
         />
-      </KeyboardAvoidingView>
+      </View>
       {showTuning ? (
         <AgentTuningSheet agent={agent} onClose={() => setShowTuning(false)} />
       ) : null}
@@ -837,6 +860,7 @@ function Composer({
   tuning,
   tunable,
   onOpenTuning,
+  keyboardOffset = 0,
 }: {
   value: string;
   onChangeText: (text: string) => void;
@@ -849,12 +873,13 @@ function Composer({
   tuning?: AgentTuning;
   tunable: boolean;
   onOpenTuning: () => void;
+  keyboardOffset?: number;
 }) {
   const theme = useTheme();
 
   return (
     <View
-      style={styles.composer}
+      style={[styles.composer, { bottom: keyboardOffset }]}
       onLayout={(event) => onHeightChange(event.nativeEvent.layout.height)}>
       {request ? (
         // Last before the card, because it tucks itself underneath it — any
@@ -1006,13 +1031,6 @@ const styles = StyleSheet.create({
   stopText: {
     fontFamily: Fonts.semibold,
     fontWeight: 600,
-  },
-  banner: {
-    minHeight: 40,
-    justifyContent: 'center',
-    paddingHorizontal: Spacing.two + Spacing.half,
-    marginHorizontal: Spacing.two + Spacing.half,
-    marginBottom: Spacing.one,
   },
   messages: {
     flexGrow: 1,

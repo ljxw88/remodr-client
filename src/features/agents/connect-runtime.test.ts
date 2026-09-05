@@ -27,6 +27,7 @@ jest.mock('@/services/herdr-repository', () => ({
     connect: jest.fn(),
     selectDevice: jest.fn(),
     isDeviceConnected: jest.fn(),
+    setReconnectHandler: jest.fn(),
   },
 }));
 jest.mock('@/services/host-repository', () => ({

@@ -20,7 +20,7 @@ import { type AgentWorkspace } from '@/domain/herdr';
 import { connectAgentRuntime } from '@/features/agents/connect-runtime';
 import { LiquidGlassButton } from '@/features/agents/liquid-glass-button';
 import { ProfileAvatar } from '@/features/agents/profile-avatar';
-import { glassRim, GlassSurface } from '@/components/ui/glass-surface';
+import { glassRim } from '@/components/ui/glass-surface';
 import { LiquidGlassRim } from '@/components/ui/liquid-glass-rim';
 import {
   AgentWorkspaceList,
@@ -255,24 +255,6 @@ export default function AgentsScreen() {
             </>
           ) : null}
         </View>
-      ) : null}
-
-      {state.connection === 'reconnecting' || state.connection === 'error' ? (
-        <GlassSurface strength="strong" style={styles.banner}>
-          <ThemedText type="small">
-            {state.connection === 'reconnecting' ? 'Reconnecting to Herdr' : 'Herdr unavailable'}
-          </ThemedText>
-          <Pressable
-            onPress={() => {
-              void connectAgentRuntime().catch((error) => {
-                Alert.alert('Could not reconnect', toUserMessage(error));
-              });
-            }}>
-            <ThemedText type="smallBold" style={{ color: theme.accent }}>
-              Retry
-            </ThemedText>
-          </Pressable>
-        </GlassSurface>
       ) : null}
 
       {hostsLoading ? (
@@ -526,15 +508,6 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-  },
-  banner: {
-    minHeight: 48,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.two,
-    paddingHorizontal: Spacing.two,
-    marginBottom: Spacing.two,
   },
   list: {
     gap: Spacing.three,

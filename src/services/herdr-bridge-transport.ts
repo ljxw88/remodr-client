@@ -27,9 +27,20 @@ export class HerdrBridgeRequestError extends Error {
  */
 export function isBridgeUnavailable(error: unknown): boolean {
   if (error instanceof HerdrBridgeRequestError) {
-    return error.code === 'BRIDGE_NOT_STARTED';
+    return error.code === 'BRIDGE_NOT_STARTED' || error.code === 'BRIDGE_CLOSED';
   }
-  return error instanceof Error && /bridge is not running/i.test(error.message);
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase();
+    return (
+      /bridge is not running/i.test(msg) ||
+      /bridge is closed/i.test(msg) ||
+      /bridge closed/i.test(msg) ||
+      /bridge disconnected/i.test(msg) ||
+      /channel is closed/i.test(msg) ||
+      /broken pipe/i.test(msg)
+    );
+  }
+  return false;
 }
 
 export class HerdrBridgeTransport {

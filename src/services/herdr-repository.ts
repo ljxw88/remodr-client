@@ -29,7 +29,7 @@ import {
   type HerdrConnectionState,
   type HerdrRuntimeState,
 } from '@/domain/herdr';
-import { HerdrBridgeTransport } from '@/services/herdr-bridge-transport';
+import { HerdrBridgeTransport, isBridgeUnavailable } from '@/services/herdr-bridge-transport';
 
 const RUNTIME_CACHE_KEY = 'remote-workspace.herdr.runtimes.v2';
 const DRAFT_PREFIX = 'remote-workspace.herdr.draft.';
@@ -99,11 +99,16 @@ export class HerdrRepository {
   private agentIndex = new Map<string, string>();
   private hydrateAttempt: Promise<void> | null = null;
   private hydrated = false;
+  private reconnectHandler: ((deviceId: string) => Promise<boolean>) | null = null;
 
   constructor(
     private readonly createTransport: () => HerdrBridgeTransport = () =>
       new HerdrBridgeTransport(),
   ) {}
+
+  setReconnectHandler(handler: (deviceId: string) => Promise<boolean>) {
+    this.reconnectHandler = handler;
+  }
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -295,9 +300,8 @@ export class HerdrRepository {
     if (!deviceId) {
       throw new Error('That agent is not available on a connected device.');
     }
-    const result = agentMutationResultSchema.parse(
-      await this.transportForAgent(agentId).request(action, request),
-    );
+    const raw = await this.requestWithAutoReconnect(agentId, action, request);
+    const result = agentMutationResultSchema.parse(raw);
     await this.installRuntime(deviceId, result.runtime);
     return result;
   }
@@ -333,10 +337,29 @@ export class HerdrRepository {
     await this.installRuntime(deviceId, runtime);
   }
 
+  private async requestWithAutoReconnect<T>(
+    agentId: string,
+    action: string,
+    payload: Record<string, unknown>,
+  ): Promise<T> {
+    try {
+      return await this.transportForAgent(agentId).request<T>(action, payload);
+    } catch (error) {
+      const deviceId = this.deviceIdForAgent(agentId);
+      if (isBridgeUnavailable(error) && deviceId && this.reconnectHandler) {
+        console.warn(`[HERDR_REPO] Bridge unavailable for agent ${agentId}, proactively reconnecting...`);
+        const reconnected = await this.reconnectHandler(deviceId);
+        if (reconnected) {
+          return await this.transportForAgent(agentId).request<T>(action, payload);
+        }
+      }
+      throw error;
+    }
+  }
+
   async loadConversation(agentId: string): Promise<AgentConversation> {
-    const conversation = conversationSchema.parse(
-      await this.transportForAgent(agentId).request('agent.conversation', { agentId }),
-    );
+    const raw = await this.requestWithAutoReconnect(agentId, 'agent.conversation', { agentId });
+    const conversation = conversationSchema.parse(raw);
     this.conversations = new Map(this.conversations).set(agentId, conversation);
     this.conversationListeners.forEach((listener) => listener());
     return conversation;
@@ -352,7 +375,7 @@ export class HerdrRepository {
       this.conversationListeners.forEach((listener) => listener());
     }
     try {
-      await this.transportForAgent(agentId).request('agent.send_message', { agentId, text });
+      await this.requestWithAutoReconnect(agentId, 'agent.send_message', { agentId, text });
       this.updateAgentStatus(agentId, 'working');
       await this.saveDraft(agentId, '');
     } catch (error) {
@@ -369,7 +392,7 @@ export class HerdrRepository {
     requestId: string,
     answer: { selectedOptionIds?: string[]; customText?: string | null },
   ): Promise<void> {
-    await this.transportForAgent(agentId).request('human_request.answer', {
+    await this.requestWithAutoReconnect(agentId, 'human_request.answer', {
       agentId,
       requestId,
       answer,
@@ -378,7 +401,7 @@ export class HerdrRepository {
   }
 
   async interrupt(agentId: string): Promise<void> {
-    await this.transportForAgent(agentId).request('agent.interrupt', { agentId });
+    await this.requestWithAutoReconnect(agentId, 'agent.interrupt', { agentId });
   }
 
   async loadDraft(agentId: string): Promise<string> {

@@ -341,6 +341,23 @@ describe('HerdrRepository multi-device runtime', () => {
 
     expect(first.start).not.toHaveBeenCalled();
   });
+
+  it('automatically reconnects and retries when bridge is closed on sendMessage', async () => {
+    const { repository, first } = await connectTwoDevices();
+    const reconnectMock = jest.fn().mockResolvedValue(true);
+    repository.setReconnectHandler(reconnectMock);
+
+    first.request.mockClear();
+    // First request fails with bridge closed, retry succeeds
+    first.request
+      .mockRejectedValueOnce(new Error('Herdr bridge is closed'))
+      .mockResolvedValueOnce({ ok: true });
+
+    await repository.sendMessage('agent-a1', 'Hello after background');
+
+    expect(reconnectMock).toHaveBeenCalledWith('device-1');
+    expect(first.request).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('optimistic conversation messages', () => {

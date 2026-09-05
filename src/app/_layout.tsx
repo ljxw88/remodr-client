@@ -14,6 +14,7 @@ import { Colors } from '@/constants/theme';
 
 import { autoConnectSavedHosts } from '@/features/connection/saved-host-connector';
 import { connectAgentRuntime } from '@/features/agents/connect-runtime';
+import { useHerdrAutoReconnect } from '@/features/agents/use-herdr-auto-reconnect';
 import { AppBackground } from '@/components/ui/app-background';
 import { useStackScreenOptions } from '@/features/navigation/stack-screen-options';
 SplashScreen.preventAutoHideAsync();
@@ -36,6 +37,7 @@ const AbyssTheme = {
 };
 
 export default function RootLayout() {
+  useHerdrAutoReconnect();
   const stackOptions = useStackScreenOptions();
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
