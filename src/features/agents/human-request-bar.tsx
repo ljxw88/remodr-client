@@ -20,6 +20,7 @@ type Props = {
   request: HumanRequest;
   enqueueing?: boolean;
   enqueueGuard?: { current: boolean };
+  onAnswer?: () => void;
 };
 
 /**
@@ -35,7 +36,7 @@ type Props = {
  * that as the prompt — so a question the options do not cover can always be
  * answered in words instead.
  */
-export function HumanRequestBar({ agentId, session, request, enqueueing = false, enqueueGuard }: Props) {
+export function HumanRequestBar({ agentId, session, request, enqueueing = false, enqueueGuard, onAnswer }: Props) {
   const theme = useTheme();
   const [selected, setSelected] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
@@ -84,6 +85,7 @@ export function HumanRequestBar({ agentId, session, request, enqueueing = false,
     inFlight.current = true;
     setSending(true);
     setError(null);
+    onAnswer?.();
     try {
       await herdrRepository.answerHumanRequest(
         agentId,

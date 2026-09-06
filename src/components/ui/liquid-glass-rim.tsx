@@ -9,6 +9,7 @@ import { StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import { useDerivedValue } from 'react-native-reanimated';
 
 import { useShaderClock } from '@/hooks/use-shader-clock';
+import { Colors, withAlpha } from '@/constants/theme';
 
 /** Matches the New agent button, so a selection reads as the same material. */
 const RIM_PERIOD_MS = 6000;
@@ -78,7 +79,7 @@ export function LiquidGlassRim({ active = true }: Props) {
               end={{ x: 0, y: size.height }}
               colors={[
                 'rgba(255,255,255,0.20)',
-                'rgba(108,124,255,0.10)',
+                withAlpha(Colors.accent, 0.10),
                 'rgba(255,255,255,0.16)',
               ]}
             />

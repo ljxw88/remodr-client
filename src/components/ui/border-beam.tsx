@@ -8,23 +8,24 @@ import { StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import { useDerivedValue } from 'react-native-reanimated';
 
 import { useShaderClock } from '@/hooks/use-shader-clock';
+import { Colors, withAlpha } from '@/constants/theme';
 
 const BEAM_PERIOD_MS = 3200;
 
 /**
  * Animated border beam riding the perimeter of the card, using the app's
- * violet accent (#6C7CFF), emerald cyan (#5BE49B), and white specular highlight.
+ * blue accent, emerald cyan (#5BE49B), and white specular highlight.
  */
 const BEAM_COLORS = [
-  'rgba(108, 124, 255, 0)',
-  'rgba(108, 124, 255, 0.15)',
-  'rgba(108, 124, 255, 0.75)',
+  withAlpha(Colors.accent, 0),
+  withAlpha(Colors.accent, 0.15),
+  withAlpha(Colors.accent, 0.75),
   'rgba(91, 228, 155, 0.90)',
   '#FFFFFF',
-  'rgba(108, 124, 255, 0.70)',
-  'rgba(108, 124, 255, 0.15)',
-  'rgba(108, 124, 255, 0)',
-  'rgba(108, 124, 255, 0)',
+  withAlpha(Colors.accent, 0.70),
+  withAlpha(Colors.accent, 0.15),
+  withAlpha(Colors.accent, 0),
+  withAlpha(Colors.accent, 0),
 ] as const;
 
 const BEAM_POSITIONS = [0, 0.03, 0.08, 0.13, 0.16, 0.20, 0.25, 0.30, 1.0];

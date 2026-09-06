@@ -14,7 +14,7 @@ export const Colors = {
   textMuted: '#A2A8B6',
   placeholder: '#8E95A5',
   border: 'rgba(255,255,255,0.12)',
-  accent: '#6C7CFF',
+  accent: '#6682F0',
   danger: '#FF716B',
   success: '#5BE49B',
   warning: '#FFC65C',
@@ -30,7 +30,7 @@ export const Colors = {
   glassBorder: 'rgba(255,255,255,0.16)',
   glassHighlight: 'rgba(255,255,255,0.22)',
   glassShadow: 'rgba(0,0,0,0.58)',
-  accentSoft: 'rgba(108,124,255,0.22)',
+  accentSoft: 'rgba(102,130,240,0.22)',
   successSoft: 'rgba(91,228,155,0.16)',
   warningSoft: 'rgba(255,198,92,0.16)',
 } as const;
@@ -86,12 +86,12 @@ export const GlassMaterial = {
 } as const;
 
 /**
- * App canvas. A saturated indigo at the top falls away to the near-black
+ * App canvas. A deep blue matching the action hue falls away to the near-black
  * `background` well before the lower third, so content lower on a screen still
  * sits on a neutral surface.
  */
 export const BackgroundGradient = {
-  colors: ['#2E3BE0', '#232C9E', '#0E1130', Colors.background] as const,
+  colors: ['#2241C0', '#1D3182', '#0D1226', Colors.background] as const,
   locations: [0, 0.28, 0.58, 1] as const,
 };
 

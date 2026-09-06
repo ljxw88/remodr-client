@@ -1,7 +1,7 @@
 import { StyleSheet } from 'react-native';
 import type { MarkedStyles } from 'react-native-marked';
 
-import { Colors, Fonts, Radius, Spacing } from '@/constants/theme';
+import { Colors, Fonts, Radius, Spacing, withAlpha } from '@/constants/theme';
 import type { SyntaxRole } from '@/components/markdown/syntax';
 import type { DiffLineKind } from '@/components/markdown/diff';
 
@@ -28,7 +28,7 @@ export const SyntaxColors: Record<SyntaxRole, string> = {
 export const DiffColors: Record<DiffLineKind, { text: string; background: string }> = {
   added: { text: Colors.success, background: 'rgba(91,228,155,0.10)' },
   removed: { text: Colors.danger, background: 'rgba(255,113,107,0.10)' },
-  hunk: { text: Colors.accent, background: 'rgba(108,124,255,0.10)' },
+  hunk: { text: Colors.accent, background: withAlpha(Colors.accent, 0.10) },
   meta: { text: Colors.textMuted, background: 'transparent' },
   context: { text: Colors.textSecondary, background: 'transparent' },
 };

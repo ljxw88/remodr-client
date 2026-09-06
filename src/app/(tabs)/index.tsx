@@ -196,12 +196,9 @@ export default function AgentsScreen() {
       <View style={styles.header}>
         <View style={styles.headerActions}>
           <LiquidGlassButton
-            agentLabel={compactHeader ? 'Agent' : 'New Agent'}
-            canCreateAgent={canCreateAgent}
-            onPressAgent={() => startCreation('agent')}
-            spaceLabel={compactHeader ? 'Space' : 'New Space'}
-            canCreateSpace={canCreateSpace}
-            onPressSpace={() => startCreation('space')}
+            label={compactHeader ? 'Agent' : 'New Agent'}
+            disabled={!canCreateAgent}
+            onPress={() => startCreation('agent')}
           />
         </View>
         {/*
@@ -242,7 +239,7 @@ export default function AgentsScreen() {
             ))}
           </ScrollView>
 
-          {spaces.length > 0 ? (
+          {spaces.length > 0 || canCreateSpace ? (
             <>
               <FilterHeader
                 label="Spaces"
@@ -269,6 +266,12 @@ export default function AgentsScreen() {
                     onPress={() => selectedDeviceId && selectWorkspace(selectedDeviceId, space.id)}
                   />
                 ))}
+                <FilterChip
+                  label="+ New Space"
+                  selected={false}
+                  disabled={!canCreateSpace}
+                  onPress={() => startCreation('space')}
+                />
               </ScrollView>
             </>
           ) : null}
