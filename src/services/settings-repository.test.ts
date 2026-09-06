@@ -1,4 +1,4 @@
-import { SettingsRepository } from './settings-repository';
+import { SETTINGS_STORAGE_KEY, SettingsRepository } from './settings-repository';
 
 describe('SettingsRepository', () => {
   let mockStore: Record<string, string>;
@@ -29,14 +29,14 @@ describe('SettingsRepository', () => {
 
     await repository.setAgentFiltersExpanded(false);
     expect(repository.getSnapshot().agentFiltersExpanded).toBe(false);
-    expect(JSON.parse(mockStore['remote-workspace.settings.v1']).agentFiltersExpanded).toBe(false);
+    expect(JSON.parse(mockStore[SETTINGS_STORAGE_KEY]).agentFiltersExpanded).toBe(false);
 
     // And it did not take the other settings down with it.
     expect(repository.getSnapshot().marqueeEnabled).toBe(true);
   });
 
   it('keeps defaults for keys a stored settings file predates', async () => {
-    mockStore['remote-workspace.settings.v1'] = JSON.stringify({ marqueeEnabled: false });
+    mockStore[SETTINGS_STORAGE_KEY] = JSON.stringify({ marqueeEnabled: false });
 
     await repository.init();
 
@@ -63,7 +63,7 @@ describe('SettingsRepository', () => {
   });
 
   it('replaces the snapshot object when stored settings load', async () => {
-    mockStore['remote-workspace.settings.v1'] = JSON.stringify({
+    mockStore[SETTINGS_STORAGE_KEY] = JSON.stringify({
       marqueeEnabled: false,
     });
     const initialSnapshot = repository.getSnapshot();
