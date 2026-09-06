@@ -1,4 +1,3 @@
-import * as Application from 'expo-application';
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { ScrollView, StyleSheet, Switch, View } from 'react-native';
@@ -33,15 +32,10 @@ type SettingRowProps = {
 };
 
 export default function SettingsScreen() {
-  const nativeVersion = Application.nativeApplicationVersion;
-  const nativeBuild = Application.nativeBuildVersion;
-  const configVersion = Constants.expoConfig?.version;
-  const configBuild =
+  const version = Constants.expoConfig?.version ?? '0.1.0';
+  const buildNumber =
     Constants.expoConfig?.android?.versionCode ??
     Constants.expoConfig?.ios?.buildNumber;
-
-  const version = nativeVersion || configVersion || '0.1.0';
-  const buildNumber = nativeBuild || configBuild;
   const versionDisplay = buildNumber ? `v${version} (${buildNumber})` : `v${version}`;
   const onDockScroll = useDockScrollHandler();
   const dockContentInset = useDockContentInset();

@@ -1,4 +1,3 @@
-import * as Application from 'expo-application';
 import Constants from 'expo-constants';
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -49,13 +48,11 @@ export default function DiagnosticsScreen() {
     lastError: device.lastError,
   } : herdrRepository.diagnostics();
 
-  const nativeVersion = Application.nativeApplicationVersion;
-  const nativeBuild = Application.nativeBuildVersion;
-  const configVersion = Constants.expoConfig?.version;
+  const configVersion = Constants.expoConfig?.version ?? '0.1.0';
   const configBuild =
     Constants.expoConfig?.android?.versionCode ??
     Constants.expoConfig?.ios?.buildNumber;
-  const versionDisplay = `${nativeVersion || configVersion || '0.1.0'}${nativeBuild || configBuild ? ` (${nativeBuild || configBuild})` : ''}`;
+  const versionDisplay = configBuild ? `v${configVersion} (${configBuild})` : `v${configVersion}`;
 
   let sshStatusSummary = 'Disconnected';
   if (deviceId) {
