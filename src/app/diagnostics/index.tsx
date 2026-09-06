@@ -1,3 +1,5 @@
+import * as Application from 'expo-application';
+import Constants from 'expo-constants';
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
@@ -5,10 +7,12 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 import { Screen } from '@/components/ui/screen';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
+import type { HostProfile } from '@/domain/hosts';
 import { useHerdr } from '@/features/agents/use-herdr';
 import { sessionDiagnosticsCommand } from '@/features/agents/session-diagnostics';
 import { useTheme } from '@/hooks/use-theme';
 import { herdrRepository } from '@/services/herdr-repository';
+import { hostRepository } from '@/services/host-repository';
 import { remoteClient } from '@/services/native-remote-client';
 import { toUserMessage } from '@/utils/user-error';
 
@@ -16,6 +20,21 @@ export default function DiagnosticsScreen() {
   const theme = useTheme();
   const { agentId } = useLocalSearchParams<{ agentId?: string }>();
   const state = useHerdr();
+  const [hosts, setHosts] = useState<HostProfile[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    void hostRepository
+      .list()
+      .then((list) => {
+        if (active) setHosts(list);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const deviceId = agentId ? herdrRepository.deviceIdForAgent(agentId) : state.selectedDeviceId;
   const device = deviceId ? state.devices[deviceId] : undefined;
   const diagnostics = device ? {
@@ -29,12 +48,50 @@ export default function DiagnosticsScreen() {
     lastSemanticEvent: null,
     lastError: device.lastError,
   } : herdrRepository.diagnostics();
-  const sshSessions = remoteClient.listSessions();
+
+  const nativeVersion = Application.nativeApplicationVersion;
+  const nativeBuild = Application.nativeBuildVersion;
+  const configVersion = Constants.expoConfig?.version;
+  const configBuild =
+    Constants.expoConfig?.android?.versionCode ??
+    Constants.expoConfig?.ios?.buildNumber;
+  const versionDisplay = `${nativeVersion || configVersion || '0.1.0'}${nativeBuild || configBuild ? ` (${nativeBuild || configBuild})` : ''}`;
+
+  let sshStatusSummary = 'Disconnected';
+  if (deviceId) {
+    const session = remoteClient.getSession(deviceId);
+    sshStatusSummary =
+      session?.status === 'connected'
+        ? 'Connected'
+        : session?.status === 'connecting'
+          ? 'Connecting…'
+          : 'Disconnected';
+  } else if (hosts.length > 0) {
+    const connectedCount = hosts.filter((h) => remoteClient.getSession(h.id)?.status === 'connected').length;
+    const connectingCount = hosts.filter((h) => remoteClient.getSession(h.id)?.status === 'connecting').length;
+    if (connectedCount === hosts.length) {
+      sshStatusSummary = `All connected (${hosts.length}/${hosts.length})`;
+    } else if (connectedCount === 0) {
+      sshStatusSummary =
+        connectingCount > 0
+          ? `Connecting… (${connectingCount}/${hosts.length})`
+          : `All disconnected (0/${hosts.length})`;
+    } else {
+      sshStatusSummary = `Degraded (${connectedCount}/${hosts.length} connected)`;
+    }
+  } else {
+    const active = remoteClient.listSessions().filter((s) => s.status === 'connected');
+    sshStatusSummary = active.length > 0 ? `${active.length} active session${active.length > 1 ? 's' : ''}` : 'Disconnected';
+  }
+
+  const targetLabel = deviceId
+    ? (hosts.find((h) => h.id === deviceId)?.name ?? deviceId)
+    : 'All devices';
+
   const rows = [
-    ['Device', deviceId ?? 'None'],
-    ['SSH', (deviceId
-      ? remoteClient.getSession(deviceId)?.status === 'connected'
-      : sshSessions.length > 0) ? 'Connected' : 'Disconnected'],
+    ['App version', versionDisplay],
+    ['Target device', targetLabel],
+    ['SSH status', sshStatusSummary],
     ['Bridge', diagnostics.connection],
     ['Bridge version', diagnostics.bridgeVersion ?? '—'],
     ['Protocol', diagnostics.protocol?.toString() ?? '—'],
@@ -70,6 +127,65 @@ export default function DiagnosticsScreen() {
             </View>
           ))}
         </View>
+
+        {hosts.length > 0 && !agentId ? (
+          <View style={styles.section}>
+            <ThemedText type="label" themeColor="textMuted" style={styles.sectionHeader}>
+              SERVER CONNECTIONS ({hosts.length})
+            </ThemedText>
+            <View
+              style={[
+                styles.card,
+                { backgroundColor: theme.backgroundElement, borderColor: theme.border },
+              ]}>
+              {hosts.map((host, index) => {
+                const session = remoteClient.getSession(host.id);
+                const dev = state.devices[host.id];
+                const isConnected = session?.status === 'connected';
+                const isConnecting = session?.status === 'connecting';
+                const statusColor = isConnected
+                  ? theme.success
+                  : isConnecting
+                    ? theme.warning
+                    : theme.textMuted;
+                const statusText = isConnected
+                  ? 'Connected'
+                  : isConnecting
+                    ? 'Connecting…'
+                    : 'Disconnected';
+                const bridgeText = dev?.connection ?? 'disconnected';
+                const error = dev?.lastError;
+
+                return (
+                  <View key={host.id}>
+                    <View style={styles.serverRow}>
+                      <View style={styles.serverDetails}>
+                        <ThemedText type="smallBold" numberOfLines={1}>
+                          {host.name}
+                        </ThemedText>
+                        <ThemedText type="caption" themeColor="textMuted" numberOfLines={1}>
+                          {host.username}@{host.hostname}:{host.port} • Bridge: {bridgeText}
+                        </ThemedText>
+                        {error ? (
+                          <ThemedText type="caption" themeColor="danger" numberOfLines={2}>
+                            Error: {error}
+                          </ThemedText>
+                        ) : null}
+                      </View>
+                      <ThemedText type="smallBold" style={{ color: statusColor }}>
+                        {statusText}
+                      </ThemedText>
+                    </View>
+                    {index < hosts.length - 1 ? (
+                      <View style={[styles.divider, { backgroundColor: theme.border }]} />
+                    ) : null}
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
+
         {agentId ? <SessionDiagnostics agentId={agentId} /> : null}
       </ScrollView>
     </Screen>
@@ -119,6 +235,27 @@ const styles = StyleSheet.create({
   session: { padding: Spacing.two, gap: Spacing.two },
   content: {
     paddingBottom: Spacing.four,
+  },
+  section: {
+    marginTop: Spacing.three,
+    gap: Spacing.one,
+  },
+  sectionHeader: {
+    letterSpacing: 0.7,
+    paddingHorizontal: Spacing.half,
+  },
+  serverRow: {
+    minHeight: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.one,
+  },
+  serverDetails: {
+    flex: 1,
+    gap: 2,
   },
   card: {
     borderWidth: 1,
