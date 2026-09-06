@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import TestRenderer from 'react-test-renderer';
 
-import DiagnosticsScreen from './index';
+import DiagnosticsScreen from '@/app/diagnostics/index';
 import { hostRepository } from '@/services/host-repository';
 import { remoteClient } from '@/services/native-remote-client';
 

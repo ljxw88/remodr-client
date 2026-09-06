@@ -3,7 +3,7 @@ import TestRenderer from 'react-test-renderer';
 import { Switch } from 'react-native';
 import { router } from 'expo-router';
 
-import SettingsScreen from './settings';
+import SettingsScreen from '@/app/(tabs)/settings';
 import { settingsRepository } from '@/services/settings-repository';
 
 jest.mock('expo-router', () => ({
