@@ -122,20 +122,21 @@ jobs:
           if [ "$IS_PRERELEASE" = "true" ]; then
             RECENT_CHANGES=$(git log -n 15 --no-merges --pretty=format:"* %s ([%h](${{ github.server_url }}/${{ github.repository }}/commit/%H))" 2>/dev/null || echo "* Automated preview update")
 
-            NOTES="### Remodr Preview Build (Alpha)
-          - **Version:** \`${{ steps.app_version.outputs.version }}\`
-          - **Build:** \`#${{ github.run_number }}\`
-          - **Commit:** [\`${{ github.sha }}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})
-          - **Built at:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')
-
-          #### 📦 Download APK:
-          - [\`${{ steps.app_version.outputs.apk_basename }}.apk\`](${{ github.server_url }}/${{ github.repository }}/releases/download/preview/${{ steps.app_version.outputs.apk_basename }}.apk)
-          - [\`remodr-preview.apk\` (latest)](${{ github.server_url }}/${{ github.repository }}/releases/download/preview/remodr-preview.apk)
-
-          ---
-
-          ### 📝 What's Changed
-          ${RECENT_CHANGES}"
+            NOTES=$(printf "%s\n" \
+              "### Remodr Preview Build (Alpha)" \
+              "- **Version:** \`${{ steps.app_version.outputs.version }}\`" \
+              "- **Build:** \`#${{ github.run_number }}\`" \
+              "- **Commit:** [\`${{ github.sha }}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})" \
+              "- **Built at:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" \
+              "" \
+              "#### 📦 Download APK:" \
+              "- [\`${{ steps.app_version.outputs.apk_basename }}.apk\`](${{ github.server_url }}/${{ github.repository }}/releases/download/preview/${{ steps.app_version.outputs.apk_basename }}.apk)" \
+              "- [\`remodr-preview.apk\` (latest)](${{ github.server_url }}/${{ github.repository }}/releases/download/preview/remodr-preview.apk)" \
+              "" \
+              "---" \
+              "" \
+              "### 📝 What's Changed" \
+              "${RECENT_CHANGES}")
 
             if gh release view "$TAG" >/dev/null 2>&1; then
               echo "Updating existing release $TAG..."

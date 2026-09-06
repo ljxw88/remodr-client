@@ -85,20 +85,21 @@ export default function DiagnosticsScreen() {
     ? (hosts.find((h) => h.id === deviceId)?.name ?? deviceId)
     : 'All devices';
 
-  const rows = [
+  const rows: [string, string][] = [
     ['App version', versionDisplay],
     ['Target device', targetLabel],
     ['SSH status', sshStatusSummary],
     ['Bridge', diagnostics.connection],
-    ['Bridge version', diagnostics.bridgeVersion ?? '—'],
-    ['Protocol', diagnostics.protocol?.toString() ?? '—'],
-    ['Herdr version', diagnostics.herdrVersion ?? '—'],
-    ['Herdr session', diagnostics.herdrSession ?? '—'],
-    ['Agents', diagnostics.agents.toString()],
-    ['Last runtime event', formatTimestamp(diagnostics.lastRuntimeEvent)],
-    ['Last semantic event', diagnostics.lastSemanticEvent ?? '—'],
-    ['Last error', diagnostics.lastError ?? '—'],
   ];
+
+  if (diagnostics.bridgeVersion) rows.push(['Bridge version', diagnostics.bridgeVersion]);
+  if (diagnostics.protocol) rows.push(['Protocol', diagnostics.protocol.toString()]);
+  if (diagnostics.herdrVersion) rows.push(['Herdr version', diagnostics.herdrVersion]);
+  if (diagnostics.herdrSession) rows.push(['Herdr session', diagnostics.herdrSession]);
+  rows.push(['Agents', diagnostics.agents.toString()]);
+  if (diagnostics.lastRuntimeEvent) rows.push(['Last runtime event', formatTimestamp(diagnostics.lastRuntimeEvent)]);
+  if (diagnostics.lastSemanticEvent) rows.push(['Last semantic event', diagnostics.lastSemanticEvent]);
+  if (diagnostics.lastError) rows.push(['Last error', diagnostics.lastError]);
 
   return (
     <Screen>

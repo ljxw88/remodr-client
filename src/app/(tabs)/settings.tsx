@@ -1,10 +1,9 @@
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
-import { ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 
 import { AppIcon } from '@/components/ui/app-icon';
 import { GlassSurface } from '@/components/ui/glass-surface';
-import { AppButton } from '@/components/ui/app-button';
 import { Screen } from '@/components/ui/screen';
 import { ScrollEdgeFrame } from '@/components/ui/scroll-edge-frame';
 import { ThemedText } from '@/components/themed-text';
@@ -29,6 +28,7 @@ type SettingRowProps = {
   };
   label: string;
   value: string;
+  onPress?: () => void;
 };
 
 export default function SettingsScreen() {
@@ -72,23 +72,19 @@ export default function SettingsScreen() {
             </SettingsGroup>
 
             <SettingsGroup title="Developer">
-              <View>
-                <SettingSwitchRow
-                  icon={{ ios: 'arrow.left.and.right', android: 'swap_horiz', web: 'swap_horiz' }}
-                  label="MarqueeText animation"
-                  value={marqueeEnabled}
-                  onValueChange={(enabled) => void setMarqueeEnabled(enabled)}
-                />
-                <SettingDivider />
-                <SettingRow
-                  icon={{ ios: 'stethoscope', android: 'troubleshoot', web: 'troubleshoot' }}
-                  label="Diagnostics"
-                  value="Runtime status"
-                />
-                <View style={styles.diagnosticsAction}>
-                  <PressableRow onPress={() => router.push('/diagnostics')} />
-                </View>
-              </View>
+              <SettingSwitchRow
+                icon={{ ios: 'arrow.left.and.right', android: 'swap_horiz', web: 'swap_horiz' }}
+                label="MarqueeText animation"
+                value={marqueeEnabled}
+                onValueChange={(enabled) => void setMarqueeEnabled(enabled)}
+              />
+              <SettingDivider />
+              <SettingRow
+                icon={{ ios: 'stethoscope', android: 'troubleshoot', web: 'troubleshoot' }}
+                label="Diagnostics"
+                value="Open →"
+                onPress={() => router.push('/diagnostics')}
+              />
             </SettingsGroup>
           </ScrollView>
         )}
@@ -126,12 +122,6 @@ function SettingSwitchRow({
   );
 }
 
-function PressableRow({ onPress }: { onPress: () => void }) {
-  return (
-    <AppButton label="Open diagnostics" variant="secondary" onPress={onPress} />
-  );
-}
-
 function SettingsGroup({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <View style={styles.group}>
@@ -145,10 +135,10 @@ function SettingsGroup({ title, children }: { title: string; children: React.Rea
   );
 }
 
-function SettingRow({ icon, label, value }: SettingRowProps) {
+function SettingRow({ icon, label, value, onPress }: SettingRowProps) {
   const theme = useTheme();
 
-  return (
+  const row = (
     <View style={styles.row}>
       <View style={[styles.iconFrame, { backgroundColor: theme.accentSoft }]}>
         <AppIcon name={icon} size={20} tintColor={theme.accent} fallback="•" />
@@ -156,11 +146,25 @@ function SettingRow({ icon, label, value }: SettingRowProps) {
       <ThemedText type="small" style={styles.rowLabel}>
         {label}
       </ThemedText>
-      <ThemedText type="small" themeColor="textMuted" numberOfLines={1}>
+      <ThemedText type="small" themeColor={onPress ? 'accent' : 'textMuted'} numberOfLines={1}>
         {value}
       </ThemedText>
     </View>
   );
+
+  if (onPress) {
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${label}, ${value}`}
+        onPress={onPress}
+        style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }]}>
+        {row}
+      </Pressable>
+    );
+  }
+
+  return row;
 }
 
 function SettingDivider() {
@@ -182,7 +186,7 @@ const styles = StyleSheet.create({
   },
   card: {},
   row: {
-    minHeight: 60,
+    minHeight: 56,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
@@ -201,9 +205,5 @@ const styles = StyleSheet.create({
   divider: {
     height: StyleSheet.hairlineWidth,
     marginLeft: 66,
-  },
-  diagnosticsAction: {
-    paddingHorizontal: Spacing.two,
-    paddingBottom: Spacing.two,
   },
 });
