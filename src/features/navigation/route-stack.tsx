@@ -50,7 +50,9 @@ type Props = {
  */
 export function RouteStack({ children, blurBackdrop = false, quiet = false }: Props) {
   const screenOptions = useStackScreenOptions();
-  const stack = <Stack screenOptions={screenOptions} layout={stackLayout}>{children}</Stack>;
+  const stack = (
+    <Stack screenOptions={screenOptions} screenLayout={screenLayout}>{children}</Stack>
+  );
 
   return (
     <View style={styles.root}>
@@ -60,48 +62,94 @@ export function RouteStack({ children, blurBackdrop = false, quiet = false }: Pr
   );
 }
 
-type StackLayoutProps = Parameters<NonNullable<ComponentProps<typeof Stack>['layout']>>[0];
+type ScreenLayoutProps = Parameters<NonNullable<ComponentProps<typeof Stack>['screenLayout']>>[0];
+type ScreenNavigation = ScreenLayoutProps['navigation'];
 
-const stackLayout = ({ state, descriptors, children }: StackLayoutProps) => (
-  <StackArrival state={state} descriptors={descriptors}>{children}</StackArrival>
+const screenLayout = ({ navigation, children }: ScreenLayoutProps) => (
+  <ScreenArrival navigation={navigation}>{children}</ScreenArrival>
 );
 
-function StackArrival({ state, descriptors, children }: Pick<StackLayoutProps, 'state' | 'descriptors' | 'children'>) {
+/**
+ * How long to wait for a screen's own appearance before settling regardless.
+ *
+ * A stack uncovered by an *outer* navigator is not transitioning as far as its
+ * own screens are concerned, so the page underneath may never hear that it is
+ * back on show. Waiting for ever would strand it at its offset, which is the
+ * one outcome worse than a late settle. Measured on device, the appearance
+ * lands about 50ms after the commit, so this only expires when the event is
+ * genuinely not coming.
+ */
+const APPEARANCE_TIMEOUT_MS = 120;
+
+/**
+ * One page's arrival, animated inside the page itself.
+ *
+ * The offset has to be in place *before* the page is first drawn, and only a
+ * per-page wrapper can do that. Animating the navigator instead — one view
+ * around every screen in the stack — leaves nowhere to put the offset that is
+ * not also the page being left, so the only safe moment is after the incoming
+ * page is already up. That is what this used to do, and it cost a stutter:
+ * measured on device, the page was composited about 50ms before its own
+ * `transitionEnd` came back to JavaScript, so it arrived, sat still for two or
+ * three frames, jumped 16dp sideways and slid back.
+ *
+ * Here the arming is invisible in both directions. A pushed page has not been
+ * composited when it mounts, and a page returned to is still behind the one
+ * being dismissed. So the first frame anyone sees is already offset, and what
+ * follows is only ever the gap closing.
+ *
+ * The header stays where it is. It belongs to the navigator rather than to the
+ * page, so it changes with the page and does not travel with it — which is
+ * also what stops the moving part reaching into a band it does not paint.
+ */
+function ScreenArrival({
+  navigation,
+  children,
+}: {
+  navigation: ScreenNavigation;
+  children: ReactNode;
+}) {
   const focused = useIsFocused();
   const entrance = useScreenEntrance();
-  const routeKey = state.routes[state.index].key;
-  const navigation = descriptors[routeKey].navigation;
-  const previous = useRef<{ key: string; index: number } | null>(null);
+  /** Whether this page has ever been on show, so a return can be told apart. */
+  const shown = useRef(false);
+  /** Whether it was covered while on show, rather than not yet arrived. */
   const covered = useRef(false);
 
   useLayoutEffect(() => {
     if (!focused) {
-      covered.current = true;
+      // A stack mounted in the background has not been left; it has not
+      // arrived yet, and when it does that is still a forward arrival.
+      covered.current = shown.current;
       entrance.reset();
       return;
     }
 
-    const last = previous.current;
-    const returning = last && (
-      state.index < last.index || (routeKey === last.key && covered.current)
-    );
-    previous.current = { key: routeKey, index: state.index };
+    entrance.arm(covered.current ? -1 : 1);
+    shown.current = true;
     covered.current = false;
-    entrance.reset();
-    let appeared = false;
 
-    // JS focus changes before Android swaps fragments, even with animation:none.
-    // Native appearance is the first safe point to move only the incoming page.
-    return navigation.addListener('transitionEnd', (event) => {
-      if (event.data.closing || appeared || !navigation.isFocused()) return;
-      appeared = true;
-      entrance.play(returning ? -1 : 1);
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      entrance.settle();
+    };
+
+    // Native appearance, which is the first frame the offset can be seen on.
+    const stopListening = navigation.addListener('transitionStart', (event) => {
+      if (event.data.closing) return;
+      settle();
     });
-  }, [entrance, focused, navigation, routeKey, state.index]);
+    const fallback = setTimeout(settle, APPEARANCE_TIMEOUT_MS);
 
-  // Animate the committed navigator, including its header, over its own canvas.
-  // A stable layout preserves mounted forms and never animates the outgoing page.
-  return <Animated.View style={[styles.stack, entrance.style]}>{children}</Animated.View>;
+    return () => {
+      stopListening();
+      clearTimeout(fallback);
+    };
+  }, [entrance, focused, navigation]);
+
+  return <Animated.View style={[styles.screen, entrance.style]}>{children}</Animated.View>;
 }
 
 const styles = StyleSheet.create({
@@ -112,7 +160,7 @@ const styles = StyleSheet.create({
     // about to be rather than a hole.
     backgroundColor: Colors.background,
   },
-  stack: {
+  screen: {
     flex: 1,
   },
 });

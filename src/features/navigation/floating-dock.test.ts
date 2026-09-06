@@ -5,7 +5,9 @@ import { AnimatedTabContent } from './floating-dock';
 
 let mockPathname = '/';
 let mockOnTransition: ((event: { data: { closing: boolean } }) => void) | undefined;
-const mockEntrance = { play: jest.fn(), reset: jest.fn(), style: {} };
+const mockEntrance = {
+  arm: jest.fn(), settle: jest.fn(), play: jest.fn(), reset: jest.fn(), style: {},
+};
 const mockNavigation = {
   addListener: (_event: string, listener: NonNullable<typeof mockOnTransition>) => {
     mockOnTransition = listener;
@@ -47,27 +49,33 @@ describe('dock page motion', () => {
     expect(mockEntrance.play.mock.calls).toEqual([[1], [-1]]);
   });
 
-  it('waits for the native root to reappear before animating Back', () => {
+  it('offsets the dock the moment it is uncovered, and closes the gap on the native arrival', () => {
     navigate('/flows/models');
     expect(mockEntrance.reset).toHaveBeenCalled();
     appear();
     navigate('/');
-    expect(mockEntrance.play).not.toHaveBeenCalled();
+    // Armed straight away: the page being dismissed is still covering it.
+    expect(mockEntrance.arm.mock.calls).toEqual([[-1]]);
+    expect(mockEntrance.settle).not.toHaveBeenCalled();
     appear(true);
+    expect(mockEntrance.settle).not.toHaveBeenCalled();
+    appear();
+    appear();
+    expect(mockEntrance.settle).toHaveBeenCalledTimes(1);
     expect(mockEntrance.play).not.toHaveBeenCalled();
-    appear();
-    appear();
-    expect(mockEntrance.play.mock.calls).toEqual([[-1]]);
   });
 
   it('cancels a pending return if another page covers the dock', () => {
     navigate('/agents/one');
     navigate('/');
+    expect(mockEntrance.arm).toHaveBeenCalledWith(-1);
     navigate('/flows/rename-agent');
+    // Covering it again puts the offset back, so nothing is left displaced.
+    expect(mockEntrance.reset).toHaveBeenCalled();
     appear();
-    expect(mockEntrance.play).not.toHaveBeenCalled();
+    expect(mockEntrance.settle).not.toHaveBeenCalled();
     navigate('/settings');
     appear();
-    expect(mockEntrance.play.mock.calls).toEqual([[-1]]);
+    expect(mockEntrance.settle).toHaveBeenCalledTimes(1);
   });
 });

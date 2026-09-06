@@ -29,22 +29,35 @@ describe('shared screen motion', () => {
     jest.restoreAllMocks();
   });
 
-  it('uses one short native-driven geometry animation for either direction', () => {
-    TestRenderer.act(() => motion.play(1));
+  it('arms either direction without animating anything', () => {
+    TestRenderer.act(() => motion.arm(1));
     expect(Animated.Value.prototype.setValue).toHaveBeenLastCalledWith(16);
+    expect(Animated.timing).not.toHaveBeenCalled();
+    TestRenderer.act(() => motion.arm(-1));
+    expect(Animated.Value.prototype.setValue).toHaveBeenLastCalledWith(-16);
+    expect(Animated.timing).not.toHaveBeenCalled();
+  });
+
+  it('settles with one short native-driven geometry animation, and no fade', () => {
+    TestRenderer.act(() => motion.settle());
     expect(Animated.timing).toHaveBeenLastCalledWith(expect.any(Animated.Value), expect.objectContaining({
       toValue: 0, duration: 200, useNativeDriver: true, isInteraction: false,
     }));
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(motion.style).not.toHaveProperty('opacity');
+  });
+
+  it('arms and settles in one go for the dock, whose content is on screen throughout', () => {
     TestRenderer.act(() => motion.play(-1));
     expect(Animated.Value.prototype.setValue).toHaveBeenLastCalledWith(-16);
-    expect(Animated.Value.prototype.stopAnimation).toHaveBeenCalledTimes(2);
-    expect(start).toHaveBeenCalledTimes(2);
-    expect(motion.style).not.toHaveProperty('opacity');
+    expect(start).toHaveBeenCalledTimes(1);
   });
 
   it('skips motion and clears any existing offset when reduced motion is enabled', () => {
     mockReduceMotion = true;
-    TestRenderer.act(() => motion.play());
+    TestRenderer.act(() => motion.arm(1));
+    expect(Animated.Value.prototype.setValue).toHaveBeenLastCalledWith(0);
+    TestRenderer.act(() => motion.settle());
     expect(Animated.timing).not.toHaveBeenCalled();
     expect(Animated.Value.prototype.setValue).toHaveBeenLastCalledWith(0);
   });
