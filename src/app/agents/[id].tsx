@@ -335,6 +335,7 @@ export default function AgentConversationScreen() {
                 items={[
                   { id: 'rename', label: 'Rename Agent', onPress: () => openAgentForm('rename') },
                   { id: 'settings', label: 'Model Settings', disabled: !supportsRetuning(agent.provider), onPress: () => openAgentForm('settings') },
+                  { id: 'diagnostics', label: 'Session diagnostics', onPress: () => router.push({ pathname: '/diagnostics', params: { agentId: agent.id } }) },
                   { id: 'close', label: 'Close agent', destructive: true, disabled: !ownerConnected, onPress: confirmCloseAgent },
                 ]}
               />

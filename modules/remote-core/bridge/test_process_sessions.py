@@ -44,6 +44,9 @@ class ProcessSessionTest(unittest.TestCase):
         )
         self.open_sessions = self.inspection.start()
         self.addCleanup(self.inspection.stop)
+        metadata = patch.object(self.bridge, "_linux_process_metadata", side_effect=self.process_metadata)
+        metadata.start()
+        self.addCleanup(metadata.stop)
         self.agent_id = self.bridge._stable_agent_id("p1")
         self.write_session("native-stale", "old history")
         self.write_session("active-session", "current history")
@@ -58,6 +61,84 @@ class ProcessSessionTest(unittest.TestCase):
         if method == "agent.get":
             raise BridgeError("agent_not_found", "Agent exited.")
         return {}
+
+    def process_metadata(self, pid):
+        process = next(item for item in self.info["foreground_processes"] if item["pid"] == pid)
+        executable = process.get("argv0") or process["name"]
+        return {
+            "parent": self.info["shell_pid"], "group": self.info["foreground_process_group_id"],
+            "executable": executable, "argv": [executable],
+        }
+
+    def test_linux_vscode_launcher_resolves_native_runtime_without_argv0(self):
+        self.info["foreground_processes"] = [
+            {"pid": 100, "name": "copilot", "argv0": None},
+            {"pid": 101, "name": "MainThread", "argv0": None},
+            {"pid": 102, "name": "MainThread", "argv0": None},
+            {"pid": 103, "name": "MainThread", "argv0": None},
+        ]
+        metadata = {
+            100: {"parent": 50, "group": 100, "executable": "/usr/bin/dash",
+                  "argv": ["/bin/sh", "/vscode/copilotCli/copilot"]},
+            101: {"parent": 100, "group": 100, "executable": "/vscode/node",
+                  "argv": ["/vscode/node", "/vscode/copilotCLIShim.js"]},
+            102: {"parent": 101, "group": 100, "executable": "/usr/local/bin/node",
+                  "argv": ["node", "/usr/local/bin/copilot"]},
+            103: {"parent": 102, "group": 100, "executable": "/npm/@github/copilot-linux-x64/copilot (deleted)",
+                  "argv": ["/npm/@github/copilot-linux-x64/copilot"]},
+        }
+        with (
+            patch("herdr_mobile_bridge.sys.platform", "linux"),
+            patch.object(self.bridge, "_linux_process_metadata", side_effect=metadata.__getitem__),
+        ):
+            self.assertEqual(self.poll()["providerSessionId"], "active-session")
+        self.open_sessions.assert_called_once_with(103)
+
+    def test_linux_native_runtime_is_recognized_by_executable_not_thread_name(self):
+        self.info["foreground_processes"] = [{"pid": 100, "name": "MainThread", "argv0": None}]
+        with (
+            patch("herdr_mobile_bridge.sys.platform", "linux"),
+            patch.object(self.bridge, "_linux_process_metadata", return_value={
+                "parent": 50, "group": 100, "executable": "/opt/copilot/copilot", "argv": ["copilot"],
+            }),
+        ):
+            self.assertEqual(self.poll()["providerSessionId"], "active-session")
+        self.open_sessions.assert_called_once_with(100)
+
+    def test_linux_reused_pid_from_another_shell_is_not_inspected(self):
+        self.info["foreground_processes"] = [{"pid": 100, "name": "MainThread", "argv0": None}]
+        with (
+            patch("herdr_mobile_bridge.sys.platform", "linux"),
+            patch.object(self.bridge, "_linux_process_metadata", side_effect={
+                100: {"parent": 70, "group": 100, "executable": "/bin/copilot", "argv": ["copilot"]},
+                70: {"parent": 1, "group": 70, "executable": "/bin/bash", "argv": ["bash"]},
+            }.__getitem__),
+        ):
+            with self.assertRaises(BridgeError) as error:
+                self.poll()
+            self.assertEqual(error.exception.code, "SESSION_IDENTITY_UNRESOLVED")
+        self.open_sessions.assert_not_called()
+
+    def test_linux_launcher_rejects_unrelated_or_ambiguous_runtimes(self):
+        self.info["foreground_processes"] = [
+            {"pid": 100, "name": "copilot"}, {"pid": 101, "name": "MainThread"},
+            {"pid": 102, "name": "MainThread"},
+        ]
+        root = {"parent": 50, "group": 100, "executable": "/bin/sh", "argv": ["sh", "/bin/copilot"]}
+        native = {"parent": 100, "group": 100, "executable": "/bin/copilot", "argv": ["copilot"]}
+        for children in (
+            {101: {**native, "parent": 999}, 102: {**native, "group": 200}},
+            {101: native, 102: native},
+        ):
+            with (
+                self.subTest(children=children),
+                patch("herdr_mobile_bridge.sys.platform", "linux"),
+                patch.object(self.bridge, "_linux_process_metadata", side_effect={100: root, **children}.__getitem__),
+            ):
+                with self.assertRaises(BridgeError) as error:
+                    self.poll()
+                self.assertEqual(error.exception.code, "SESSION_IDENTITY_UNRESOLVED")
+        self.open_sessions.assert_not_called()
 
     def write_session(self, session_id, content):
         directory = self.home / ".copilot" / "session-state" / session_id

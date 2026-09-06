@@ -989,13 +989,94 @@ class Bridge:
         if len(roots) != 1 or group == shell_pid:
             raise ValueError("no unique foreground Copilot group leader")
         root = roots[0]
-        if any(
-            not isinstance(root.get(key), str)
-            or Path(root[key]).name != "copilot"
-            for key in ("name", "argv0")
+        if not sys.platform.startswith("linux"):
+            if not all(
+                isinstance(root.get(key), str) and Path(root[key]).name == "copilot"
+                for key in ("name", "argv0")
+            ):
+                raise ValueError("foreground group leader is not the Copilot executable")
+            return group, shell_pid
+
+        # Linux may omit argv0 and launch through VS Code's shell/Node shims.
+        # Follow only the verified foreground launch chain, not arbitrary children.
+        if len(processes) > 256:
+            raise OSError("foreground process list exceeds the inspection limit")
+        leader = self._linux_process_metadata(group)
+        if leader["group"] != group:
+            raise ValueError("foreground process group changed")
+        ancestor = leader["parent"]
+        visited = {group}
+        for _ in range(32):
+            if ancestor == shell_pid:
+                break
+            if ancestor <= 1 or ancestor in visited:
+                raise ValueError("foreground process no longer belongs to the pane shell")
+            visited.add(ancestor)
+            ancestor = self._linux_process_metadata(ancestor)["parent"]
+        else:
+            raise ValueError("foreground process ancestry could not be verified")
+        # Package updates can unlink a still-running executable on Linux.
+        executable = self._linux_executable_name(leader["executable"])
+        if executable == "copilot":
+            return group, shell_pid
+        argv = leader["argv"]
+        script = argv[1] if len(argv) > 1 else ""
+        if (
+            executable not in ("sh", "dash", "bash", "zsh", "node", "bun")
+            or Path(script).name not in ("copilot", "copilotCLIShim.js")
         ):
-            raise ValueError("foreground group leader is not the Copilot executable")
-        return group, shell_pid
+            raise ValueError("foreground group leader is not a verified Copilot launcher")
+        metadata = {group: leader}
+        for process in processes:
+            pid = process.get("pid") if isinstance(process, dict) else None
+            if type(pid) is not int or pid <= 0 or pid == group:
+                continue
+            try:
+                item = self._linux_process_metadata(pid)
+            except FileNotFoundError:
+                continue
+            if item["group"] == group:
+                metadata[pid] = item
+        candidates = {
+            pid for pid, item in metadata.items()
+            if self._linux_executable_name(item["executable"]) == "copilot"
+        }
+        primary = []
+        for pid in candidates:
+            parent = metadata[pid]["parent"]
+            visited = {pid}
+            while parent in metadata and parent not in visited and parent not in candidates:
+                if parent == group:
+                    primary.append(pid)
+                    break
+                visited.add(parent)
+                parent = metadata[parent]["parent"]
+        if len(primary) != 1:
+            raise ValueError("Copilot launcher has no unique foreground runtime")
+        return primary[0], shell_pid
+
+    @staticmethod
+    def _linux_executable_name(executable: str) -> str:
+        suffix = " (deleted)"
+        return Path(executable[:-len(suffix)] if executable.endswith(suffix) else executable).name
+
+    @staticmethod
+    def _linux_process_metadata(pid: int) -> dict[str, Any]:
+        directory = Path("/proc") / str(pid)
+        if directory.stat().st_uid != os.getuid():
+            raise OSError("foreground process belongs to another user")
+        fields = (directory / "stat").read_text().rsplit(")", 1)[1].split()
+        executable = os.readlink(directory / "exe")
+        with (directory / "cmdline").open("rb") as command:
+            argv = command.read(65537)
+        if len(argv) > 65536:
+            raise OSError("foreground command metadata exceeds the inspection limit")
+        return {
+            "parent": int(fields[1]),
+            "group": int(fields[2]),
+            "executable": executable,
+            "argv": [os.fsdecode(part) for part in argv.split(b"\0") if part],
+        }
 
     @staticmethod
     def _bounded_process_output(arguments: list[str]) -> bytes:
@@ -2334,7 +2415,8 @@ class Bridge:
             reason = (
                 self.session_identity_errors[agent["paneId"]]
                 if agent.get("provider") == "codex"
-                else "The active provider session cannot be verified."
+                else "The active provider session cannot be verified: "
+                + self.session_identity_errors[agent["paneId"]]
             )
             raise BridgeError("SESSION_IDENTITY_UNRESOLVED", reason)
         provider = agent["provider"]

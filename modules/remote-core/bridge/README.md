@@ -131,11 +131,16 @@ must not be presented as the user's main conversation.
 
 Some Herdr versions retain Copilot's original session reference even after
 accepting a native clear/session report. The bridge therefore requests
-`pane.process_info` and verifies the **foreground process-group leader** is the
-exact `copilot` executable in that pane. A child Copilot process, background
-SDK process, or another pane's process metadata is not sufficient.
+`pane.process_info` and verifies the **foreground process-group leader** in that
+pane. On macOS this is the `copilot` executable. Linux can omit `argv0` and start
+Copilot through VS Code's shell/Node launchers; `/proc` executable, parent, owner,
+and process-group metadata identifies the unique native Copilot runtime in that
+verified launcher chain. Arbitrary child/background SDK processes, unrelated
+groups, and ambiguous sibling runtimes are not accepted.
+Linux's ` (deleted)` executable marker after an in-place CLI update is recognized;
+an otherwise live, verified runtime does not need to be restarted.
 
-Only that PID's open descriptors are inspected: Linux uses `/proc/<pid>/fd`;
+Only the selected runtime PID's open descriptors are inspected: Linux uses `/proc/<pid>/fd`;
 macOS uses `lsof -nP -a -p <pid> -F0pun`. The process must belong to the bridge
 user. Only the exact path
 `~/.copilot/session-state/<session-id>/session.db` qualifies, not other homes,

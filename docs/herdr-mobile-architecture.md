@@ -83,6 +83,13 @@ and responses identify the session actually read. Session-bound caches and launc
 bookkeeping must follow that reported identity rather than the original launch
 ID. See [session rotation and queued-command isolation](connection-resilience.md#clearing-or-replacing-a-provider-session).
 
+For machine-specific failures, the agent action menu includes **Session
+diagnostics**. It uses that device's existing authenticated SSH connection to
+show sanitized foreground-process and session metadata. It does not expose
+credentials or arbitrary command execution. Linux Copilot launchers may involve
+VS Code and Node wrapper processes; the bridge follows only the verified
+foreground launcher chain to the native runtime.
+
 ## Provider adapters
 
 | Provider | Current conversation source | Limits |
