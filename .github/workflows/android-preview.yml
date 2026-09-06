@@ -37,6 +37,8 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -118,15 +120,22 @@ jobs:
           STABLE_APK="build/remodr-preview.apk"
 
           if [ "$IS_PRERELEASE" = "true" ]; then
-            NOTES="### Remodr Preview Build
+            RECENT_CHANGES=$(git log -n 15 --no-merges --pretty=format:"* %s ([%h](${{ github.server_url }}/${{ github.repository }}/commit/%H))" 2>/dev/null || echo "* Automated preview update")
+
+            NOTES="### Remodr Preview Build (Alpha)
           - **Version:** \`${{ steps.app_version.outputs.version }}\`
           - **Build:** \`#${{ github.run_number }}\`
           - **Commit:** [\`${{ github.sha }}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})
           - **Built at:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')
 
-          #### Download APK:
+          #### 📦 Download APK:
           - [\`${{ steps.app_version.outputs.apk_basename }}.apk\`](${{ github.server_url }}/${{ github.repository }}/releases/download/preview/${{ steps.app_version.outputs.apk_basename }}.apk)
-          - [\`remodr-preview.apk\` (latest)](${{ github.server_url }}/${{ github.repository }}/releases/download/preview/remodr-preview.apk)"
+          - [\`remodr-preview.apk\` (latest)](${{ github.server_url }}/${{ github.repository }}/releases/download/preview/remodr-preview.apk)
+
+          ---
+
+          ### 📝 What's Changed
+          ${RECENT_CHANGES}"
 
             if gh release view "$TAG" >/dev/null 2>&1; then
               echo "Updating existing release $TAG..."
@@ -140,7 +149,7 @@ jobs:
                 --notes "$NOTES"
             fi
           else
-            # Official Tagged Release (e.g., v1.0.0)
+            # Official Tagged Release (e.g., v0.1.0)
             if gh release view "$TAG" >/dev/null 2>&1; then
               echo "Updating existing release $TAG..."
               gh release upload "$TAG" "$PRIMARY_APK" --clobber

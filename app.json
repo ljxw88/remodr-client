@@ -2,7 +2,7 @@
   "expo": {
     "name": "Remodr",
     "slug": "sparminal",
-    "version": "1.0.0",
+    "version": "0.1.0",
     "backgroundColor": "#08090B",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",

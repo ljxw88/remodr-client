@@ -32,11 +32,11 @@ type SettingRowProps = {
 };
 
 export default function SettingsScreen() {
-  const version = Constants.expoConfig?.version ?? '1.0.0';
+  const version = Constants.expoConfig?.version ?? '0.1.0';
   const buildNumber =
     Constants.expoConfig?.android?.versionCode ??
     Constants.expoConfig?.ios?.buildNumber;
-  const versionDisplay = buildNumber ? `${version} (${buildNumber})` : version;
+  const versionDisplay = buildNumber ? `v${version} (${buildNumber})` : `v${version}`;
   const onDockScroll = useDockScrollHandler();
   const dockContentInset = useDockContentInset();
   const { marqueeEnabled, setMarqueeEnabled } = useAppSettings();
