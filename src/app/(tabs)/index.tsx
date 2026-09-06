@@ -19,8 +19,8 @@ import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
 import { type AgentWorkspace } from '@/domain/herdr';
 import { connectAgentRuntime } from '@/features/agents/connect-runtime';
+import { HeaderRoundButton } from '@/features/agents/header-round-button';
 import { LiquidGlassButton } from '@/features/agents/liquid-glass-button';
-import { ProfileAvatar } from '@/features/agents/profile-avatar';
 import { glassRim } from '@/components/ui/glass-surface';
 import { LiquidGlassRim } from '@/components/ui/liquid-glass-rim';
 import {
@@ -204,16 +204,15 @@ export default function AgentsScreen() {
             onPressSpace={() => startCreation('space')}
           />
         </View>
-        {/* The filters are chrome: useful when picking where to look, in the
-            way when reading the list. This folds them away and remembers. */}
         {/*
-          The New agent button's material, so the two ends of this line read as
-          one pair. Which way the chevron points is the whole of the state: the
-          section it opens is either on screen or it is not, so a fill saying so
-          as well would be telling you something you can already see.
+          The filters are chrome: useful when picking where to look, in the way
+          when reading the list. This folds them away and remembers.
+
+          Which way the chevron points is the whole of the state. The section it
+          opens is either on screen or it is not, so a fill saying so as well
+          would be telling you something you can already see.
         */}
-        <ProfileAvatar
-          liquidRim
+        <HeaderRoundButton
           icon={agentFiltersExpanded ? CollapseFiltersIcon : ExpandFiltersIcon}
           fallback={agentFiltersExpanded ? '⌃' : '⌄'}
           accessibilityLabel={

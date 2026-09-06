@@ -165,7 +165,8 @@ export const ControlHeight = {
   /** A row carrying an icon, or a name with a second line under it. */
   row: 56,
   /**
-   * The home header's pair — the New Agent button and the profile beside it.
+   * The home header's pair — the New agent button and the round button beside
+   * it.
    *
    * Deliberately off the scale above, which is for controls sharing a panel
    * with their neighbours. These two are the screen's opening move and stand

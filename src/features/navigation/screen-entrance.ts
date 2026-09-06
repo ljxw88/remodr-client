@@ -29,7 +29,7 @@ const Entrance = {
   duration: 200,
 };
 
-export type EntranceDirection = 1 | -1;
+type EntranceDirection = 1 | -1;
 
 /**
  * The motion above, and a way to run it.
