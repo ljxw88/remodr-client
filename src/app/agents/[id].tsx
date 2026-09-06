@@ -33,6 +33,7 @@ import { ActionMenu } from '@/components/ui/action-menu';
 import { HumanRequestBar } from '@/features/agents/human-request-bar';
 import { useAgentConversation, useHerdr } from '@/features/agents/use-herdr';
 import { conversationRefreshInterval, startConversationRefresh } from '@/features/agents/conversation-refresh';
+import { useConversationScroll } from '@/features/agents/use-conversation-scroll';
 import { CommandDelivery, ConnectionStatus } from '@/features/connection/connection-status';
 import { useConnectionSnapshot, useForeground, usePendingCommands } from '@/features/connection/use-connection';
 import {
@@ -47,6 +48,8 @@ import { useKeyboardOverlap } from '@/hooks/use-keyboard-overlap';
 import { isBridgeUnavailable } from '@/services/herdr-bridge-transport';
 import { herdrRepository } from '@/services/herdr-repository';
 import { toUserMessage } from '@/utils/user-error';
+
+const HISTORY_ANCHOR = { minIndexForVisible: 0 };
 
 export default function AgentConversationScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -84,6 +87,14 @@ export default function AgentConversationScreen() {
   const actionVisible = useRef(false);
   const mounted = useRef(false);
   const listRef = useRef<FlatList<ConversationDisplayItem>>(null);
+  const scrollToLatest = useCallback((animated: boolean) => {
+    listRef.current?.scrollToOffset({ offset: 0, animated });
+  }, []);
+  const scroll = useConversationScroll({
+    conversationId: id,
+    active: focused && foreground,
+    scrollToLatest,
+  });
   const sendingRef = useRef(false);
   const draftRevision = useRef(0);
   const refreshRef = useRef<Promise<void> | null>(null);
@@ -149,13 +160,6 @@ export default function AgentConversationScreen() {
     setSendError(null);
   }
 
-  useEffect(() => {
-    if (!focused || !foreground) return;
-    const subscription = Keyboard.addListener('keyboardDidShow', () => {
-      listRef.current?.scrollToOffset({ offset: 0, animated: true });
-    });
-    return () => subscription.remove();
-  }, [focused, foreground]);
   /**
    * Newest first, because the transcript renders inverted. Offset zero is then
    * the newest message, so opening a conversation lands at the bottom by
@@ -171,6 +175,11 @@ export default function AgentConversationScreen() {
     ? `${activeTool.title}…`
     : `${agent ? providerLabel(agent.provider) : 'The agent'} is working`;
   const hasOpenRequest = conversation?.activeHumanRequest != null;
+  const scheduleScroll = scroll.schedule;
+
+  useEffect(() => {
+    scheduleScroll();
+  }, [displayItems, composerHeight, keyboardHeight, scheduleScroll]);
 
   useEffect(() => {
     if (!id) return;
@@ -276,6 +285,7 @@ export default function AgentConversationScreen() {
     const revision = draftRevision.current;
     setSending(true);
     setSendError(null);
+    scroll.followLatest();
     try {
       if (conversation?.activeHumanRequest) {
         await herdrRepository.answerHumanRequest(
@@ -287,12 +297,7 @@ export default function AgentConversationScreen() {
         await herdrRepository.sendMessage(agent.id, text);
       }
       if (draftRevision.current === revision) setDraft('');
-      // The one scroll left in this screen, and the only one that is asked
-      // for: sending is a statement that you want to watch the reply. On an
-      // inverted list offset zero is the newest message, so unlike
-      // `scrollToEnd` this cannot land halfway up a list still measuring
-      // itself.
-      listRef.current?.scrollToOffset({ offset: 0, animated: true });
+      scroll.schedule();
     } catch (error) {
       setSendError(toUserMessage(error));
     } finally {
@@ -350,6 +355,7 @@ export default function AgentConversationScreen() {
           <AgentHeader agent={agent} connected={ownerConnected} />
           <ScrollEdgeFrame
             inverted
+            onScroll={(event) => scroll.onScroll(event.nativeEvent.contentOffset.y)}
             // The fade is what stops rows reading through the gaps between the
             // composer's stacked panels, so it has to reach as far as they do.
             bottomHeight={Math.max(
@@ -359,6 +365,7 @@ export default function AgentConversationScreen() {
             {(edge) => (
               <FlatList
                 {...edge}
+                key={id}
                 ref={listRef}
                 inverted
                 keyboardShouldPersistTaps="handled"
@@ -377,21 +384,21 @@ export default function AgentConversationScreen() {
                 maxToRenderPerBatch={20}
                 windowSize={7}
                 contentContainerStyle={styles.messages}
-                /**
-                 * Holds the reader's place when a message grows or older
-                 * history arrives, instead of shifting the viewport under them.
-                 *
-                 * `autoscrollToTopThreshold` is what makes it follow again once
-                 * they are back at the newest message — "top" here means the
-                 * start of the content, which on an inverted list is the bottom
-                 * of the screen. Without it, a reply that grows while you are
-                 * watching it stays pinned by its first line and writes itself
-                 * off the bottom of the screen.
-                 */
-                maintainVisibleContentPosition={{
-                  minIndexForVisible: 0,
-                  autoscrollToTopThreshold: 24,
+                onContentSizeChange={(width, height) => {
+                  edge.onContentSizeChange(width, height);
+                  scroll.schedule();
                 }}
+                onLayout={(event) => {
+                  edge.onLayout(event);
+                  scroll.schedule();
+                }}
+                onScrollBeginDrag={(event) => scroll.onScrollBeginDrag(event.nativeEvent.contentOffset.y)}
+                onScrollEndDrag={(event) => scroll.onScrollEndDrag(event.nativeEvent.contentOffset.y)}
+                onMomentumScrollBegin={scroll.onMomentumScrollBegin}
+                onMomentumScrollEnd={(event) => scroll.onMomentumScrollEnd(event.nativeEvent.contentOffset.y)}
+                // Keep native anchoring stable: toggling it can reuse a stale
+                // anchor on iOS. Explicit follow runs after layout settles.
+                maintainVisibleContentPosition={HISTORY_ANCHOR}
                 // Inverted, so this sits below the newest message. It is
                 // measured rather than guessed because the composer grows: a
                 // pending question, the working row and a wrapped draft all
@@ -449,6 +456,8 @@ export default function AgentConversationScreen() {
           tunable={supportsRetuning(agent.provider)}
           onOpenModelSettings={() => openAgentForm('settings')}
           keyboardOffset={keyboardHeight}
+          showLatest={!scroll.following}
+          onFollowLatest={scroll.followLatest}
         />
         <ConnectionStatus
           deviceId={ownerDeviceId}
@@ -897,6 +906,8 @@ function Composer({
   tunable,
   onOpenModelSettings,
   keyboardOffset = 0,
+  showLatest,
+  onFollowLatest,
 }: {
   value: string;
   onChangeText: (text: string) => void;
@@ -913,6 +924,8 @@ function Composer({
   tunable: boolean;
   onOpenModelSettings: () => void;
   keyboardOffset?: number;
+  showLatest: boolean;
+  onFollowLatest: () => void;
 }) {
   const theme = useTheme();
 
@@ -933,6 +946,7 @@ function Composer({
           request={request}
           enqueueing={sending}
           enqueueGuard={enqueueGuard}
+          onAnswer={onFollowLatest}
         />
       ) : null}
       <View style={styles.cardWrapper}>
@@ -958,6 +972,26 @@ function Composer({
                 ]}>
                 <ThemedText style={styles.atText}>@</ThemedText>
               </Pressable>
+              {showLatest ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Scroll to latest message"
+                  accessibilityHint="Resume following new messages"
+                  hitSlop={8}
+                  onPress={onFollowLatest}
+                  style={({ pressed }) => [
+                    styles.latest,
+                    { backgroundColor: theme.accentSoft, opacity: pressed ? 0.72 : 1 },
+                  ]}>
+                  <AppIcon
+                    name={{ ios: 'arrow.down', android: 'arrow_downward', web: 'arrow_downward' }}
+                    size={14}
+                    tintColor={theme.text}
+                    fallback="↓"
+                  />
+                  <ThemedText type="caption">Latest</ThemedText>
+                </Pressable>
+              ) : null}
             </View>
 
             <TextInput
@@ -1201,6 +1235,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  latest: {
+    marginLeft: 'auto',
+    minHeight: 28,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.half,
+    paddingHorizontal: Spacing.one,
+    borderRadius: Radius.pill,
   },
   atText: {
     fontSize: 14,

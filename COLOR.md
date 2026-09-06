@@ -12,7 +12,7 @@ Almost everything lives in **`src/constants/theme.ts`**. Start there.
 
 ```ts
 export const BackgroundGradient = {
-  colors: ['#2E3BE0', '#232C9E', '#0E1130', Colors.background],
+  colors: ['#2241C0', '#1D3182', '#0D1226', Colors.background],
   locations: [0, 0.28, 0.58, 1],
 };
 ```
@@ -21,6 +21,10 @@ export const BackgroundGradient = {
 near-black sooner, which keeps more of a screen neutral; raise it to carry the
 indigo further down. Keep the last colour equal to `Colors.background` so the
 foot of the gradient matches anything painted with the flat canvas colour.
+
+The gradient and `Colors.accent` (`#6682F0`) share the same blue hue. The
+gradient is slightly darker than the original indigo; stop positions and
+glass opacity remain unchanged.
 
 `src/components/ui/app-background.tsx` renders the gradient at the root and in
 routes/blur targets that need their own opaque backdrop. `CanvasFill` aligns
@@ -121,7 +125,7 @@ sample the underlying app's blur target.
 changing `accent` restyles every primary action, selection, and focus ring at
 once.
 
-Use `withAlpha('#6C7CFF', 0.4)` rather than writing a second `rgba()` literal
+Use `withAlpha(Colors.accent, 0.4)` rather than writing a second `rgba()` literal
 for a translucent variant of an existing token.
 
 ## Everywhere else

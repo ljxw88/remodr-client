@@ -106,3 +106,11 @@ truncate without displacing Send; the accessibility label retains the full name.
 Connection status remains a floating indicator with a small retry action.
 Detailed connection state is on the server page; no reconnect sheet opens.
 Structured agent questions remain beside the composer.
+
+Chat uses `use-conversation-scroll.ts` to follow both message updates and
+their later native layout measurements. Sending text or an answer resumes
+following; manual history scrolling pauses it. The composer's **Latest**
+control resumes following without changing the draft. Native visible-content
+anchoring stays configured throughout the conversation to avoid stale anchor
+geometry on iOS. Explicit following runs after data and native layout updates;
+when reading history, only native anchoring adjusts the reader's position.

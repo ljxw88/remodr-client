@@ -1,7 +1,7 @@
 # Remodr — Dark Mobile Design
 
 Remodr is an always-dark, conversation-first Android client for
-remote coding agents. It uses a calm near-black canvas, restrained violet
+remote coding agents. It uses a calm near-black canvas, restrained blue
 accents, and soft depth to make complex remote workflows feel native on a
 phone. The interface borrows proven hierarchy from modern finance and chat
 apps without copying another product's branding or screen layouts.
@@ -25,7 +25,7 @@ the normal user flow.
 
 - Top-level navigation floats above the canvas as one rounded glass dock. It
   never spans edge to edge or paints a full-width navigation background.
-- The active destination uses one restrained violet-soft capsule; inactive
+- The active destination uses one restrained blue-soft capsule; inactive
   destinations remain transparent.
 - At the top of a page, show icons and labels in a 72dp dock. After a deliberate
   downward scroll, animate to a narrower 54dp icon-only dock.
@@ -57,7 +57,7 @@ the normal user flow.
 - Scrims and edge fades must stay low in alpha. A scrim tuned against the old
   solid near-black reads as a grey band over the saturated top of the
   gradient.
-- Use one violet accent for primary actions, selection, focus, and active
+- Use one blue accent for primary actions, selection, focus, and active
   states.
 - Frosted glass is the app's one surface material. Chips, buttons, cards, the
   dock, and the composer are all the same glass at different strengths, so the
@@ -77,7 +77,7 @@ a colour lives and which value to tune.
 | Role | Value |
 |---|---|
 | Canvas | `#08090B` |
-| Canvas gradient | `#2E3BE0` → `#232C9E` → `#0E1130` → `#08090B` |
+| Canvas gradient | `#2241C0` → `#1D3182` → `#0D1226` → `#08090B` |
 | Surface | `#141519` |
 | Selected surface | `#202229` |
 | Border | `#252830` |
@@ -85,12 +85,12 @@ a colour lives and which value to tune.
 | Secondary text | `#B2B6C0` |
 | Muted text | `#A2A8B6` |
 | Placeholder | `#8E95A5` |
-| Primary accent | `#6C7CFF` |
+| Primary accent | `#6682F0` |
 | Success | `#5BE49B` |
 | Warning | `#FFC65C` |
 | Danger | `#FF716B` |
 
-Violet is reserved for action and active emphasis. Green, amber, and red are
+Blue is reserved for action and active emphasis. Green, amber, and red are
 semantic and must always be paired with a label or icon.
 
 ## Geometry and spacing
@@ -132,10 +132,10 @@ logs. Do not add marketing subtitles to mobile headers.
 
 ### Buttons and fields
 
-- Primary buttons use violet with white semibold text and a pill shape.
+- Primary buttons use blue with white semibold text and a pill shape.
 - Secondary buttons use an elevated dark surface with a restrained border.
 - Destructive actions remain visually separate from the primary workflow.
-- Inputs use the shared minimum control height with an 18dp radius. Focus uses a violet border and
+- Inputs use the shared minimum control height with an 18dp radius. Focus uses a blue border and
   subtle depth, not a glow.
 
 ### Workflow pages and contextual menus
@@ -233,7 +233,7 @@ anyway.
 
 ### Status
 
-- Working: violet
+- Working: blue
 - Needs input: amber
 - Done or connected: green
 - Failed: red
@@ -256,12 +256,13 @@ Status must remain understandable without color alone.
 - Show provider, working directory, and explicit status.
 - Preserve last-known content during reconnect and show a compact floating
   connection indicator.
-- A violet-soft icon tile gives each row a stable visual anchor.
+- A blue-soft icon tile gives each row a stable visual anchor.
 - Tapping a row opens its conversation at the newest content.
 - Keep **New agent** as the only primary action. Its page chooses one
   of the server-advertised providers, a required space, and an explicit
   auto-approval setting without exposing terminal controls.
-- Place a secondary **New space** action beside it. Space creation asks for an
+- Place **+ New Space** in the Spaces filter list, including when a connected
+  device has no spaces yet. Space creation asks for an
   optional label and required remote root folder, then selects the new space
   and continues directly into the agent picker.
 - Keep the root-folder field editable, with a trailing folder action that opens
@@ -289,7 +290,14 @@ chromatic orb.
 - Assistant content sits directly on the canvas for maximum reading space.
 - User messages use compact right-aligned dark bubbles.
 - Open at the newest item and follow sent messages, received reply updates, tool
-  updates, and assistant responses automatically.
+  updates, and assistant responses while the reader is at the bottom.
+- Sending a message or an answer resumes following immediately. Re-pin after
+  transcript, composer and keyboard layout changes so long messages and
+  streaming markdown cannot push the newest content out of view.
+- Scrolling into history pauses following and leaves position preservation to
+  native anchoring. A small **Latest** action in the composer's existing top row
+  returns to the bottom; scrolling back near the bottom also resumes following.
+  Opening the keyboard alone must not interrupt history reading.
 - Group every tool call within a user turn into one thin, expandable line:
   `Worked for 20m (6 tool calls)`.
 - Show a persistent named activity indicator above the composer while the
@@ -308,7 +316,7 @@ chromatic orb.
 - Give every fenced block a header with its language and a copy action, and
   scroll code horizontally rather than wrapping it, so indentation-sensitive
   output stays readable.
-- Colour `diff` fences per line: green additions, red removals, violet hunk
+- Colour `diff` fences per line: green additions, red removals, blue hunk
   headers, muted file metadata.
 - Size table columns to fit the screen and scroll wide tables horizontally.
   Never clip a column off the edge.
@@ -331,7 +339,7 @@ chromatic orb.
 
 ## Settings
 
-- Use compact grouped rows with violet-soft icon tiles.
+- Use compact grouped rows with blue-soft icon tiles.
 - Keep security claims specific: stored credentials, host-key verification,
   diagnostics, and app version.
 - Do not include Appearance controls because the product is intentionally
