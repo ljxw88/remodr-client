@@ -214,6 +214,19 @@ export default function AgentsScreen() {
             agentFiltersExpanded ? 'Hide devices and spaces' : 'Show devices and spaces'
           }
           expanded={agentFiltersExpanded}
+          /*
+            Brighter plate while the section is open. The rim is spoken for by
+            the connection status, so the fill is what is left to say it.
+
+            The selected surface rather than `accentSoft`, which is what marks
+            a selected chip. This button sits at the very top of the canvas,
+            where the gradient is at its most saturated indigo, and a violet
+            tint there lands within a few points of the plain glass — measured
+            side by side, the two states were indistinguishable. A chip gets
+            away with `accentSoft` because its iridescent rim is doing the
+            work, and that rim is scoped to the one hero control.
+          */
+          backgroundColor={agentFiltersExpanded ? theme.backgroundSelected : undefined}
           disabled={hosts.length === 0}
           onPress={() => void setAgentFiltersExpanded(!agentFiltersExpanded)}
         />

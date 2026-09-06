@@ -33,10 +33,6 @@ export const Colors = {
   accentSoft: 'rgba(108,124,255,0.22)',
   successSoft: 'rgba(91,228,155,0.16)',
   warningSoft: 'rgba(255,198,92,0.16)',
-  // The profile avatar. Alone among the header controls it is a well rather
-  // than a plate: a translucent indigo that darkens the canvas instead of
-  // lightening it, so the status ring around it has something to read against.
-  avatarFill: 'rgba(26,25,62,0.30)',
 } as const;
 
 /**

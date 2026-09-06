@@ -15,9 +15,9 @@ describe('ProfileAvatar', () => {
     expect(PROFILE_AVATAR_SIZE).toBe(ControlHeight.header);
   });
 
-  it('has a fill in the theme rather than one of its own', () => {
-    expect(typeof Colors.avatarFill).toBe('string');
-    expect(Colors.avatarFill.length).toBeGreaterThan(0);
+  it('is made of the same glass as the controls it sits beside', () => {
+    expect(Colors.glass).toBe(Colors.backgroundElement);
+    expect(Colors.glass).toMatch(/^rgba\(255,255,255/);
   });
 
   describe('getConnectionStatusColor', () => {

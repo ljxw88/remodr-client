@@ -10,6 +10,7 @@ import {
 
 import { ThemedText } from '@/components/themed-text';
 import { AppIcon, type AppIconName } from '@/components/ui/app-icon';
+import { glassRim } from '@/components/ui/glass-surface';
 import { Colors, ControlHeight } from '@/constants/theme';
 import type { HerdrConnectionState } from '@/domain/herdr';
 import { useTheme } from '@/hooks/use-theme';
@@ -51,7 +52,7 @@ export type ProfileAvatarProps = {
   status?: HerdrConnectionState;
   /** Explicit border color override for connection status */
   statusColor?: string;
-  /** Background pure color override (defaults to `avatarFill` in the theme). */
+  /** Fill override, for a control that has a state of its own to show. */
   backgroundColor?: string;
   /** Icon/text tint color override (defaults to theme.text) */
   tintColor?: string;
@@ -75,9 +76,18 @@ export type ProfileAvatarProps = {
 };
 
 /**
- * Circular profile avatar with pure background color adapting to the interface
- * material and a border displaying the active connection status. Matches the
- * New agent button's 50px height.
+ * The header's round button, drawn at the New agent button's height so the two
+ * read as a pair.
+ *
+ * The same glass as every other control that sits on the canvas: a translucent
+ * white plate and a hairline rim with a brighter top edge. It used to be the
+ * one header control that darkened the canvas instead of lightening it, which
+ * bought its status ring contrast at the price of being the only thing on that
+ * line made of something else.
+ *
+ * The rim carries the connection status, so it is the app's rim in weight and
+ * the status palette in colour. That leaves the fill free for whatever state
+ * the button itself has, which is why it is the caller's to pass.
  */
 export function ProfileAvatar({
   onPress,
@@ -96,7 +106,7 @@ export function ProfileAvatar({
 }: ProfileAvatarProps) {
   const theme = useTheme();
   const effectiveBorderColor = statusColor ?? getConnectionStatusColor(status, theme);
-  const effectiveBackgroundColor = backgroundColor ?? theme.avatarFill;
+  const effectiveBackgroundColor = backgroundColor ?? theme.glass;
   const effectiveTintColor = tintColor ?? theme.text;
 
   const handlePress = useCallback(() => {
@@ -116,10 +126,11 @@ export function ProfileAvatar({
       onPress={handlePress}
       style={({ pressed }) => [
         styles.container,
+        glassRim(effectiveBorderColor),
         {
-          backgroundColor:
-            pressed && !disabled ? theme.backgroundSelected : effectiveBackgroundColor,
-          borderColor: effectiveBorderColor,
+          // Pressing dims and shrinks rather than swapping the fill, which on
+          // an active button would drop the one colour saying it is active.
+          backgroundColor: effectiveBackgroundColor,
           opacity: disabled ? 0.45 : pressed ? 0.8 : 1,
           transform: [{ scale: pressed && !disabled ? 0.96 : 1 }],
         },
@@ -152,7 +163,6 @@ const styles = StyleSheet.create({
     width: SIZE,
     height: SIZE,
     borderRadius: SIZE / 2,
-    borderWidth: 2,
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
