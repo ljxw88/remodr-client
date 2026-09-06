@@ -5,6 +5,11 @@ import {
   getConnectionStatusColor,
 } from './profile-avatar';
 
+// The rim draws through Skia, which Jest is not set up to transform. This
+// suite never renders, so the drawing is out of scope either way. `jest.mock`
+// is hoisted above the imports regardless of where it is written.
+jest.mock('@/components/ui/liquid-glass-rim', () => ({ LiquidGlassRim: () => null }));
+
 describe('ProfileAvatar', () => {
   it('is defined and exports ProfileAvatar', () => {
     expect(ProfileAvatar).toBeDefined();

@@ -4,6 +4,7 @@ import {
   Image,
   Pressable,
   StyleSheet,
+  View,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
@@ -11,6 +12,7 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { AppIcon, type AppIconName } from '@/components/ui/app-icon';
 import { glassRim } from '@/components/ui/glass-surface';
+import { LiquidGlassRim } from '@/components/ui/liquid-glass-rim';
 import { Colors, ControlHeight } from '@/constants/theme';
 import type { HerdrConnectionState } from '@/domain/herdr';
 import { useTheme } from '@/hooks/use-theme';
@@ -69,6 +71,17 @@ export type ProfileAvatarProps = {
    * screen readers. Left off when the button is not one.
    */
   expanded?: boolean;
+  /**
+   * Wears the New agent button's material instead of the flat glass plate: a
+   * frosted body and a slowly turning iridescent rim, drawn in Skia.
+   *
+   * For the round button sharing the header's top line with it, so the two read
+   * as one pair rather than two unrelated controls. It is drawn over the glass
+   * plate rather than instead of it, which is what a selected chip does with
+   * the same rim; the status colour steps aside, since an iridescent edge and
+   * a semantic one cannot both have the border.
+   */
+  liquidRim?: boolean;
   /** Disables the button */
   disabled?: boolean;
   /** Optional container style */
@@ -101,6 +114,7 @@ export function ProfileAvatar({
   icon = { ios: 'person.fill', android: 'person', web: 'person' },
   fallback = '👤',
   expanded,
+  liquidRim = false,
   disabled = false,
   style,
 }: ProfileAvatarProps) {
@@ -126,34 +140,51 @@ export function ProfileAvatar({
       onPress={handlePress}
       style={({ pressed }) => [
         styles.container,
-        glassRim(effectiveBorderColor),
+        /*
+          The plate and its rim stay under the drawn one, which is also what a
+          selected chip does. Taking them away to let the drawn rim be the whole
+          edge looks right in principle and does not survive contact: with no
+          fill and no border the button stops painting on Android altogether,
+          chevron included. Only the colour steps aside — an iridescent edge and
+          a status one cannot both have the border.
+        */
+        glassRim(liquidRim ? undefined : effectiveBorderColor),
         {
-          // Pressing dims and shrinks rather than swapping the fill, which on
-          // an active button would drop the one colour saying it is active.
           backgroundColor: effectiveBackgroundColor,
-          opacity: disabled ? 0.45 : pressed ? 0.8 : 1,
+          // Dims and shrinks, at the depth the button beside it dims to.
+          opacity: disabled ? 0.45 : pressed ? 0.72 : 1,
           transform: [{ scale: pressed && !disabled ? 0.96 : 1 }],
         },
         style,
       ]}>
-      {imageUri ? (
-        <Image
-          source={{ uri: imageUri }}
-          style={styles.avatarImage}
-          resizeMode="cover"
-        />
-      ) : initials ? (
-        <ThemedText type="smallBold" style={{ color: effectiveTintColor }}>
-          {initials}
-        </ThemedText>
-      ) : (
-        <AppIcon
-          name={icon}
-          size={20}
-          tintColor={effectiveTintColor}
-          fallback={fallback}
-        />
-      )}
+      {liquidRim ? <LiquidGlassRim active={!disabled} /> : null}
+      {/*
+        A layer of its own, so it can be lifted above the rim. Being declared
+        after the canvas is not enough on Android — the canvas composited its
+        frosted body over the icon and left it looking washed rather than
+        drawn. The selected chip keeps its label in a wrapper for its own
+        reasons and gets the same protection by accident.
+      */}
+      <View style={styles.content}>
+        {imageUri ? (
+          <Image
+            source={{ uri: imageUri }}
+            style={styles.avatarImage}
+            resizeMode="cover"
+          />
+        ) : initials ? (
+          <ThemedText type="smallBold" style={{ color: effectiveTintColor }}>
+            {initials}
+          </ThemedText>
+        ) : (
+          <AppIcon
+            name={icon}
+            size={20}
+            tintColor={effectiveTintColor}
+            fallback={fallback}
+          />
+        )}
+      </View>
     </Pressable>
   );
 }
@@ -167,6 +198,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     overflow: 'hidden',
     flexShrink: 0,
+  },
+  content: {
+    // Above the drawn rim, and the reason this is a view at all.
+    zIndex: 1,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   avatarImage: {
     width: '100%',

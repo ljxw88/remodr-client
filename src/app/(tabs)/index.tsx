@@ -206,27 +206,20 @@ export default function AgentsScreen() {
         </View>
         {/* The filters are chrome: useful when picking where to look, in the
             way when reading the list. This folds them away and remembers. */}
+        {/*
+          The New agent button's material, so the two ends of this line read as
+          one pair. Which way the chevron points is the whole of the state: the
+          section it opens is either on screen or it is not, so a fill saying so
+          as well would be telling you something you can already see.
+        */}
         <ProfileAvatar
-          status={state.connection}
+          liquidRim
           icon={agentFiltersExpanded ? CollapseFiltersIcon : ExpandFiltersIcon}
           fallback={agentFiltersExpanded ? '⌃' : '⌄'}
           accessibilityLabel={
             agentFiltersExpanded ? 'Hide devices and spaces' : 'Show devices and spaces'
           }
           expanded={agentFiltersExpanded}
-          /*
-            Brighter plate while the section is open. The rim is spoken for by
-            the connection status, so the fill is what is left to say it.
-
-            The selected surface rather than `accentSoft`, which is what marks
-            a selected chip. This button sits at the very top of the canvas,
-            where the gradient is at its most saturated indigo, and a violet
-            tint there lands within a few points of the plain glass — measured
-            side by side, the two states were indistinguishable. A chip gets
-            away with `accentSoft` because its iridescent rim is doing the
-            work, and that rim is scoped to the one hero control.
-          */
-          backgroundColor={agentFiltersExpanded ? theme.backgroundSelected : undefined}
           disabled={hosts.length === 0}
           onPress={() => void setAgentFiltersExpanded(!agentFiltersExpanded)}
         />
