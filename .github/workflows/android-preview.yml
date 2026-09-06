@@ -1,4 +1,4 @@
-name: Build Android Preview
+name: Build and Release Android App
 
 on:
   workflow_dispatch:
@@ -60,21 +60,50 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Resolve App Version
+        id: app_version
+        run: |
+          RAW_VERSION=$(node -p "require('./package.json').version")
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+            CLEAN_VERSION="${TAG#v}"
+            APK_BASENAME="remodr-${TAG}"
+            IS_PRERELEASE=false
+            RELEASE_TITLE="Remodr ${TAG}"
+            # Ensure app.json matches the tagged version
+            node scripts/sync-version.cjs --no-increment
+          else
+            TAG="preview"
+            CLEAN_VERSION="${RAW_VERSION}"
+            APK_BASENAME="remodr-${RAW_VERSION}-preview-${{ github.run_number }}"
+            IS_PRERELEASE=true
+            RELEASE_TITLE="Remodr v${RAW_VERSION} Preview (${{ github.run_number }})"
+          fi
+
+          echo "version=${CLEAN_VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "apk_basename=${APK_BASENAME}" >> $GITHUB_OUTPUT
+          echo "is_prerelease=${IS_PRERELEASE}" >> $GITHUB_OUTPUT
+          echo "title=${RELEASE_TITLE}" >> $GITHUB_OUTPUT
+
       - name: Build Android APK locally
         run: |
           mkdir -p build
+          TARGET_APK="build/${{ steps.app_version.outputs.apk_basename }}.apk"
           npx --yes eas-cli build \
             --platform android \
             --profile preview \
             --local \
             --non-interactive \
-            --output ./build/app-preview.apk
+            --output "$TARGET_APK"
+          # Create a stable unversioned copy for permanent download links
+          cp "$TARGET_APK" build/remodr-preview.apk
 
       - name: Upload APK to Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: android-preview-${{ github.run_number }}
-          path: build/app-preview.apk
+          name: ${{ steps.app_version.outputs.apk_basename }}
+          path: build/${{ steps.app_version.outputs.apk_basename }}.apk
           retention-days: 14
           if-no-files-found: error
 
@@ -82,24 +111,43 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ "${{ github.ref_type }}" = "tag" ]; then
-            TAG="${{ github.ref_name }}"
-            TITLE="Release $TAG"
-            PRERELEASE_FLAG=""
-          else
-            TAG="preview"
-            TITLE="Android Preview Build"
-            PRERELEASE_FLAG="--prerelease"
-          fi
+          TAG="${{ steps.app_version.outputs.tag }}"
+          TITLE="${{ steps.app_version.outputs.title }}"
+          IS_PRERELEASE="${{ steps.app_version.outputs.is_prerelease }}"
+          PRIMARY_APK="build/${{ steps.app_version.outputs.apk_basename }}.apk"
+          STABLE_APK="build/remodr-preview.apk"
 
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Updating existing release $TAG..."
-            gh release upload "$TAG" build/app-preview.apk --clobber
-            gh release edit "$TAG" --title "$TITLE" --notes "Automated Android APK built from commit ${{ github.sha }} on $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            NOTES="### Remodr Preview Build
+          - **Version:** \`${{ steps.app_version.outputs.version }}\`
+          - **Build:** \`#${{ github.run_number }}\`
+          - **Commit:** [\`${{ github.sha }}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})
+          - **Built at:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+
+          #### Download APK:
+          - [\`${{ steps.app_version.outputs.apk_basename }}.apk\`](${{ github.server_url }}/${{ github.repository }}/releases/download/preview/${{ steps.app_version.outputs.apk_basename }}.apk)
+          - [\`remodr-preview.apk\` (latest)](${{ github.server_url }}/${{ github.repository }}/releases/download/preview/remodr-preview.apk)"
+
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              echo "Updating existing release $TAG..."
+              gh release upload "$TAG" "$PRIMARY_APK" "$STABLE_APK" --clobber
+              gh release edit "$TAG" --title "$TITLE" --notes "$NOTES"
+            else
+              echo "Creating new release $TAG..."
+              gh release create "$TAG" "$PRIMARY_APK" "$STABLE_APK" \
+                --title "$TITLE" \
+                --prerelease \
+                --notes "$NOTES"
+            fi
           else
-            echo "Creating new release $TAG..."
-            gh release create "$TAG" build/app-preview.apk \
-              --title "$TITLE" \
-              $PRERELEASE_FLAG \
-              --notes "Automated Android APK built from commit ${{ github.sha }}"
+            # Official Tagged Release (e.g., v1.0.0)
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              echo "Updating existing release $TAG..."
+              gh release upload "$TAG" "$PRIMARY_APK" --clobber
+            else
+              echo "Creating official release $TAG..."
+              gh release create "$TAG" "$PRIMARY_APK" \
+                --title "$TITLE" \
+                --generate-notes
+            fi
           fi

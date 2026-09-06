@@ -58,7 +58,10 @@
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "models:refresh": "node ./scripts/refresh-models.cjs",
-    "test": "jest"
+    "test": "jest",
+    "version": "node ./scripts/sync-version.cjs && git add app.json",
+    "version:check": "node ./scripts/sync-version.cjs --check",
+    "version:bump": "node ./scripts/sync-version.cjs"
   },
   "jest": {
     "preset": "jest-expo",

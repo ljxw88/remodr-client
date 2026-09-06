@@ -9,7 +9,8 @@
     "scheme": "remoteworkspace",
     "userInterfaceStyle": "dark",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
@@ -19,7 +20,8 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.remoteworkspace"
+      "package": "com.anonymous.remoteworkspace",
+      "versionCode": 1
     },
     "web": {
       "output": "static",
