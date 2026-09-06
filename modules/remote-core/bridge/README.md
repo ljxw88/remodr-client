@@ -1,4 +1,4 @@
-# Durable bridge commands
+# Herdr mobile bridge
 
 The standalone Python bridge still uses NDJSON **protocol 1**. No additional
 packages or sibling Python files are needed on the remote host. Its hello
@@ -11,6 +11,65 @@ An unavailable journal produces a hello with `durableCommands: false`,
 `runtimeReady: false`, `fatal: true`, and a typed `error: {code, message}` (for
 example `COMMAND_STORE_UNAVAILABLE`); the bridge then exits without dispatching.
 Availability can change after hello: later storage failures still fail closed.
+
+## Source modules and deployment
+
+Runtime source lives in `remodr_bridge/`. Provider packages under
+`remodr_bridge/providers/` own their launch/tuning settings, active-session
+resolution, and transcript parsing:
+
+- `copilot/`: native process/session discovery, Copilot event parsing, questions,
+  TODOs, and Copilot-specific tuning.
+- `codex/`: thread/status-line identity, rollout parsing, and Codex configuration.
+- `claude/`: Claude Code launch settings and transcript handling.
+- `cursor/`: Cursor Agent launch settings and explicit terminal fallback.
+
+Shared orchestration, protocol, transport, and durable storage stay outside
+provider packages. The provider registry is the integration point; adding a
+provider should not require adding branches throughout the runtime.
+This refactor does not imply feature parity: existing provider capabilities
+and restrictions below remain unchanged.
+
+| Module | Responsibility |
+| --- | --- |
+| `remodr_bridge/bridge.py` | Protocol dispatch, synchronized state, and orchestration |
+| `remodr_bridge/runtime.py` | Snapshot normalization and session reconciliation |
+| `remodr_bridge/lifecycle.py` | Workspace and agent create/rename/close operations |
+| `remodr_bridge/commands.py`, `ledger.py` | Durable command preconditions, receipts, and storage |
+| `remodr_bridge/questions.py` | Shared question-answer delivery |
+| `remodr_bridge/subscriptions.py`, `transport.py` | Herdr events and socket I/O |
+| `providers/base.py` | `ProviderSpec`, `ProviderAdapter`, and the explicit `ProviderHost` contract |
+| `providers/__init__.py` | Ordered provider registry and normalized provider selection |
+| `providers/<provider>/settings.py` | That provider's labels, flags, effort choices, and capabilities |
+
+Copilot's `processes.py`, `sessions.py`, `transcript.py`, and `tuning.py` separate
+OS process inspection, identity resolution, transcript decoding, and live
+retuning. Codex separates `sessions.py` from `transcript.py`; Claude has its own
+transcript reader. Cursor explicitly inherits the raw-output fallback.
+Shared state stays with the host so the existing lock, cache-invalidation, and
+durable-command boundaries remain consistent across adapters.
+
+`herdr_mobile_bridge.py` is a source-tree compatibility entrypoint. Android does
+not upload that file on its own. `build_bundle.py` packages the runtime modules
+and `archive_main.py` into a deterministic `herdr_mobile_bridge.pyz`; the native
+Gradle task runs it before asset merging. Tests, caches, and build helpers are
+excluded. The complete archive is byte-verified and deployed to a content-addressed
+`.pyz` path, so an update cannot mix old and new provider modules.
+
+```sh
+python3 build_bundle.py --output /tmp/herdr_mobile_bridge.pyz
+python3 /tmp/herdr_mobile_bridge.pyz --version
+```
+
+`--version` imports the runtime and reports its protocol/providers without
+contacting Herdr or creating a session. Normal execution remains protocol-1
+NDJSON on stdin/stdout. The remote server needs Python and the existing standard
+library dependencies, not pip packages or an extraction step.
+
+New providers need an adapter, registry entry, and provider-level regression
+coverage, plus the corresponding mobile provider/model-catalogue support.
+Keep shared session isolation and durable command preconditions in the runtime
+rather than duplicating them in provider adapters.
 
 ## Providers and model settings
 
@@ -131,11 +190,16 @@ must not be presented as the user's main conversation.
 
 Some Herdr versions retain Copilot's original session reference even after
 accepting a native clear/session report. The bridge therefore requests
-`pane.process_info` and verifies the **foreground process-group leader** is the
-exact `copilot` executable in that pane. A child Copilot process, background
-SDK process, or another pane's process metadata is not sufficient.
+`pane.process_info` and verifies the **foreground process-group leader** in that
+pane. On macOS this is the `copilot` executable. Linux can omit `argv0` and start
+Copilot through VS Code's shell/Node launchers; `/proc` executable, parent, owner,
+and process-group metadata identifies the unique native Copilot runtime in that
+verified launcher chain. Arbitrary child/background SDK processes, unrelated
+groups, and ambiguous sibling runtimes are not accepted.
+Linux's ` (deleted)` executable marker after an in-place CLI update is recognized;
+an otherwise live, verified runtime does not need to be restarted.
 
-Only that PID's open descriptors are inspected: Linux uses `/proc/<pid>/fd`;
+Only the selected runtime PID's open descriptors are inspected: Linux uses `/proc/<pid>/fd`;
 macOS uses `lsof -nP -a -p <pid> -F0pun`. The process must belong to the bridge
 user. Only the exact path
 `~/.copilot/session-state/<session-id>/session.db` qualifies, not other homes,

@@ -177,9 +177,11 @@ depend on their native Herdr integrations for session identity.
 
 Rebuild/reinstall the app to deploy changes to its bundled Python bridge; a
 JavaScript reload alone does not replace that native asset. When diagnosing an
-old installation, compare the running `herdr_mobile_bridge-<sha256>.py` filename
-with the checksum of `modules/remote-core/bridge/herdr_mobile_bridge.py`; the
-APK's `assets/herdr_mobile_bridge.py` must contain the same bytes.
+old installation, compare the running `herdr_mobile_bridge-<sha256>.pyz` filename
+with the checksum of the generated archive at
+`modules/remote-core/android/build/generated/bridgeAssets/herdr_mobile_bridge.pyz`.
+The APK's `assets/herdr_mobile_bridge.pyz` must contain the same bytes. The
+fingerprint covers the complete module bundle, not only the source entrypoint.
 
 On recovery, fetch authoritative snapshots, including the visible conversation
 even if its agent has already finished. Pending local messages are an overlay,

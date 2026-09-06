@@ -195,7 +195,7 @@ class SessionRotationTest(unittest.TestCase):
                 )
                 self.snapshot = self.make_snapshot(session_id, provider)
                 with patch.object(
-                    self.bridge, "_effective_codex_session", return_value=session_id
+                    self.bridge.providers["codex"], "resolve_session", return_value=session_id
                 ):
                     conversation = self.poll()
                 self.assertEqual(conversation["provider"], provider)
@@ -220,7 +220,7 @@ class SessionRotationTest(unittest.TestCase):
         self.bridge._refresh_runtime()
         self.write_session("after-clear")
         self.snapshot = self.make_snapshot("after-clear")
-        with patch("herdr_mobile_bridge.time.sleep"):
+        with patch("remodr_bridge.providers.copilot.tuning.time.sleep"):
             self.bridge._retune_agent({
                 "agentId": self.agent_id, "model": "gpt-5.4", "effort": "high"
             })
@@ -306,7 +306,7 @@ class SessionRotationTest(unittest.TestCase):
     def test_transcript_failure_is_not_silently_replaced_with_terminal_output(self):
         self.write_session("before-clear")
         with (
-            patch.object(self.bridge, "_load_copilot", side_effect=OSError("unreadable")),
+            patch.object(self.bridge.providers["copilot"], "load_conversation", side_effect=OSError("unreadable")),
             patch.object(self.bridge, "_load_fallback") as fallback,
             patch.object(self.bridge, "_diagnostic"),
         ):
@@ -362,7 +362,7 @@ class SessionRotationTest(unittest.TestCase):
         refreshing = threading.Event()
         errors = []
         results = []
-        load = self.bridge._load_copilot
+        load = self.bridge.providers["copilot"].load_conversation
 
         def paused_load(agent):
             entered.set()
@@ -380,7 +380,7 @@ class SessionRotationTest(unittest.TestCase):
             refreshing.set()
             self.bridge._handle_herdr_event({"data": {"type": "pane_output_changed"}})
 
-        with patch.object(self.bridge, "_load_copilot", side_effect=paused_load):
+        with patch.object(self.bridge.providers["copilot"], "load_conversation", side_effect=paused_load):
             reader = threading.Thread(target=poll)
             updater = threading.Thread(target=subscription)
             reader.start()

@@ -16,6 +16,7 @@ Expo APIs; do not assume examples for another SDK apply.
 - Node.js/npm compatible with the installed Expo SDK.
 - Android SDK/platform tools, an emulator or USB-debuggable Android phone, and
   a compatible JDK. The local Android build has been exercised with JDK 17.
+- Python 3 for packaging the modular bridge into its self-contained zipapp.
 - A remote SSH host running Herdr and the provider CLI you want to use. See
   [Herdr integration](herdr-mobile-architecture.md).
 
@@ -60,6 +61,32 @@ adb -s YOUR_DEVICE_SERIAL install -r \
 
 This debug development APK uses Metro. It is not a self-contained distribution
 build merely because Gradle produced an APK.
+
+## Bridge source and packaging
+
+Provider-specific code lives under
+[`modules/remote-core/bridge/remodr_bridge/providers/`](../modules/remote-core/bridge/remodr_bridge/providers/).
+Shared runtime code and durable command handling live elsewhere in the same
+package. `herdr_mobile_bridge.py` remains a small source-tree entrypoint, not
+the file deployed on its own.
+
+The native module's `bundleHerdrBridge` Gradle task runs automatically before
+asset merging. It creates
+`modules/remote-core/android/build/generated/bridgeAssets/herdr_mobile_bridge.pyz`.
+The APK contains only that runtime archive, not tests or loose Python modules.
+If `python3` is not on PATH, pass `-PherdrBridgePython=/path/to/python3` to Gradle.
+
+To build and inspect the archive without Android:
+
+```sh
+python3 modules/remote-core/bridge/build_bundle.py --output /tmp/herdr_mobile_bridge.pyz
+python3 /tmp/herdr_mobile_bridge.pyz --version
+```
+
+The archive is deterministic: unchanged source produces identical bytes. Any
+provider-module change changes the archive checksum and therefore the remote
+deployment path. Run bridge regressions with the existing unittest command
+below; it also checks isolated zipapp execution and packaging contents.
 
 ## Native generation
 

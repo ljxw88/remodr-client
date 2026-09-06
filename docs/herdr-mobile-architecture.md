@@ -40,21 +40,25 @@ configuration uses each provider's own flags.
 HerdrRepository
     -> HerdrBridgeTransport (protocol 1 NDJSON)
     -> RemoteCore / SSHJ non-PTY exec
-    -> herdr_mobile_bridge-<sha256>.py
+    -> herdr_mobile_bridge-<sha256>.pyz
         -> Herdr Unix socket
         -> provider transcript files
 ```
 
-The app bundles
-[`herdr_mobile_bridge.py`](../modules/remote-core/bridge/herdr_mobile_bridge.py)
-and deploys it with SFTP under `~/.local/share/remote-workspace/`. Native
+The [modular Python source](../modules/remote-core/bridge/remodr_bridge/) is
+packaged by [`build_bundle.py`](../modules/remote-core/bridge/build_bundle.py)
+into `herdr_mobile_bridge.pyz`. Gradle builds this archive automatically and
+includes it as an APK asset. The app deploys it with SFTP under
+`~/.local/share/remote-workspace/`. Native
 [`BridgeDeployment`](../modules/remote-core/android/src/main/java/com/remoteworkspace/remotecore/BridgeDeployment.kt)
 verifies content and publishes a versioned launch path; servers without atomic
 rename use a verified private staging file. There is no new public TCP service.
 
-Stdout contains protocol NDJSON only; diagnostics go to stderr. The bridge is
-self-contained, so the bundled Python file is the entire remote runtime.
-Changes to that asset require rebuilding and reinstalling the Android app.
+Stdout contains protocol NDJSON only; diagnostics go to stderr. The zipapp
+contains all runtime modules and runs directly with `python3 -u`; it requires no
+remote extraction, package installation, or sibling source files. Its checksum
+covers every module, so a provider change produces a new deployment version.
+Changes to any bridge module require rebuilding and reinstalling the Android app.
 
 Hello carries version/capability information and runtime readiness. A fatal
 journal failure is distinct from unavailable Herdr. Successful ping only proves
@@ -82,6 +86,13 @@ Conversation reads reconcile the current session even without a lifecycle event,
 and responses identify the session actually read. Session-bound caches and launch
 bookkeeping must follow that reported identity rather than the original launch
 ID. See [session rotation and queued-command isolation](connection-resilience.md#clearing-or-replacing-a-provider-session).
+
+For machine-specific failures, the agent action menu includes **Session
+diagnostics**. It uses that device's existing authenticated SSH connection to
+show sanitized foreground-process and session metadata. It does not expose
+credentials or arbitrary command execution. Linux Copilot launchers may involve
+VS Code and Node wrapper processes; the bridge follows only the verified
+foreground launcher chain to the native runtime.
 
 ## Provider adapters
 
