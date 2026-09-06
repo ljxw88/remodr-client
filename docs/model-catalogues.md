@@ -150,7 +150,9 @@ conversation output uses the explicit raw-output compatibility view.
 ## Adding a provider
 
 Add a source adapter in `scripts/model-sources.cjs`, its JSON snapshot and
-static app import, provider/schema entries, and bridge launch/normalization
-support. Add fixtures for the discovery format and tests for its CLI
+static app import, and provider/schema entries. Implement bridge behavior in a
+package under `modules/remote-core/bridge/remodr_bridge/providers/` and register
+its adapter in that directory's `__init__.py`; the runtime bundle includes the
+new module automatically. Add fixtures for the discovery format and tests for its CLI
 arguments. Do not copy another provider's context or effort settings even if
 the model IDs look similar.

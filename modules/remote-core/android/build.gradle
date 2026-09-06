@@ -6,12 +6,34 @@ plugins {
 group = 'com.remoteworkspace.remotecore'
 version = '0.1.0'
 
+def bridgeAssets = layout.buildDirectory.dir('generated/bridgeAssets')
+def bridgeBundle = bridgeAssets.map { it.file('herdr_mobile_bridge.pyz') }
+def bundleHerdrBridge = tasks.register('bundleHerdrBridge', Exec) {
+  inputs.files(fileTree('../bridge/remodr_bridge') {
+    include '**/*.py'
+    exclude '**/__pycache__/**', '**/tests/**', '**/test_*.py', '**/*_test.py'
+  })
+  inputs.files('../bridge/archive_main.py', '../bridge/build_bundle.py')
+  outputs.file(bridgeBundle)
+  commandLine(
+    providers.gradleProperty('herdrBridgePython').getOrElse('python3'),
+    file('../bridge/build_bundle.py').absolutePath,
+    '--output', bridgeBundle.get().asFile.absolutePath,
+  )
+}
+
+tasks.configureEach {
+  if (name == 'preBuild' || (name.startsWith('merge') && name.endsWith('Assets'))) {
+    dependsOn(bundleHerdrBridge)
+  }
+}
+
 android {
   namespace "com.remoteworkspace.remotecore"
   sourceSets {
     main {
-      assets.srcDir '../bridge'
-      assets.exclude 'test_*.py', '__pycache__/**'
+      assets.srcDir bridgeAssets
+      assets.include 'herdr_mobile_bridge.pyz'
     }
   }
   androidResources {

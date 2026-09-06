@@ -134,7 +134,7 @@ class RemoteCoreModule : Module() {
       val context = appContext.reactContext
         ?: appContext.currentActivity
         ?: throw HerdrBridgeException("Missing Android context")
-      val source = context.assets.open("herdr_mobile_bridge.py").use { it.readBytes() }
+      val source = context.assets.open("herdr_mobile_bridge.pyz").use { it.readBytes() }
       manager.startHerdrBridge(sessionId, source) { bridgeId, message ->
         sendEvent(
           "onHerdrMessage",

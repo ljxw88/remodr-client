@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
+from remodr_bridge.providers.copilot.processes import CopilotProcesses
 from herdr_mobile_bridge import Bridge, BridgeError
 
 
@@ -40,11 +41,11 @@ class ProcessSessionTest(unittest.TestCase):
         }
         self.bridge._herdr_request = Mock(side_effect=self.request)
         self.inspection = patch.object(
-            self.bridge, "_copilot_open_session_ids", return_value={"active-session"}
+            self.bridge.providers["copilot"].processes, "open_session_ids", return_value={"active-session"}
         )
         self.open_sessions = self.inspection.start()
         self.addCleanup(self.inspection.stop)
-        metadata = patch.object(self.bridge, "_linux_process_metadata", side_effect=self.process_metadata)
+        metadata = patch.object(self.bridge.providers["copilot"].processes, "linux_process_metadata", side_effect=self.process_metadata)
         metadata.start()
         self.addCleanup(metadata.stop)
         self.agent_id = self.bridge._stable_agent_id("p1")
@@ -88,8 +89,8 @@ class ProcessSessionTest(unittest.TestCase):
                   "argv": ["/npm/@github/copilot-linux-x64/copilot"]},
         }
         with (
-            patch("herdr_mobile_bridge.sys.platform", "linux"),
-            patch.object(self.bridge, "_linux_process_metadata", side_effect=metadata.__getitem__),
+            patch("remodr_bridge.providers.copilot.processes.sys.platform", "linux"),
+            patch.object(self.bridge.providers["copilot"].processes, "linux_process_metadata", side_effect=metadata.__getitem__),
         ):
             self.assertEqual(self.poll()["providerSessionId"], "active-session")
         self.open_sessions.assert_called_once_with(103)
@@ -97,8 +98,8 @@ class ProcessSessionTest(unittest.TestCase):
     def test_linux_native_runtime_is_recognized_by_executable_not_thread_name(self):
         self.info["foreground_processes"] = [{"pid": 100, "name": "MainThread", "argv0": None}]
         with (
-            patch("herdr_mobile_bridge.sys.platform", "linux"),
-            patch.object(self.bridge, "_linux_process_metadata", return_value={
+            patch("remodr_bridge.providers.copilot.processes.sys.platform", "linux"),
+            patch.object(self.bridge.providers["copilot"].processes, "linux_process_metadata", return_value={
                 "parent": 50, "group": 100, "executable": "/opt/copilot/copilot", "argv": ["copilot"],
             }),
         ):
@@ -108,8 +109,8 @@ class ProcessSessionTest(unittest.TestCase):
     def test_linux_reused_pid_from_another_shell_is_not_inspected(self):
         self.info["foreground_processes"] = [{"pid": 100, "name": "MainThread", "argv0": None}]
         with (
-            patch("herdr_mobile_bridge.sys.platform", "linux"),
-            patch.object(self.bridge, "_linux_process_metadata", side_effect={
+            patch("remodr_bridge.providers.copilot.processes.sys.platform", "linux"),
+            patch.object(self.bridge.providers["copilot"].processes, "linux_process_metadata", side_effect={
                 100: {"parent": 70, "group": 100, "executable": "/bin/copilot", "argv": ["copilot"]},
                 70: {"parent": 1, "group": 70, "executable": "/bin/bash", "argv": ["bash"]},
             }.__getitem__),
@@ -132,8 +133,8 @@ class ProcessSessionTest(unittest.TestCase):
         ):
             with (
                 self.subTest(children=children),
-                patch("herdr_mobile_bridge.sys.platform", "linux"),
-                patch.object(self.bridge, "_linux_process_metadata", side_effect={100: root, **children}.__getitem__),
+                patch("remodr_bridge.providers.copilot.processes.sys.platform", "linux"),
+                patch.object(self.bridge.providers["copilot"].processes, "linux_process_metadata", side_effect={100: root, **children}.__getitem__),
             ):
                 with self.assertRaises(BridgeError) as error:
                     self.poll()
@@ -293,7 +294,7 @@ class ProcessSessionTest(unittest.TestCase):
 
     def test_process_binding_change_during_inspection_is_refused(self):
         with patch.object(
-            self.bridge, "_copilot_foreground_process",
+            self.bridge.providers["copilot"].processes, "foreground_process",
             side_effect=[(100, 50), (200, 50)],
         ):
             with self.assertRaises(BridgeError) as caught:
@@ -302,7 +303,7 @@ class ProcessSessionTest(unittest.TestCase):
 
     def test_metadata_disappearing_after_inspection_is_not_native_fallback(self):
         with patch.object(
-            self.bridge, "_copilot_foreground_process",
+            self.bridge.providers["copilot"].processes, "foreground_process",
             side_effect=[(100, 50), OSError("pane disappeared")],
         ):
             with self.assertRaises(BridgeError) as caught:
@@ -311,7 +312,7 @@ class ProcessSessionTest(unittest.TestCase):
 
     def test_retune_independently_resolves_the_process_session(self):
         self.bridge.started_sessions["p1"] = "native-stale"
-        with patch.object(self.bridge, "_restart_agent") as restart:
+        with patch.object(self.bridge.providers["copilot"].tuning, "restart_agent") as restart:
             self.bridge._retune_agent({
                 "agentId": self.agent_id, "model": "gpt-5.4", "effort": "high"
             })
@@ -348,10 +349,10 @@ class ProcessSessionTest(unittest.TestCase):
             str(root / "deleted" / "session.db") + " (deleted)",
         ]
         with (
-            patch("herdr_mobile_bridge.sys.platform", "linux"),
-            patch.object(self.bridge, "_linux_process_paths", return_value=paths) as read,
+            patch("remodr_bridge.providers.copilot.processes.sys.platform", "linux"),
+            patch.object(self.bridge.providers["copilot"].processes, "linux_process_paths", return_value=paths) as read,
         ):
-            self.assertEqual(self.bridge._copilot_open_session_ids(100), {"valid"})
+            self.assertEqual(self.bridge.providers["copilot"].processes.open_session_ids(100), {"valid"})
         read.assert_called_once_with(100)
 
     def test_macos_lsof_parser_requires_matching_pid_and_owner(self):
@@ -361,11 +362,11 @@ class ProcessSessionTest(unittest.TestCase):
             f"p100\0u{os.getuid()}\0\nfcwd\0n{self.home}\0\nf7\0n{database}\0\n"
         ).encode()
         with (
-            patch("herdr_mobile_bridge.sys.platform", "darwin"),
-            patch("herdr_mobile_bridge.shutil.which", return_value="/usr/sbin/lsof"),
-            patch.object(self.bridge, "_bounded_process_output", return_value=output) as run,
+            patch("remodr_bridge.providers.copilot.processes.sys.platform", "darwin"),
+            patch("remodr_bridge.providers.copilot.processes.shutil.which", return_value="/usr/sbin/lsof"),
+            patch.object(self.bridge.providers["copilot"].processes, "bounded_process_output", return_value=output) as run,
         ):
-            self.assertEqual(self.bridge._copilot_open_session_ids(100), {"active-session"})
+            self.assertEqual(self.bridge.providers["copilot"].processes.open_session_ids(100), {"active-session"})
         self.assertEqual(run.call_args.args[0][-5:], ["-nP", "-a", "-p", "100", "-F0pun"])
         for invalid in (
             output.replace(b"p100\0", b"p101\0"),
@@ -374,7 +375,7 @@ class ProcessSessionTest(unittest.TestCase):
         ):
             with self.subTest(output=invalid):
                 with self.assertRaises(OSError):
-                    Bridge._lsof_paths(invalid, 100)
+                    CopilotProcesses.lsof_paths(invalid, 100)
 
     def test_linux_proc_inspects_only_numeric_fds_of_the_selected_owned_pid(self):
         entries = [
@@ -386,35 +387,35 @@ class ProcessSessionTest(unittest.TestCase):
         scan.__enter__.return_value = iter(entries)
         with (
             patch.object(Path, "stat", return_value=SimpleNamespace(st_uid=os.getuid())),
-            patch("herdr_mobile_bridge.os.scandir", return_value=scan) as scandir,
+            patch("remodr_bridge.providers.copilot.processes.os.scandir", return_value=scan) as scandir,
             patch(
-                "herdr_mobile_bridge.os.readlink",
+                "remodr_bridge.providers.copilot.processes.os.readlink",
                 side_effect=["/home/user/.copilot/session-state/active/session.db", FileNotFoundError()],
             ) as readlink,
         ):
             self.assertEqual(
-                Bridge._linux_process_paths(100),
+                CopilotProcesses.linux_process_paths(100),
                 ["/home/user/.copilot/session-state/active/session.db"],
             )
         scandir.assert_called_once_with(Path("/proc/100/fd"))
         self.assertEqual(readlink.call_count, 2)
 
     def test_descriptor_subprocess_has_time_and_output_limits(self):
-        with patch("herdr_mobile_bridge.PROCESS_INSPECTION_TIMEOUT", 0.05):
+        with patch("remodr_bridge.providers.copilot.processes.PROCESS_INSPECTION_TIMEOUT", 0.05):
             with self.assertRaisesRegex(OSError, "timed out"):
-                Bridge._bounded_process_output([
+                CopilotProcesses.bounded_process_output([
                     sys.executable, "-c", "import time; time.sleep(3)"
                 ])
-        with patch("herdr_mobile_bridge.PROCESS_INSPECTION_MAX_BYTES", 32):
+        with patch("remodr_bridge.providers.copilot.processes.PROCESS_INSPECTION_MAX_BYTES", 32):
             with self.assertRaisesRegex(OSError, "size limit"):
-                Bridge._bounded_process_output([
+                CopilotProcesses.bounded_process_output([
                     sys.executable, "-c", "print('x' * 1000)"
                 ])
 
     def test_linux_inspection_rejects_foreign_owners_and_excess_descriptors(self):
         with patch.object(Path, "stat", return_value=SimpleNamespace(st_uid=os.getuid() + 1)):
             with self.assertRaisesRegex(OSError, "another user"):
-                Bridge._linux_process_paths(100)
+                CopilotProcesses.linux_process_paths(100)
         scan = MagicMock()
         scan.__enter__.return_value = iter([
             SimpleNamespace(name="7", path="/proc/100/fd/7"),
@@ -422,12 +423,12 @@ class ProcessSessionTest(unittest.TestCase):
         ])
         with (
             patch.object(Path, "stat", return_value=SimpleNamespace(st_uid=os.getuid())),
-            patch("herdr_mobile_bridge.os.scandir", return_value=scan),
-            patch("herdr_mobile_bridge.os.readlink", return_value="/some/path"),
-            patch("herdr_mobile_bridge.PROCESS_INSPECTION_MAX_FDS", 1),
+            patch("remodr_bridge.providers.copilot.processes.os.scandir", return_value=scan),
+            patch("remodr_bridge.providers.copilot.processes.os.readlink", return_value="/some/path"),
+            patch("remodr_bridge.providers.copilot.processes.PROCESS_INSPECTION_MAX_FDS", 1),
         ):
             with self.assertRaisesRegex(OSError, "exceeds its limit"):
-                Bridge._linux_process_paths(100)
+                CopilotProcesses.linux_process_paths(100)
 
 
 if __name__ == "__main__":

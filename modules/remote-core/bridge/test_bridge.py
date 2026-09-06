@@ -4,6 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from remodr_bridge.providers.copilot.transcript import normalize_question
+
 from herdr_mobile_bridge import (
     BYPASS_ARGUMENTS,
     CODEX_STATUS_CONFIG,
@@ -202,7 +204,7 @@ class BridgeProtocolTest(unittest.TestCase):
             )
             bridge = Bridge()
             with patch.object(Path, "home", return_value=home):
-                conversation = bridge._load_copilot(
+                conversation = bridge.providers["copilot"].load_conversation(
                     {
                         "id": "agent-1",
                         "providerSessionId": "session-1",
@@ -541,7 +543,7 @@ class BridgeProtocolTest(unittest.TestCase):
 
         with (
             patch.object(bridge, "_herdr_request", side_effect=request),
-            patch("herdr_mobile_bridge.time.sleep"),
+            patch("remodr_bridge.lifecycle.time.sleep"),
         ):
             bridge._start_agent("copilot", "copilot", "p2", [])
 
@@ -567,7 +569,7 @@ class BridgeProtocolTest(unittest.TestCase):
 
         with (
             patch.object(bridge, "_herdr_request", side_effect=request),
-            patch("herdr_mobile_bridge.time.sleep"),
+            patch("remodr_bridge.lifecycle.time.sleep"),
         ):
             bridge._start_agent("copilot", "copilot", "p2", [])
         self.assertEqual(attempts, 12)
@@ -585,8 +587,8 @@ class BridgeProtocolTest(unittest.TestCase):
 
         with (
             patch.object(bridge, "_herdr_request", side_effect=request),
-            patch("herdr_mobile_bridge.time.sleep"),
-            patch("herdr_mobile_bridge.time.monotonic", side_effect=lambda: next(clock)),
+            patch("remodr_bridge.lifecycle.time.sleep"),
+            patch("remodr_bridge.lifecycle.time.monotonic", side_effect=lambda: next(clock)),
         ):
             with self.assertRaises(BridgeError) as caught:
                 bridge._start_agent("copilot", "copilot", "p2", [])
@@ -779,8 +781,8 @@ class BridgeProtocolTest(unittest.TestCase):
             }
 
             with patch.object(Path, "home", return_value=home):
-                conversation = bridge._load_copilot(agent)
-                cached_conversation = bridge._load_copilot(agent)
+                conversation = bridge.providers["copilot"].load_conversation(agent)
+                cached_conversation = bridge.providers["copilot"].load_conversation(agent)
 
             self.assertIsNotNone(conversation)
             self.assertIs(cached_conversation, conversation)
@@ -825,7 +827,7 @@ class BridgeProtocolTest(unittest.TestCase):
             )
             bridge = Bridge()
             with patch.object(Path, "home", return_value=home):
-                conversation = bridge._load_copilot(
+                conversation = bridge.providers["copilot"].load_conversation(
                     {
                         "id": "agent-1",
                         "providerSessionId": "session-1",
@@ -872,7 +874,7 @@ class BridgeProtocolTest(unittest.TestCase):
             )
             bridge = Bridge()
             with patch.object(Path, "home", return_value=home):
-                conversation = bridge._load_copilot(
+                conversation = bridge.providers["copilot"].load_conversation(
                     {
                         "id": "agent-1",
                         "providerSessionId": "session-1",
@@ -924,7 +926,7 @@ class BridgeProtocolTest(unittest.TestCase):
             )
             bridge = Bridge()
             with patch.object(Path, "home", return_value=home):
-                conversation = bridge._load_copilot(
+                conversation = bridge.providers["copilot"].load_conversation(
                     {
                         "id": "agent-1",
                         "providerSessionId": "session-1",
@@ -963,7 +965,7 @@ class BridgeProtocolTest(unittest.TestCase):
             )
             bridge = Bridge()
             with patch.object(Path, "home", return_value=home):
-                conversation = bridge._load_copilot(
+                conversation = bridge.providers["copilot"].load_conversation(
                     {
                         "id": "agent-1",
                         "providerSessionId": "session-1",
@@ -994,7 +996,7 @@ class HumanQuestionTest(unittest.TestCase):
         # By far the more common shape in real session logs. Reading only the
         # JSON-Schema shape left most questions invisible to the app.
         bridge = Bridge()
-        request = bridge._normalize_copilot_question(
+        request = normalize_question(
             "call-1",
             {
                 "question": "Which decomposition should I create?",
@@ -1016,13 +1018,13 @@ class HumanQuestionTest(unittest.TestCase):
 
     def test_a_plain_question_without_choices_is_a_text_question(self):
         bridge = Bridge()
-        request = bridge._normalize_copilot_question("call-1", {"question": "Which host?"})
+        request = normalize_question("call-1", {"question": "Which host?"})
         self.assertEqual(request["kind"], "text")
         self.assertEqual(request["options"], [])
 
     def test_reads_the_json_schema_shape(self):
         bridge = Bridge()
-        request = bridge._normalize_copilot_question(
+        request = normalize_question(
             "call-1",
             {
                 "message": "Pick a transport.",
@@ -1395,7 +1397,7 @@ class AgentTuningTest(unittest.TestCase):
         # Only the session-level events carry a context window; per-turn ones
         # name a model and nothing else.
         with tempfile.TemporaryDirectory() as root:
-            with patch("herdr_mobile_bridge.Path.home", return_value=Path(root)):
+            with patch("pathlib.Path.home", return_value=Path(root)):
                 bridge = Bridge()
                 self._write_session(
                     root,
@@ -1421,7 +1423,7 @@ class AgentTuningTest(unittest.TestCase):
                     ],
                 )
                 self.assertEqual(
-                    bridge._session_tuning("s1"),
+                    bridge.providers["copilot"].tuning.session_tuning("s1"),
                     {
                         "model": "gpt-5.6-sol",
                         "effort": "max",
@@ -1433,7 +1435,7 @@ class AgentTuningTest(unittest.TestCase):
         # Logs are append-only and reach megabytes, and this runs on every
         # snapshot while an agent works.
         with tempfile.TemporaryDirectory() as root:
-            with patch("herdr_mobile_bridge.Path.home", return_value=Path(root)):
+            with patch("pathlib.Path.home", return_value=Path(root)):
                 bridge = Bridge()
                 self._write_session(
                     root,
@@ -1445,7 +1447,7 @@ class AgentTuningTest(unittest.TestCase):
                         }
                     ],
                 )
-                first = bridge._session_tuning("s1")
+                first = bridge.providers["copilot"].tuning.session_tuning("s1")
                 self.assertEqual(first["model"], "gpt-5.4")
                 offset = bridge.session_tuning_cache["s1"][0]
 
@@ -1463,7 +1465,7 @@ class AgentTuningTest(unittest.TestCase):
                         }
                     ],
                 )
-                second = bridge._session_tuning("s1")
+                second = bridge.providers["copilot"].tuning.session_tuning("s1")
                 self.assertEqual(second["model"], "grok-4.6")
                 self.assertEqual(second["context"], "long_context")
                 self.assertGreater(bridge.session_tuning_cache["s1"][0], offset)
@@ -1473,7 +1475,7 @@ class AgentTuningTest(unittest.TestCase):
         # reset would show the session running a default it never went back to
         # — the next resume still names the one it kept.
         with tempfile.TemporaryDirectory() as root:
-            with patch("herdr_mobile_bridge.Path.home", return_value=Path(root)):
+            with patch("pathlib.Path.home", return_value=Path(root)):
                 bridge = Bridge()
                 self._write_session(
                     root,
@@ -1494,7 +1496,7 @@ class AgentTuningTest(unittest.TestCase):
                     ],
                 )
                 self.assertEqual(
-                    bridge._session_tuning("s1"),
+                    bridge.providers["copilot"].tuning.session_tuning("s1"),
                     {
                         "model": "claude-sonnet-5",
                         "effort": "medium",
@@ -1505,7 +1507,7 @@ class AgentTuningTest(unittest.TestCase):
     def test_auto_is_read_as_no_model_pinned(self):
         # The CLI writes it as the word rather than leaving the field out.
         with tempfile.TemporaryDirectory() as root:
-            with patch("herdr_mobile_bridge.Path.home", return_value=Path(root)):
+            with patch("pathlib.Path.home", return_value=Path(root)):
                 bridge = Bridge()
                 self._write_session(
                     root,
@@ -1518,19 +1520,19 @@ class AgentTuningTest(unittest.TestCase):
                         {"type": "session.model_change", "data": {"newModel": "auto"}},
                     ],
                 )
-                tuning = bridge._session_tuning("s1")
+                tuning = bridge.providers["copilot"].tuning.session_tuning("s1")
                 self.assertIsNone(tuning["model"])
                 self.assertEqual(tuning["effort"], "low")
 
     def test_a_log_with_nothing_to_say_reports_nothing(self):
         with tempfile.TemporaryDirectory() as root:
-            with patch("herdr_mobile_bridge.Path.home", return_value=Path(root)):
+            with patch("pathlib.Path.home", return_value=Path(root)):
                 bridge = Bridge()
                 self._write_session(
                     root, "s1", [{"type": "assistant.message", "data": {"model": "x"}}]
                 )
                 self.assertEqual(
-                    bridge._session_tuning("s1"),
+                    bridge.providers["copilot"].tuning.session_tuning("s1"),
                     {"model": None, "effort": None, "context": None},
                 )
 
@@ -1558,9 +1560,9 @@ class AgentTuningTest(unittest.TestCase):
 
     def test_a_missing_log_reports_nothing(self):
         with tempfile.TemporaryDirectory() as root:
-            with patch("herdr_mobile_bridge.Path.home", return_value=Path(root)):
+            with patch("pathlib.Path.home", return_value=Path(root)):
                 self.assertEqual(
-                    Bridge()._session_tuning("nope"),
+                    Bridge().providers["copilot"].tuning.session_tuning("nope"),
                     {"model": None, "effort": None, "context": None},
                 )
 
@@ -1606,7 +1608,7 @@ class AgentTuningTest(unittest.TestCase):
         # the old one immediately after a change.
         bridge = Bridge()
         bridge.agent_tuning = {"p1": {"model": "claude-haiku-4.5"}}
-        bridge._session_tuning = lambda _session: {
+        bridge.providers["copilot"].tuning.session_tuning = lambda _session: {
             "model": "gpt-5.6-luna",
             "effort": None,
             "context": None,
@@ -1621,7 +1623,7 @@ class AgentTuningTest(unittest.TestCase):
         # from it rather than showing a default the agent never had.
         bridge = Bridge()
         bridge.agent_tuning = {}
-        bridge._session_tuning = lambda _session: {
+        bridge.providers["copilot"].tuning.session_tuning = lambda _session: {
             "model": "gpt-5.6-luna",
             "effort": "xhigh",
             "context": "long_context",
@@ -1635,7 +1637,7 @@ class AgentTuningTest(unittest.TestCase):
         # A model set from here with an effort only the log knows about.
         bridge = Bridge()
         bridge.agent_tuning = {"p1": {"model": "gpt-5.4", "effort": None, "context": None}}
-        bridge._session_tuning = lambda _session: {
+        bridge.providers["copilot"].tuning.session_tuning = lambda _session: {
             "model": "gpt-5.6-luna",
             "effort": "high",
             "context": "long_context",
@@ -1676,7 +1678,7 @@ class AgentTuningTest(unittest.TestCase):
             return {}
 
         bridge._herdr_request = request
-        with patch("herdr_mobile_bridge.time.sleep"):
+        with patch("remodr_bridge.providers.copilot.tuning.time.sleep"):
             bridge._retune_agent({"agentId": "a1", "model": "gpt-5.4", "effort": "high"})
         methods = [method for method, _ in sent]
         self.assertEqual(methods[0], "agent.prompt")
@@ -1701,7 +1703,7 @@ class AgentTuningTest(unittest.TestCase):
         # restarting an agent to change nothing interrupts its work.
         bridge = self._bridge({})
         bridge.agent_tuning = {}
-        bridge._session_tuning = lambda _session: {
+        bridge.providers["copilot"].tuning.session_tuning = lambda _session: {
             "model": "gpt-5.4",
             "effort": "max",
             "context": "long_context",
@@ -1733,7 +1735,7 @@ class AgentTuningTest(unittest.TestCase):
             return {}
 
         bridge._herdr_request = request
-        with patch("herdr_mobile_bridge.time.sleep"):
+        with patch("remodr_bridge.providers.copilot.tuning.time.sleep"):
             bridge._retune_agent({"agentId": "a1", "model": "gpt-5.4", "effort": "high"})
         start = next(params for method, params in sent if method == "agent.start")
         self.assertNotIn("--allow-all-tools", start["args"])
@@ -1754,7 +1756,7 @@ class AgentTuningTest(unittest.TestCase):
             return {}
 
         bridge._herdr_request = request
-        with patch("herdr_mobile_bridge.time.sleep"):
+        with patch("remodr_bridge.providers.copilot.tuning.time.sleep"):
             with self.assertRaises(BridgeError) as caught:
                 bridge._retune_agent({"agentId": "a1", "model": "gpt-5.4", "effort": "max"})
         self.assertEqual(caught.exception.code, "RETUNE_REFUSED")
@@ -1814,7 +1816,7 @@ class AgentTuningTest(unittest.TestCase):
             with self.subTest(provider=provider):
                 bridge = Bridge()
                 bridge.agent_tuning = {"p1": {"model": "provider-model"}}
-                with patch.object(bridge, "_session_tuning") as session_tuning:
+                with patch.object(bridge.providers["copilot"].tuning, "session_tuning") as session_tuning:
                     snapshot = bridge._normalize_snapshot({
                         "agents": [{
                             "pane_id": "p1", "agent": provider,

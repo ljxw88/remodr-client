@@ -6,6 +6,8 @@ import uuid
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from remodr_bridge.providers.codex.sessions import status_session
+
 from herdr_mobile_bridge import Bridge, BridgeError, CODEX_STATUS_CONFIG
 
 
@@ -102,7 +104,7 @@ class CodexTest(unittest.TestCase):
             patch.object(bridge, "_agent_catalog_snapshot", return_value=[{"provider": "codex", "available": True}]),
             patch.object(bridge, "_herdr_request", return_value={"root_pane": {"pane_id": "p1"}}),
             patch.object(bridge, "_start_agent", side_effect=start),
-            patch("herdr_mobile_bridge.time.sleep"),
+            patch("remodr_bridge.lifecycle.time.sleep"),
         ):
             result = bridge._create_agent({"provider": "codex", "workspaceId": "w1", "bypassPermissions": False})
         self.assertEqual(len(polls), 2)
@@ -122,9 +124,9 @@ class CodexTest(unittest.TestCase):
         for footer in ("gpt-6-astra", "Press enter to confirm", f"Session: {SESSION}",
                        "00000000-0000-0000-0000-000000000000", f"{SESSION} \u00b7 {NEXT_SESSION}"):
             with self.subTest(footer=footer):
-                self.assertIsNone(Bridge._codex_status_session(f"{SESSION}\n> Ask Codex\n{footer}"))
+                self.assertIsNone(status_session(f"{SESSION}\n> Ask Codex\n{footer}"))
         for footer in (SESSION, f"{SESSION} \u00b7 gpt-6-astra low", f"gpt-6-astra \u00b7 {SESSION}"):
-            self.assertEqual(Bridge._codex_status_session(footer), SESSION)
+            self.assertEqual(status_session(footer), SESSION)
 
     def test_new_overrides_stale_hook_identity_and_blocks_the_old_outbox_target(self):
         self.snapshot["agents"][0]["agent_session"] = {"kind": "id", "value": SESSION}
@@ -176,25 +178,25 @@ class CodexTest(unittest.TestCase):
                 "content": [{"type": "output_text", "text": "Hello!"}],
             }},
         ])
-        result = self.bridge._load_codex(self.agent())
+        result = self.bridge.providers["codex"].load_conversation(self.agent())
         self.assertEqual(result["providerSessionId"], SESSION)
         self.assertEqual(result["items"], [
             {"id": "codex:UserMessage:user-1", "kind": "user_message", "text": "hello"},
             {"id": "codex:AgentMessage:assistant-1", "kind": "assistant_message", "markdown": "Hello!"},
         ])
-        self.assertIs(self.bridge._load_codex(self.agent()), result)
+        self.assertIs(self.bridge.providers["codex"].load_conversation(self.agent()), result)
 
     def test_legacy_messages_have_stable_ids_and_append_without_retyping_history(self):
         path = self.rollout([
             {"type": "event_msg", "payload": {"type": "user_message", "message": "hello"}},
             {"type": "event_msg", "payload": {"type": "agent_message", "message": "Hi"}},
         ], mode="legacy")
-        first = self.bridge._load_codex(self.agent())
+        first = self.bridge.providers["codex"].load_conversation(self.agent())
         with path.open("a") as output:
             output.write(json.dumps({"type": "event_msg", "payload": {
                 "type": "agent_message", "message": "More",
             }}) + "\n")
-        second = self.bridge._load_codex(self.agent())
+        second = self.bridge.providers["codex"].load_conversation(self.agent())
         self.assertEqual(first["items"], second["items"][:2])
         self.assertEqual(second["items"][2]["markdown"], "More")
 
@@ -202,7 +204,7 @@ class CodexTest(unittest.TestCase):
         path = self.rollout([])
         path.write_text(json.dumps({"type": "session_meta", "payload": {"id": NEXT_SESSION}}) + "\n")
         with self.assertRaises(BridgeError) as error:
-            self.bridge._load_codex(self.agent())
+            self.bridge.providers["codex"].load_conversation(self.agent())
         self.assertEqual(error.exception.code, "CONVERSATION_SESSION_MISMATCH")
 
     def test_sqlite_selects_the_authoritative_rollout_among_multiple_physical_files(self):
@@ -212,17 +214,17 @@ class CodexTest(unittest.TestCase):
         with sqlite3.connect(database) as connection:
             connection.execute("CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT)")
             connection.execute("INSERT INTO threads VALUES (?, ?)", (SESSION, str(current)))
-        result = self.bridge._load_codex(self.agent())
+        result = self.bridge.providers["codex"].load_conversation(self.agent())
         self.assertEqual(result["items"][0]["markdown"], "Current")
 
     def test_multiple_unindexed_rollouts_are_not_guessed_by_time_or_filename(self):
         self.rollout([])
         self.rollout([], suffix="_physical")
         with self.assertRaises(BridgeError):
-            self.bridge._load_codex(self.agent())
+            self.bridge.providers["codex"].load_conversation(self.agent())
 
     def test_missing_unmaterialized_transcript_is_not_an_error(self):
-        self.assertIsNone(self.bridge._load_codex(self.agent()))
+        self.assertIsNone(self.bridge.providers["codex"].load_conversation(self.agent()))
 
 
 if __name__ == "__main__":

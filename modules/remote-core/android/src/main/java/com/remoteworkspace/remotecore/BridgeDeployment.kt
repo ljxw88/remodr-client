@@ -21,7 +21,7 @@ internal interface BridgeDeploymentStore {
 
 internal fun bridgeVersionPath(directory: String, bytes: ByteArray): String {
   val hash = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
-  return "$directory/herdr_mobile_bridge-$hash.py"
+  return "$directory/herdr_mobile_bridge-$hash.pyz"
 }
 
 internal fun deployBridge(
@@ -32,7 +32,7 @@ internal fun deployBridge(
   val destination = bridgeVersionPath(directory, bytes)
   if (store.matches(destination, bytes)) return destination
   store.mkdirs(directory)
-  val staging = "${destination.removeSuffix(".py")}-${UUID.randomUUID()}.upload.py"
+  val staging = "${destination.removeSuffix(".pyz")}-${UUID.randomUUID()}.upload.pyz"
   var retained = false
   try {
     store.writeExclusive(staging, bytes)

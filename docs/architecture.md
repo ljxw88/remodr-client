@@ -37,7 +37,8 @@ Expo Router screens
 | Durable sends | [`command-outbox.ts`](../src/services/command-outbox.ts) | Serialized local command persistence |
 | Native client API | [`native-remote-client.ts`](../src/services/native-remote-client.ts) | Typed access to the local Expo module |
 | Native resources | [`modules/remote-core/android/`](../modules/remote-core/android/) | SSH sessions, channels, SFTP, forwards, secrets, background service |
-| Bridge | [`herdr_mobile_bridge.py`](../modules/remote-core/bridge/herdr_mobile_bridge.py) | Herdr calls, provider adapters, durable command journal |
+| Bridge runtime | [`remodr_bridge/`](../modules/remote-core/bridge/remodr_bridge/) | Herdr orchestration, protocol, durable commands, and shared session handling |
+| Provider adapters | [`providers/`](../modules/remote-core/bridge/remodr_bridge/providers/) | Provider-specific launch settings, session identity, and transcript readers |
 
 External stores expose snapshots through `useSyncExternalStore`. There is one
 runtime/transport per connected device. The selected-device fields are derived

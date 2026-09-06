@@ -1,6 +1,7 @@
 import json
 import io
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -9,6 +10,7 @@ import time
 import unittest
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from herdr_mobile_bridge import Bridge, BridgeError, CommandLedger
@@ -47,6 +49,23 @@ bridge._handle_request_line(input())
 
 
 class DurableCommandsTest(unittest.TestCase):
+    def test_store_errors_remain_typed_without_newer_python_sqlite_constants(self):
+        full = sqlite3.OperationalError("database or disk is full")
+        full.sqlite_errorcode = 13
+        with patch(
+            "remodr_bridge.ledger.sqlite3",
+            SimpleNamespace(OperationalError=sqlite3.OperationalError),
+        ):
+            self.assertEqual(CommandLedger._store_error(full).code, "COMMAND_STORE_FULL")
+            self.assertEqual(
+                CommandLedger._store_error(sqlite3.OperationalError("database is locked")).code,
+                "COMMAND_IN_PROGRESS",
+            )
+            self.assertEqual(
+                CommandLedger._store_error(OSError("unavailable")).code,
+                "COMMAND_STORE_UNAVAILABLE",
+            )
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(dir=Path(__file__).parent)
         self.addCleanup(self.directory.cleanup)
@@ -328,7 +347,7 @@ class DurableCommandsTest(unittest.TestCase):
 
     def test_capacity_refuses_new_ids_without_evicting_old_results(self):
         self.assertTrue(self.send()["ok"])
-        with patch("herdr_mobile_bridge.COMMAND_MAX_ENTRIES", 1):
+        with patch("remodr_bridge.ledger.COMMAND_MAX_ENTRIES", 1):
             self.assert_error(self.send(command_id=str(uuid.uuid4())), "COMMAND_STORE_FULL")
             self.assertTrue(self.send()["ok"])
         self.assertEqual(self.bridge._herdr_request.call_count, 1)
@@ -441,6 +460,11 @@ class DurableCommandsTest(unittest.TestCase):
         script = deployment / "herdr_mobile_bridge.py"
         script.write_bytes(source)
         script.chmod(0o700)
+        shutil.copytree(
+            Path(__file__).with_name("remodr_bridge"),
+            deployment / "remodr_bridge",
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
         digest = hashlib.sha256(source).hexdigest()
         (deployment / "herdr_mobile_bridge.sha256").write_text(digest)
         for mode in (0o755, 0o775, 0o777):
@@ -477,7 +501,7 @@ class DurableCommandsTest(unittest.TestCase):
     def test_foreign_owned_directory_is_not_hardened_or_traversed(self):
         directory = self.home / ".local"
         directory.mkdir(mode=0o755)
-        with patch("herdr_mobile_bridge.os.getuid", return_value=directory.stat().st_uid + 1):
+        with patch("remodr_bridge.ledger.os.getuid", return_value=directory.stat().st_uid + 1):
             response = self.send()
         self.assert_error(response, "COMMAND_STORE_UNAVAILABLE")
         self.assertIn(str(directory), response["error"]["message"])
@@ -513,7 +537,7 @@ class DurableCommandsTest(unittest.TestCase):
         directory = self.home / ".local"
         directory.mkdir()
         directory.chmod(0o775)
-        with patch("herdr_mobile_bridge.os.fchmod", side_effect=PermissionError("denied")):
+        with patch("remodr_bridge.ledger.os.fchmod", side_effect=PermissionError("denied")):
             self.bridge.run()
         hello = self.bridge.write.call_args.args[0]
         self.assertTrue(hello["fatal"])
@@ -592,8 +616,8 @@ class DurableCommandsTest(unittest.TestCase):
             "action": "bridge.ping", "payload": {},
         }
         with (
-            patch("herdr_mobile_bridge.threading.Thread"),
-            patch("herdr_mobile_bridge.sys.stdin", io.StringIO(json.dumps(ping) + "\n")),
+            patch("remodr_bridge.bridge.threading.Thread"),
+            patch("remodr_bridge.bridge.sys.stdin", io.StringIO(json.dumps(ping) + "\n")),
         ):
             self.bridge.run()
         messages = [call.args[0] for call in self.bridge.write.call_args_list]
@@ -609,8 +633,8 @@ class DurableCommandsTest(unittest.TestCase):
         self.bridge._refresh_runtime.side_effect = initialize
         self.bridge.subscribed.set()
         with (
-            patch("herdr_mobile_bridge.threading.Thread"),
-            patch("herdr_mobile_bridge.sys.stdin", io.StringIO("")),
+            patch("remodr_bridge.bridge.threading.Thread"),
+            patch("remodr_bridge.bridge.sys.stdin", io.StringIO("")),
         ):
             self.bridge.run()
         hello = self.bridge.write.call_args_list[0].args[0]
