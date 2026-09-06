@@ -37,10 +37,22 @@ import {
 import { useHostSession } from '@/features/connection/use-host-session';
 import { ConnectionStatus } from '@/features/connection/connection-status';
 import { useHosts } from '@/features/hosts/use-hosts';
+import { useAppSettings } from '@/hooks/use-app-settings';
 import { useTheme } from '@/hooks/use-theme';
 import { herdrRepository } from '@/services/herdr-repository';
 import { HerdrBridgeRequestError } from '@/services/herdr-bridge-transport';
 import { toUserMessage } from '@/utils/user-error';
+
+const CollapseFiltersIcon = {
+  ios: 'chevron.up',
+  android: 'expand_less',
+  web: 'expand_less',
+} as const;
+const ExpandFiltersIcon = {
+  ios: 'chevron.down',
+  android: 'expand_more',
+  web: 'expand_more',
+} as const;
 
 export default function AgentsScreen() {
   const theme = useTheme();
@@ -49,6 +61,7 @@ export default function AgentsScreen() {
   const { hosts, loading: hostsLoading } = useHosts();
   const onDockScroll = useDockScrollHandler();
   const dockContentInset = useDockContentInset();
+  const { agentFiltersExpanded, setAgentFiltersExpanded } = useAppSettings();
   const [closingSpaceId, setClosingSpaceId] = useState<string | null>(null);
   const selectedDeviceId = state.selectedDeviceId ?? state.runtime.deviceId ?? null;
   const selectedSpaceId = useWorkspaceSelection(selectedDeviceId);
@@ -191,13 +204,28 @@ export default function AgentsScreen() {
             onPressSpace={() => startCreation('space')}
           />
         </View>
+        {/* The filters are chrome: useful when picking where to look, in the
+            way when reading the list. This folds them away and remembers. */}
+        {/*
+          The New agent button's material, so the two ends of this line read as
+          one pair. Which way the chevron points is the whole of the state: the
+          section it opens is either on screen or it is not, so a fill saying so
+          as well would be telling you something you can already see.
+        */}
         <ProfileAvatar
-          status={state.connection}
-          onPress={() => router.push('/settings')}
+          liquidRim
+          icon={agentFiltersExpanded ? CollapseFiltersIcon : ExpandFiltersIcon}
+          fallback={agentFiltersExpanded ? '⌃' : '⌄'}
+          accessibilityLabel={
+            agentFiltersExpanded ? 'Hide devices and spaces' : 'Show devices and spaces'
+          }
+          expanded={agentFiltersExpanded}
+          disabled={hosts.length === 0}
+          onPress={() => void setAgentFiltersExpanded(!agentFiltersExpanded)}
         />
       </View>
 
-      {hosts.length > 0 ? (
+      {hosts.length > 0 && agentFiltersExpanded ? (
         <View style={styles.filters}>
           <FilterHeader label="Devices" value={selectedHost?.name} />
           <ScrollView
