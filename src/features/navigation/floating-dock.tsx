@@ -140,10 +140,12 @@ export function AnimatedTabContent({ children }: PropsWithChildren) {
   const pendingReturn = useRef(false);
   const entrance = useScreenEntrance();
 
+  // Only the settle waits here. The offset itself went on the moment the dock
+  // was uncovered, while the page being dismissed was still covering it.
   useLayoutEffect(() => navigation.addListener('transitionEnd', (event) => {
     if (event.data.closing || !pendingReturn.current || !navigation.isFocused()) return;
     pendingReturn.current = false;
-    entrance.play(-1);
+    entrance.settle();
   }), [entrance, navigation]);
 
   useLayoutEffect(() => {
@@ -166,12 +168,15 @@ export function AnimatedTabContent({ children }: PropsWithChildren) {
       return;
     }
 
-    // The pathname changes before the root fragment reappears. Wait for its
-    // native arrival so this motion is not spent underneath the closing page.
+    // The pathname changes before the root fragment reappears, so the offset
+    // can simply be put in place: nothing can see it until the closing page is
+    // gone. Only closing the gap has to wait for that native arrival, or it is
+    // spent underneath a page that is still on top.
     if (wasCovered.current || pendingReturn.current) {
       wasCovered.current = false;
       previousIndex.current = tabIndex;
       pendingReturn.current = true;
+      entrance.arm(-1);
       return;
     }
 

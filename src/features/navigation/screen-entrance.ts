@@ -29,13 +29,23 @@ const Entrance = {
   duration: 200,
 };
 
+export type EntranceDirection = 1 | -1;
+
 /**
  * The motion above, and a way to run it.
  *
- * The trigger is left to the caller because the two places that settle do not
- * agree on when. The dock keeps its content mounted and settles it whenever the
- * tab changes. A stack settles when its active route changes or it is uncovered
- * by Back. Only the motion is shared, so the app has one answer to arriving.
+ * Arriving is two acts, and keeping them apart is the whole point. **Arming**
+ * puts the screen at its starting offset; it is only ever correct while nobody
+ * can see the screen — before it is composited on a push, or behind the page
+ * still being dismissed on a return. **Settling** closes the gap, and belongs
+ * at the moment the screen actually appears.
+ *
+ * Running the two together is what an arrival must never do once the screen is
+ * up: a screen armed after it is already on show jumps sideways and then slides
+ * back, which reads as a stutter rather than an arrival. `play` is for the one
+ * caller where the two genuinely coincide — the dock, whose content stays
+ * mounted and on screen, so the arming lands in the same commit that swaps the
+ * tab and is painted with it.
  *
  * `direction` is which way the screen comes from: forward is 1, back is -1.
  */
@@ -50,29 +60,44 @@ export function useScreenEntrance() {
 
   useEffect(() => reset, [reset]);
 
-  const play = useCallback(
-    (direction: 1 | -1 = 1) => {
-      reset();
-      if (shouldReduceMotion()) return;
-
-      translateX.setValue(direction * Entrance.offsetFrom);
-
-      Animated.timing(translateX, {
-        toValue: 0,
-        duration: Entrance.duration,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-        isInteraction: false,
-      }).start();
+  /** Put the screen where it starts from. Only while it cannot be seen. */
+  const arm = useCallback(
+    (direction: EntranceDirection = 1) => {
+      translateX.stopAnimation();
+      translateX.setValue(shouldReduceMotion() ? 0 : direction * Entrance.offsetFrom);
     },
-    [reset, shouldReduceMotion, translateX],
+    [shouldReduceMotion, translateX],
+  );
+
+  /** Close the gap. Harmless when nothing was armed: the gap is already nil. */
+  const settle = useCallback(() => {
+    if (shouldReduceMotion()) {
+      reset();
+      return;
+    }
+
+    Animated.timing(translateX, {
+      toValue: 0,
+      duration: Entrance.duration,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+      isInteraction: false,
+    }).start();
+  }, [reset, shouldReduceMotion, translateX]);
+
+  const play = useCallback(
+    (direction: EntranceDirection = 1) => {
+      arm(direction);
+      settle();
+    },
+    [arm, settle],
   );
 
   return useMemo(
     // Stable across renders on purpose. Callers reach for this from an effect,
     // and an identity that changed every pass would replay the arrival every
     // time anything above re-rendered.
-    () => ({ style: { transform: [{ translateX }] }, play, reset }),
-    [play, reset, translateX],
+    () => ({ style: { transform: [{ translateX }] }, arm, settle, play, reset }),
+    [arm, play, reset, settle, translateX],
   );
 }
