@@ -4,10 +4,13 @@ export const SETTINGS_STORAGE_KEY = 'remote-workspace.settings.v1';
 
 export type AppSettings = {
   marqueeEnabled: boolean;
+  /** Whether the agents screen shows its device and space filters. */
+  agentFiltersExpanded: boolean;
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
   marqueeEnabled: true,
+  agentFiltersExpanded: true,
 };
 
 type Listener = () => void;
@@ -37,12 +40,16 @@ export class SettingsRepository {
       const raw = await this.storage.getItem(SETTINGS_STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
+        // Field by field, so a settings file written before a key existed
+        // keeps its defaults rather than reading `undefined` over them.
+        const stored: Partial<AppSettings> = {};
         if (typeof parsed.marqueeEnabled === 'boolean') {
-          this.settings = {
-            ...this.settings,
-            marqueeEnabled: parsed.marqueeEnabled,
-          };
+          stored.marqueeEnabled = parsed.marqueeEnabled;
         }
+        if (typeof parsed.agentFiltersExpanded === 'boolean') {
+          stored.agentFiltersExpanded = parsed.agentFiltersExpanded;
+        }
+        this.settings = { ...this.settings, ...stored };
       }
     } catch (error) {
       console.warn('[SETTINGS] Failed to load settings', error);
@@ -67,11 +74,16 @@ export class SettingsRepository {
     };
   };
 
-  async setMarqueeEnabled(enabled: boolean): Promise<AppSettings> {
-    this.settings = {
-      ...this.settings,
-      marqueeEnabled: enabled,
-    };
+  setMarqueeEnabled(enabled: boolean): Promise<AppSettings> {
+    return this.update({ marqueeEnabled: enabled });
+  }
+
+  setAgentFiltersExpanded(expanded: boolean): Promise<AppSettings> {
+    return this.update({ agentFiltersExpanded: expanded });
+  }
+
+  private async update(patch: Partial<AppSettings>): Promise<AppSettings> {
+    this.settings = { ...this.settings, ...patch };
     try {
       await this.storage.setItem(
         SETTINGS_STORAGE_KEY,

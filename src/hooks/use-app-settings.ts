@@ -17,8 +17,14 @@ export function useAppSettings() {
     return settingsRepository.setMarqueeEnabled(enabled);
   };
 
+  const setAgentFiltersExpanded = (expanded: boolean) => {
+    return settingsRepository.setAgentFiltersExpanded(expanded);
+  };
+
   return {
     marqueeEnabled: settings.marqueeEnabled,
     setMarqueeEnabled,
+    agentFiltersExpanded: settings.agentFiltersExpanded,
+    setAgentFiltersExpanded,
   };
 }

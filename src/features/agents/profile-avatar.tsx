@@ -61,6 +61,13 @@ export type ProfileAvatarProps = {
   initials?: string;
   /** Custom icon override (defaults to person.fill / person) */
   icon?: AppIconName;
+  /** Glyph to draw where the platform has no symbol for `icon`. */
+  fallback?: string;
+  /**
+   * Marks the button as a disclosure control and says which way it points, for
+   * screen readers. Left off when the button is not one.
+   */
+  expanded?: boolean;
   /** Disables the button */
   disabled?: boolean;
   /** Optional container style */
@@ -82,6 +89,8 @@ export function ProfileAvatar({
   imageUri,
   initials,
   icon = { ios: 'person.fill', android: 'person', web: 'person' },
+  fallback = '👤',
+  expanded,
   disabled = false,
   style,
 }: ProfileAvatarProps) {
@@ -102,7 +111,7 @@ export function ProfileAvatar({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
-      accessibilityState={{ disabled }}
+      accessibilityState={{ disabled, expanded }}
       disabled={disabled}
       onPress={handlePress}
       style={({ pressed }) => [
@@ -131,7 +140,7 @@ export function ProfileAvatar({
           name={icon}
           size={20}
           tintColor={effectiveTintColor}
-          fallback="👤"
+          fallback={fallback}
         />
       )}
     </Pressable>

@@ -23,6 +23,27 @@ describe('SettingsRepository', () => {
     expect(repository.getSnapshot().marqueeEnabled).toBe(true);
   });
 
+  it('shows the agent filters until told otherwise, and remembers being told', async () => {
+    const settings = await repository.init();
+    expect(settings.agentFiltersExpanded).toBe(true);
+
+    await repository.setAgentFiltersExpanded(false);
+    expect(repository.getSnapshot().agentFiltersExpanded).toBe(false);
+    expect(JSON.parse(mockStore['remote-workspace.settings.v1']).agentFiltersExpanded).toBe(false);
+
+    // And it did not take the other settings down with it.
+    expect(repository.getSnapshot().marqueeEnabled).toBe(true);
+  });
+
+  it('keeps defaults for keys a stored settings file predates', async () => {
+    mockStore['remote-workspace.settings.v1'] = JSON.stringify({ marqueeEnabled: false });
+
+    await repository.init();
+
+    expect(repository.getSnapshot().marqueeEnabled).toBe(false);
+    expect(repository.getSnapshot().agentFiltersExpanded).toBe(true);
+  });
+
   it('updates and persists marqueeEnabled', async () => {
     await repository.setMarqueeEnabled(false);
     expect(repository.getSnapshot().marqueeEnabled).toBe(false);
