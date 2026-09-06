@@ -2,14 +2,15 @@
   "expo": {
     "name": "Remodr",
     "slug": "sparminal",
-    "version": "1.0.0",
+    "version": "0.1.0",
     "backgroundColor": "#08090B",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "remoteworkspace",
     "userInterfaceStyle": "dark",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
@@ -19,7 +20,8 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.remoteworkspace"
+      "package": "com.anonymous.remoteworkspace",
+      "versionCode": 1
     },
     "web": {
       "output": "static",
