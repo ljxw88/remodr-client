@@ -25,7 +25,7 @@ class CodexAdapter(ProviderAdapter):
     def resolve_session(
         self, raw: dict[str, Any], native_session_id: str | None, *, inspect: bool
     ) -> str | None:
-        self.host.process_bound_panes.discard(str(raw.get("pane_id") or ""))
+        self.host.sessions.forget_process_binding(str(raw.get("pane_id") or ""))
         return sessions.effective_session(self.host, raw, native_session_id)
 
     def load_conversation(self, agent: dict[str, Any]) -> dict[str, Any] | None:

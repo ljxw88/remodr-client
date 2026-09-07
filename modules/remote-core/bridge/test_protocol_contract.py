@@ -117,7 +117,7 @@ class ProtocolContractTest(unittest.TestCase):
                             for call in self.bridge._herdr_request.call_args_list
                         ))
                     if not actual["activeHumanRequest"]:
-                        self.assertEqual(self.bridge.pending_human_requests, {})
+                        self.assertEqual(self.bridge.sessions.question_ids(), frozenset())
 
     def test_durable_responses_and_restart_replay_match_production(self):
         self.install_frame(fixture("copilot-session-replacement.json")["frames"][0])

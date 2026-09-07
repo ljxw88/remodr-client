@@ -151,12 +151,26 @@ class ProcessSessionTest(unittest.TestCase):
     def poll(self):
         return self.bridge._dispatch("agent.conversation", {"agentId": self.agent_id})
 
+    def test_first_process_verified_identity_retains_matching_launch_settings(self):
+        tuning = {"model": "launch-model", "effort": "high", "context": "long_context"}
+        self.bridge.sessions.record_launch("p1", "active-session", tuning, False)
+        conversation = self.poll()
+        self.assertEqual(conversation["providerSessionId"], "active-session")
+        self.assertEqual(self.bridge.sessions.tuning("p1"), tuning)
+        self.assertEqual(self.bridge.runtime["agents"][0]["tuning"], tuning)
+        self.assertFalse(self.bridge.sessions.bypass("p1"))
+        self.assertTrue(self.bridge.sessions.is_process_bound("p1"))
+        self.assertTrue(self.bridge.sessions.was_observed("p1"))
+
     def test_active_database_overrides_stale_native_identity_everywhere(self):
-        self.bridge.started_sessions["p1"] = "native-stale"
+        self.bridge.sessions.record_launch("p1", "native-stale", {"model": "stale-model"}, False)
         conversation = self.poll()
         self.assertEqual(conversation["providerSessionId"], "active-session")
         self.assertEqual(conversation["items"][0]["text"], "current history")
-        self.assertEqual(self.bridge.started_sessions["p1"], "active-session")
+        self.assertEqual(self.bridge.sessions.launched_session("p1"), "active-session")
+        self.assertEqual(self.bridge.sessions.tuning("p1"), {})
+        self.assertIsNone(self.bridge.runtime["agents"][0]["tuning"]["model"])
+        self.assertFalse(self.bridge.sessions.bypass("p1"))
         self.assertEqual(
             self.bridge.runtime["agents"][0]["providerSessionId"], "active-session"
         )
@@ -180,7 +194,8 @@ class ProcessSessionTest(unittest.TestCase):
         self.assertEqual(self.open_sessions.call_args_list[0].args, (100,))
         self.assertEqual(self.open_sessions.call_args_list[1].args, (100,))
         self.assertFalse(any(
-            key[2] == "active-session" for key in self.bridge.conversation_cache
+            key.session_id == "active-session"
+            for key in self.bridge.sessions.conversation_keys()
         ))
 
     def test_event_bursts_do_not_rescan_processes_or_restore_stale_native_ids(self):
@@ -210,7 +225,7 @@ class ProcessSessionTest(unittest.TestCase):
     def test_missing_optional_database_retains_native_identity_before_process_binding(self):
         self.open_sessions.return_value = set()
         self.assertEqual(self.poll()["providerSessionId"], "native-stale")
-        self.assertNotIn("p1", self.bridge.process_bound_panes)
+        self.assertFalse(self.bridge.sessions.is_process_bound("p1"))
         self.assertIn("unverified native identity", self.bridge._diagnostic.call_args.args[1])
 
     def test_missing_database_cannot_restore_native_identity_after_process_binding(self):
@@ -229,7 +244,7 @@ class ProcessSessionTest(unittest.TestCase):
                     self.poll()
                 self.assertEqual(caught.exception.code, "SESSION_IDENTITY_UNRESOLVED")
                 self.assertIsNone(self.bridge.raw_agents[self.agent_id]["providerSessionId"])
-                self.assertNotIn("p1", self.bridge.started_sessions)
+                self.assertIsNone(self.bridge.sessions.launched_session("p1"))
                 with self.assertRaises(BridgeError) as retune:
                     self.bridge._retune_agent({"agentId": self.agent_id, "model": "gpt-5.4"})
                 self.assertEqual(retune.exception.code, "SESSION_IDENTITY_UNRESOLVED")
@@ -311,7 +326,7 @@ class ProcessSessionTest(unittest.TestCase):
         self.assertEqual(caught.exception.code, "SESSION_IDENTITY_UNRESOLVED")
 
     def test_retune_independently_resolves_the_process_session(self):
-        self.bridge.started_sessions["p1"] = "native-stale"
+        self.bridge.sessions.remember_launch_session("p1", "native-stale")
         with patch.object(self.bridge.providers["copilot"].tuning, "restart_agent") as restart:
             self.bridge._retune_agent({
                 "agentId": self.agent_id, "model": "gpt-5.4", "effort": "high"

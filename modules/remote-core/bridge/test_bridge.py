@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from remodr_bridge.providers.copilot.transcript import normalize_question
+from remodr_bridge.session_registry import SessionBinding, SessionKey
 
 from herdr_mobile_bridge import (
     BYPASS_ARGUMENTS,
@@ -449,6 +450,50 @@ class BridgeProtocolTest(unittest.TestCase):
             {"workspace_id": "w2", "close_group": True},
         )
 
+    def test_workspace_close_refresh_failure_clears_only_removed_session_state(self):
+        bridge = Bridge()
+        closed = {"id": "a1", "paneId": "p1", "workspaceId": "w1",
+                  "provider": "copilot", "providerSessionId": "s1"}
+        remaining = {"id": "a2", "paneId": "p2", "workspaceId": "w2",
+                     "provider": "claude", "providerSessionId": "s2"}
+        pending = {"id": "a3", "paneId": "p3", "workspaceId": "w1",
+                   "provider": "copilot", "providerSessionId": None}
+        bridge.runtime = {
+            "workspaces": [{"id": "w1"}, {"id": "w2"}],
+            "agents": [closed, remaining, pending],
+        }
+        bridge.raw_agents = {agent["id"]: agent for agent in (closed, remaining, pending)}
+        bridge.pending_agents = {"p3": pending}
+        version = (1, 2, 3, 4)
+        for agent in (closed, remaining):
+            key = SessionKey.from_agent(agent)
+            bridge.sessions.record_launch(agent["paneId"], key.session_id, {"model": key.session_id}, False)
+            bridge.sessions.bind(SessionBinding.from_agent(agent), reported=True)
+            bridge.sessions.cache_tuning(key.session_id, 10, {"model": key.session_id})
+            bridge.sessions.cache_conversation(key, version, {"items": []})
+            bridge._remember_human_request({"id": key.agent_id}, agent)
+        bridge.sessions.record_launch("p3", "pending-launch", {"model": "pending"}, False)
+        with (
+            patch.object(bridge, "_herdr_request", return_value={}),
+            patch.object(bridge, "_refresh_runtime", side_effect=OSError("snapshot unavailable")),
+            patch.object(bridge, "_diagnostic"),
+        ):
+            result = bridge._close_workspace({"workspaceId": "w1"})
+        self.assertEqual(result["runtime"]["workspaces"], [{"id": "w2"}])
+        self.assertEqual(result["runtime"]["agents"], [remaining])
+        self.assertEqual(bridge.raw_agents, {"a2": remaining})
+        self.assertEqual(bridge.pending_agents, {})
+        self.assertIsNone(bridge.sessions.binding("a1"))
+        self.assertIsNone(bridge.sessions.cached_tuning("s1"))
+        for pane in ("p1", "p3"):
+            self.assertIsNone(bridge.sessions.launched_session(pane))
+            self.assertEqual(bridge.sessions.tuning(pane), {})
+        key = SessionKey.from_agent(remaining)
+        self.assertEqual(bridge.sessions.conversation_keys(), frozenset({key}))
+        self.assertEqual(bridge.sessions.question_ids(), frozenset({"a2"}))
+        self.assertEqual(bridge.sessions.tuning("p2"), {"model": "s2"})
+        self.assertFalse(bridge.sessions.bypass("p2"))
+
     def test_create_agent_cleans_up_pane_when_post_start_refresh_fails(self):
         bridge = Bridge()
         bridge.runtime = {
@@ -782,10 +827,14 @@ class BridgeProtocolTest(unittest.TestCase):
 
             with patch.object(Path, "home", return_value=home):
                 conversation = bridge.providers["copilot"].load_conversation(agent)
-                cached_conversation = bridge.providers["copilot"].load_conversation(agent)
+                with patch.object(Path, "open", side_effect=AssertionError("cached transcript was reread")):
+                    cached_conversation = bridge.providers["copilot"].load_conversation(agent)
 
             self.assertIsNotNone(conversation)
-            self.assertIs(cached_conversation, conversation)
+            self.assertEqual(cached_conversation, conversation)
+            self.assertIsNot(cached_conversation, conversation)
+            cached_conversation["items"][0]["text"] = "caller mutation"
+            self.assertEqual(conversation["items"][0]["text"], "Fix reconnect.")
             kinds = [item["kind"] for item in conversation["items"]]
             self.assertEqual(
                 kinds,
@@ -1103,9 +1152,10 @@ class HumanQuestionTest(unittest.TestCase):
         bridge.raw_agents = {
             "agent-1": {"id": "agent-1", "paneId": "p1", "agent_status": "blocked"}
         }
-        bridge.pending_human_requests = {
-            "req-1": {"options": [{"id": "TCP", "label": "TCP"}]}
-        }
+        bridge._remember_human_request(
+            {"id": "req-1", "options": [{"id": "TCP", "label": "TCP"}]},
+            bridge.raw_agents["agent-1"],
+        )
         bridge._answer_human_request(
             {"agentId": "agent-1", "requestId": "req-1", "answer": {"selectedOptionIds": ["TCP"]}}
         )
@@ -1126,7 +1176,9 @@ class HumanQuestionTest(unittest.TestCase):
         bridge.raw_agents = {
             "agent-1": {"id": "agent-1", "paneId": "p1", "agent_status": "idle"}
         }
-        bridge.pending_human_requests = {"req-1": {"options": []}}
+        bridge._remember_human_request(
+            {"id": "req-1", "options": []}, bridge.raw_agents["agent-1"],
+        )
         bridge._answer_human_request(
             {"agentId": "agent-1", "requestId": "req-1", "answer": {"customText": "hi"}}
         )
@@ -1245,14 +1297,15 @@ class AgentManagementTest(unittest.TestCase):
                     args = list(BYPASS_ARGUMENTS[provider]) if bypass else []
                     args.extend(expected)
                     if provider == "copilot":
-                        args.extend(["--session-id", bridge.started_sessions["p1"]])
+                        args.extend(["--session-id", bridge.sessions.launched_session("p1")])
                     else:
-                        self.assertEqual(bridge.started_sessions, {})
+                        self.assertIsNone(bridge.sessions.launched_session("p1"))
                     if provider == "codex":
                         args.extend(["-c", CODEX_STATUS_CONFIG])
                     self.assertEqual(start["kind"], provider)
                     self.assertEqual(start["args"], args)
-                    self.assertEqual(bridge.agent_tuning["p1"]["model"], tuning["model"])
+                    self.assertEqual(bridge.sessions.tuning("p1")["model"], tuning["model"])
+                    self.assertEqual(bridge.sessions.bypass("p1"), bypass)
 
     def test_bad_creation_tuning_fails_before_creating_a_pane(self):
         for payload, code in [
@@ -1301,7 +1354,7 @@ class AgentManagementTest(unittest.TestCase):
         # Herdr only learns the id once the agent writes its state out. Until
         # then the conversation would fall back to scraping the terminal.
         bridge = Bridge()
-        bridge.started_sessions = {"w1:p1": "session-abc"}
+        bridge.sessions.remember_launch_session("w1:p1", "session-abc")
         snapshot = {
             "agents": [{"pane_id": "w1:p1", "agent": "copilot", "workspace_id": "w1"}],
             "workspaces": [],
@@ -1356,13 +1409,58 @@ class AgentManagementTest(unittest.TestCase):
 
         bridge._herdr_request = request
         bridge._refresh_runtime = failing_refresh
-        bridge.raw_agents = {"a1": {"id": "a1", "paneId": "p1", "tabId": "w1:t1"}}
-        bridge.runtime = {"agents": [{"id": "a1"}, {"id": "a2"}]}
+        bridge.raw_agents = {
+            "a1": {
+                "id": "a1", "paneId": "p1", "tabId": "w1:t1",
+                "provider": "copilot", "providerSessionId": "closed-session",
+            },
+            "a2": {
+                "id": "a2", "paneId": "p2", "tabId": "w1:t1",
+                "provider": "claude", "providerSessionId": "live-session",
+            },
+        }
+        version = (1, 2, 3, 4)
+        for raw in bridge.raw_agents.values():
+            pane, session = raw["paneId"], raw["providerSessionId"]
+            bridge.sessions.record_launch(pane, session, {"model": session}, False)
+            bridge.sessions.bind(SessionBinding.from_agent(raw), reported=True)
+            bridge.sessions.record_identity(
+                pane, error="old error", diagnostic="old diagnostic",
+                process_bound=True, observed=True,
+            )
+            bridge.sessions.cache_tuning(session, 10, {"model": session})
+            bridge.sessions.cache_conversation(
+                SessionKey.from_agent(raw), version, {"agentId": raw["id"]},
+            )
+            bridge._remember_human_request({"id": raw["id"], "options": []}, raw)
+        closed_key = SessionKey.from_agent(bridge.raw_agents["a1"])
+        live_key = SessionKey.from_agent(bridge.raw_agents["a2"])
+        bridge.runtime = {"agents": [dict(raw) for raw in bridge.raw_agents.values()]}
         result = bridge._close_agent({"agentId": "a1"})
         self.assertEqual(
             [agent["id"] for agent in result["runtime"]["agents"]], ["a2"]
         )
         self.assertNotIn("a1", bridge.raw_agents)
+        self.assertIsNone(bridge.sessions.binding("a1"))
+        self.assertIsNone(bridge.sessions.launched_session("p1"))
+        self.assertEqual(bridge.sessions.tuning("p1"), {})
+        self.assertTrue(bridge.sessions.bypass("p1"))
+        self.assertIsNone(bridge.sessions.identity_error("p1"))
+        self.assertFalse(bridge.sessions.was_observed("p1"))
+        self.assertFalse(bridge.sessions.is_process_bound("p1"))
+        self.assertIsNone(bridge.sessions.cached_tuning("closed-session"))
+        self.assertIsNone(bridge.sessions.conversation(closed_key, version))
+        self.assertIsNone(bridge.sessions.question("a1"))
+        self.assertEqual(bridge.sessions.binding("a2"), SessionBinding(live_key, "p2"))
+        self.assertEqual(bridge.sessions.launched_session("p2"), "live-session")
+        self.assertEqual(bridge.sessions.tuning("p2"), {"model": "live-session"})
+        self.assertFalse(bridge.sessions.bypass("p2"))
+        self.assertEqual(bridge.sessions.identity_error("p2"), "old error")
+        self.assertTrue(bridge.sessions.was_observed("p2"))
+        self.assertTrue(bridge.sessions.is_process_bound("p2"))
+        self.assertEqual(bridge.sessions.cached_tuning("live-session"), (10, {"model": "live-session"}))
+        self.assertEqual(bridge.sessions.conversation(live_key, version), {"agentId": "a2"})
+        self.assertEqual(bridge.sessions.question("a2").key, live_key)
 
 
 class AgentTuningTest(unittest.TestCase):
@@ -1381,8 +1479,8 @@ class AgentTuningTest(unittest.TestCase):
                 "providerSessionId": session,
             }
         }
-        bridge.agent_tuning = {"p1": current}
-        bridge.started_sessions = {"p1": session} if session else {}
+        bridge.sessions.record_launch("p1", session, current, True)
+        bridge.sessions.bind(SessionBinding.from_agent(bridge.raw_agents["a1"]), reported=bool(session))
         bridge._refresh_runtime = lambda: None
         return bridge
 
@@ -1449,7 +1547,7 @@ class AgentTuningTest(unittest.TestCase):
                 )
                 first = bridge.providers["copilot"].tuning.session_tuning("s1")
                 self.assertEqual(first["model"], "gpt-5.4")
-                offset = bridge.session_tuning_cache["s1"][0]
+                offset = bridge.sessions.cached_tuning("s1")[0]
 
                 self._write_session(
                     root,
@@ -1468,7 +1566,7 @@ class AgentTuningTest(unittest.TestCase):
                 second = bridge.providers["copilot"].tuning.session_tuning("s1")
                 self.assertEqual(second["model"], "grok-4.6")
                 self.assertEqual(second["context"], "long_context")
-                self.assertGreater(bridge.session_tuning_cache["s1"][0], offset)
+                self.assertGreater(bridge.sessions.cached_tuning("s1")[0], offset)
 
     def test_a_model_change_leaves_settings_it_does_not_mention_alone(self):
         # A change reports only what it changed. Reading a missing effort as a
@@ -1540,7 +1638,8 @@ class AgentTuningTest(unittest.TestCase):
         # Keyed by session rather than pane, so nothing else prunes it and it
         # would grow for as long as the bridge runs.
         bridge = Bridge()
-        bridge.session_tuning_cache = {"gone": (10, {}), "live": (10, {})}
+        bridge.sessions.cache_tuning("gone", 10, {})
+        bridge.sessions.cache_tuning("live", 10, {})
         snapshot = {
             "agents": [
                 {
@@ -1556,7 +1655,8 @@ class AgentTuningTest(unittest.TestCase):
         }
         with patch.object(bridge, "_herdr_request", return_value={"snapshot": snapshot}):
             bridge._refresh_runtime()
-        self.assertEqual(list(bridge.session_tuning_cache), ["live"])
+        self.assertIsNone(bridge.sessions.cached_tuning("gone"))
+        self.assertIsNotNone(bridge.sessions.cached_tuning("live"))
 
     def test_a_missing_log_reports_nothing(self):
         with tempfile.TemporaryDirectory() as root:
@@ -1607,7 +1707,7 @@ class AgentTuningTest(unittest.TestCase):
         # The session log names the model the agent last ran, which still says
         # the old one immediately after a change.
         bridge = Bridge()
-        bridge.agent_tuning = {"p1": {"model": "claude-haiku-4.5"}}
+        bridge.sessions.set_tuning("p1", {"model": "claude-haiku-4.5"})
         bridge.providers["copilot"].tuning.session_tuning = lambda _session: {
             "model": "gpt-5.6-luna",
             "effort": None,
@@ -1622,7 +1722,6 @@ class AgentTuningTest(unittest.TestCase):
         # ran — so the log is the only evidence there is, and all three come
         # from it rather than showing a default the agent never had.
         bridge = Bridge()
-        bridge.agent_tuning = {}
         bridge.providers["copilot"].tuning.session_tuning = lambda _session: {
             "model": "gpt-5.6-luna",
             "effort": "xhigh",
@@ -1636,7 +1735,7 @@ class AgentTuningTest(unittest.TestCase):
     def test_settings_are_taken_field_by_field(self):
         # A model set from here with an effort only the log knows about.
         bridge = Bridge()
-        bridge.agent_tuning = {"p1": {"model": "gpt-5.4", "effort": None, "context": None}}
+        bridge.sessions.set_tuning("p1", {"model": "gpt-5.4", "effort": None, "context": None})
         bridge.providers["copilot"].tuning.session_tuning = lambda _session: {
             "model": "gpt-5.6-luna",
             "effort": "high",
@@ -1702,7 +1801,7 @@ class AgentTuningTest(unittest.TestCase):
         # against what this app set alone made that look like a change, and
         # restarting an agent to change nothing interrupts its work.
         bridge = self._bridge({})
-        bridge.agent_tuning = {}
+        bridge.sessions.set_tuning("p1", {})
         bridge.providers["copilot"].tuning.session_tuning = lambda _session: {
             "model": "gpt-5.4",
             "effort": "max",
@@ -1725,7 +1824,9 @@ class AgentTuningTest(unittest.TestCase):
         # Handing an agent all its tools back because its reasoning changed is
         # not a change anyone asked for.
         bridge = self._bridge({"model": "gpt-5.4", "effort": "low", "context": None})
-        bridge.agent_bypass = {"p1": False}
+        bridge.sessions.record_launch(
+            "p1", bridge.sessions.launched_session("p1"), bridge.sessions.tuning("p1"), False,
+        )
         sent = []
 
         def request(method, params):
@@ -1815,7 +1916,7 @@ class AgentTuningTest(unittest.TestCase):
         for provider in ("claude", "codex", "cursor", "unknown"):
             with self.subTest(provider=provider):
                 bridge = Bridge()
-                bridge.agent_tuning = {"p1": {"model": "provider-model"}}
+                bridge.sessions.set_tuning("p1", {"model": "provider-model"})
                 with patch.object(bridge.providers["copilot"].tuning, "session_tuning") as session_tuning:
                     snapshot = bridge._normalize_snapshot({
                         "agents": [{
@@ -1832,7 +1933,7 @@ class AgentTuningTest(unittest.TestCase):
 
     def test_non_copilot_pane_cannot_inherit_a_copilot_session_id(self):
         bridge = Bridge()
-        bridge.started_sessions = {"p1": "previous-copilot-session"}
+        bridge.sessions.remember_launch_session("p1", "previous-copilot-session")
         snapshot = bridge._normalize_snapshot({
             "agents": [{"pane_id": "p1", "agent": "cursor"}],
             "panes": [{"pane_id": "p1"}],
@@ -1841,10 +1942,10 @@ class AgentTuningTest(unittest.TestCase):
 
     def test_pending_cursor_agent_reports_creation_tuning_and_no_retuning(self):
         bridge = Bridge()
-        bridge.agent_tuning = {"p1": {"model": "auto", "effort": None, "context": None}}
+        bridge.sessions.set_tuning("p1", {"model": "auto", "effort": None, "context": None})
         bridge._install_pending_agent("a1", "cursor", "cursor", "w1", "p1")
         agent = bridge.runtime["agents"][0]
-        self.assertEqual(agent["tuning"], bridge.agent_tuning["p1"])
+        self.assertEqual(agent["tuning"], bridge.sessions.tuning("p1"))
         self.assertEqual(agent["provider"], "cursor")
         self.assertFalse(agent["capabilities"]["supportsRetuning"])
 

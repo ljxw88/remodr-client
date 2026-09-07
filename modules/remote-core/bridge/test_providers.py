@@ -107,7 +107,7 @@ class ProviderRegistryTest(unittest.TestCase):
                 "cursor", "cursor", "p1",
                 ["--probe-bypass", "--probe-model", "chosen", "--probe-session", "Probe"],
             )
-            self.assertEqual(bridge.started_sessions["p1"], "probe-launch")
+            self.assertEqual(bridge.sessions.launched_session("p1"), "probe-launch")
 
     def test_each_bridge_owns_its_adapters_and_session_state(self):
         first, second = Bridge(), Bridge()
@@ -116,8 +116,9 @@ class ProviderRegistryTest(unittest.TestCase):
             self.assertIsNot(first.providers[provider], second.providers[provider])
             self.assertIs(first.providers[provider].host, first)
         self.assertIsNot(first.providers["copilot"].tuning, second.providers["copilot"].tuning)
-        first.session_tuning_cache["session"] = (1, {"model": "first"})
-        self.assertEqual(second.session_tuning_cache, {})
+        self.assertIsNot(first.sessions, second.sessions)
+        first.sessions.cache_tuning("session", 1, {"model": "first"})
+        self.assertIsNone(second.sessions.cached_tuning("session"))
 
     def test_claude_uses_native_identity_and_reads_only_its_transcript(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
@@ -134,14 +135,16 @@ class ProviderRegistryTest(unittest.TestCase):
                 adapter = bridge.providers["claude"]
                 self.assertIsInstance(adapter, ClaudeAdapter)
                 bridge._herdr_request = Mock()
-                bridge.process_bound_panes.add("p1")
-                bridge.session_identity_errors["p1"] = "old provider error"
+                bridge.sessions.record_identity(
+                    "p1", error="old provider error", diagnostic="old diagnostic",
+                    process_bound=True,
+                )
                 session = adapter.resolve_session(
                     {"pane_id": "p1"}, "claude-native", inspect=True,
                 )
                 self.assertEqual(session, "claude-native")
-                self.assertNotIn("p1", bridge.process_bound_panes)
-                self.assertNotIn("p1", bridge.session_identity_errors)
+                self.assertFalse(bridge.sessions.is_process_bound("p1"))
+                self.assertIsNone(bridge.sessions.identity_error("p1"))
                 result = adapter.load_conversation({"id": "a1", "providerSessionId": session})
                 self.assertEqual(result["items"][0]["text"], "native transcript")
                 self.assertTrue(result["semantic"])

@@ -14,9 +14,9 @@ def answer_human_request(host: Bridge, payload: dict[str, Any]) -> dict[str, Any
     agent = host._require_agent(payload)
     if not isinstance(request_id, str):
         raise BridgeError("INVALID_REQUEST", "Human request ID is required.")
-    request = host.pending_human_requests.get(request_id)
-    scope = host.human_request_scopes.get(request_id)
-    if scope is not None and scope[1:] != (
+    pending = host.sessions.question(request_id)
+    request = pending.request if pending else None
+    if pending is not None and (pending.key.provider, pending.key.session_id) != (
         agent.get("provider"), agent.get("providerSessionId")
     ):
         raise BridgeError("INVALID_REQUEST", "The question belongs to another session.")
@@ -56,8 +56,7 @@ def answer_human_request(host: Bridge, payload: dict[str, Any]) -> dict[str, Any
             if error.code != "agent_blocked":
                 raise
             host._answer_blocked_dialog(agent, request, selected_ids, text)
-    host.pending_human_requests.pop(request_id, None)
-    host.human_request_scopes.pop(request_id, None)
+    host.sessions.forget_question(request_id)
     return {"accepted": True}
 
 

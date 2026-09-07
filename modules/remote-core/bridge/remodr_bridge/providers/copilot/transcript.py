@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from ..base import ProviderHost
 from ...formatting import tool_title, tool_detail
+from ...session_registry import SessionKey
 
 def load_conversation(host: ProviderHost, agent: dict[str, Any]) -> dict[str, Any] | None:
     session_id = agent.get("providerSessionId")
@@ -26,13 +27,13 @@ def load_conversation(host: ProviderHost, agent: dict[str, Any]) -> dict[str, An
         database_stat.st_size if database_stat else 0,
         database_stat.st_mtime_ns if database_stat else 0,
     )
-    cache_key = (agent["id"], "copilot", session_id)
-    cached = host.conversation_cache.get(cache_key)
-    if cached and cached[0] == cache_version:
-        request = cached[1].get("activeHumanRequest")
+    cache_key = SessionKey(agent["id"], "copilot", session_id)
+    cached = host.sessions.conversation(cache_key, cache_version)
+    if cached is not None:
+        request = cached.get("activeHumanRequest")
         if request:
             host._remember_human_request(request, agent)
-        return cached[1]
+        return cached
 
     records: dict[str, dict[str, Any]] = {}
     order: list[str] = []
@@ -158,8 +159,7 @@ def load_conversation(host: ProviderHost, agent: dict[str, Any]) -> dict[str, An
                 tool_call_id = str(data.get("toolCallId") or event_id)
                 if tool_call_id in human_tool_ids:
                     request_id = human_tool_ids[tool_call_id]
-                    host.pending_human_requests.pop(request_id, None)
-                    host.human_request_scopes.pop(request_id, None)
+                    host.sessions.forget_question(request_id)
                     current = records.get("human:" + request_id)
                     if current:
                         current["resolved"] = True
@@ -190,7 +190,7 @@ def load_conversation(host: ProviderHost, agent: dict[str, Any]) -> dict[str, An
             None,
         ),
     }
-    host.conversation_cache[cache_key] = (cache_version, conversation)
+    host.sessions.cache_conversation(cache_key, cache_version, conversation)
     return conversation
 
 

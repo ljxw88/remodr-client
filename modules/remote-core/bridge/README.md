@@ -34,6 +34,7 @@ and restrictions below remain unchanged.
 | --- | --- |
 | `remodr_bridge/bridge.py` | Protocol dispatch, synchronized state, and orchestration |
 | `remodr_bridge/runtime.py` | Snapshot normalization and session reconciliation |
+| `remodr_bridge/session_registry.py` | Session bindings, launch/identity state, scoped caches and questions |
 | `remodr_bridge/activity.py` | Session-bound transcript/terminal output recency |
 | `remodr_bridge/lifecycle.py` | Workspace and agent create/rename/close operations |
 | `remodr_bridge/commands.py`, `ledger.py` | Durable command preconditions, receipts, and storage |
@@ -47,8 +48,9 @@ Copilot's `processes.py`, `sessions.py`, `transcript.py`, and `tuning.py` separa
 OS process inspection, identity resolution, transcript decoding, and live
 retuning. Codex separates `sessions.py` from `transcript.py`; Claude has its own
 transcript reader. Cursor explicitly inherits the raw-output fallback.
-Shared state stays with the host so the existing lock, cache-invalidation, and
-durable-command boundaries remain consistent across adapters.
+Runtime publication and Herdr I/O stay with the host. Session state belongs to
+`Bridge.sessions`, whose explicit registry methods replace mutable host
+dictionaries. Durable-command state remains in the ledger.
 
 `herdr_mobile_bridge.py` is a source-tree compatibility entrypoint. Android does
 not upload that file on its own. `build_bundle.py` packages the runtime modules
@@ -71,6 +73,46 @@ New providers need an adapter, registry entry, and provider-level regression
 coverage, plus the corresponding mobile provider/model-catalogue support.
 Keep shared session isolation and durable command preconditions in the runtime
 rather than duplicating them in provider adapters.
+
+## Session ownership and locks
+
+`SessionRegistry` owns launch IDs, observed/process-bound identity state,
+diagnostic deduplication, launch tuning and permission choices, transcript/tuning
+caches, and pending questions with their session scopes. `SessionKey` and
+`SessionBinding` are immutable internal records, not new wire fields. Cache and
+question payloads are copied on entry and retrieval so a parser or reply consumer
+cannot mutate registry-owned values through an alias.
+
+Normalization binds the effective identity after provider-specific inspection.
+First identification retains launch settings; rotation clears the previous
+session's tuning/transcript/question state without changing the pane's permission
+choice. Pruning distinguishes live shell panes from live agents. Successful
+agent/workspace closure also forgets the removed state when the following
+runtime refresh fails, rather than leaving old cached questions reachable.
+Provider parsers and identity authority rules are otherwise unchanged.
+
+| Lock | Owner and contract |
+| --- | --- |
+| `refresh_lock` | Bridge-wide reentrant lock for normalization, conversation reads, retuning and runtime/session removal. Provider read/bind sequences run under this lock. |
+| `state_lock` | Short access/publication of bridge runtime, raw agents and pending launch projections. Providers no longer receive this lock. |
+| Registry lock | Private reentrant lock for in-memory registry operations only; never performs Herdr/file I/O, callbacks or bridge-lock acquisition. |
+
+Nested acquisition order is `refresh_lock -> state_lock -> registry lock`;
+`state_lock` can be omitted when only session state is needed. Do not acquire
+`refresh_lock` while holding `state_lock`. Registry methods lock themselves;
+private `_invalidate` requires the registry lock. `_normalize_snapshot` acquires
+the refresh lock even when called outside `_refresh_runtime`.
+
+Subscription bookkeeping and stdout use their existing separate locks. They
+release those locks before entering refresh/registry operations, and identity
+diagnostics are emitted after registry updates release their lock. Ledger
+reservations, mutation accounting, receipt persistence and replay rules are not
+part of this registry.
+
+The source entrypoint and `Bridge` facade remain available. Former mutable
+session dictionaries were internal implementation details, not supported
+integration APIs; consumers should use registry operations rather than replacing
+or mutating its private containers.
 
 ## Cross-language protocol fixtures
 

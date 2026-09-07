@@ -55,14 +55,11 @@ def effective_session(
         session_id = None
         reason = f"Codex thread identity could not be read: {error}"
     if session_id:
-        host.session_identity_errors.pop(pane_id, None)
-        host.session_identity_diagnostics.pop(pane_id, None)
+        host.sessions.clear_identity(pane_id)
         return session_id
 
-    host.session_identity_errors[pane_id] = reason
-    if host.session_identity_diagnostics.get(pane_id) != reason:
+    if host.sessions.record_identity(pane_id, error=reason, diagnostic=reason, process_bound=False):
         host._diagnostic("CODEX_SESSION_IDENTITY", f"{pane_id}: {reason}")
-        host.session_identity_diagnostics[pane_id] = reason
     previous = host.raw_agents.get(host._stable_agent_id(pane_id))
     # Preserve the last displayed transcript while a dialog hides the footer.
     # This hint is not dispatch authority: command preparation refuses it.

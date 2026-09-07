@@ -47,6 +47,7 @@ Expo Router screens
 | Native client API | [`native-remote-client.ts`](../src/services/native-remote-client.ts) | Typed access to the local Expo module |
 | Native resources | [`modules/remote-core/android/`](../modules/remote-core/android/) | SSH sessions, channels, SFTP, forwards, secrets, background service |
 | Bridge runtime | [`remodr_bridge/`](../modules/remote-core/bridge/remodr_bridge/) | Herdr orchestration, protocol, durable commands, and shared session handling |
+| Bridge sessions | [`session_registry.py`](../modules/remote-core/bridge/remodr_bridge/session_registry.py) | Typed session bindings, identity/launch metadata, scoped caches and question ownership |
 | Provider adapters | [`providers/`](../modules/remote-core/bridge/remodr_bridge/providers/) | Provider-specific launch settings, session identity, and transcript readers |
 
 External stores expose snapshots through `useSyncExternalStore`. There is one
@@ -75,6 +76,12 @@ tie synthetic production bridge output to the TypeScript schemas and session
 helpers. The store also consumes the same session-replacement fixture, so its
 invalidation behavior is constrained by the wire contract rather than only
 store-specific mocks.
+
+The Python bridge similarly keeps session-owned memory in `SessionRegistry`.
+Providers use explicit registry operations and read-only runtime views instead
+of mutating host dictionaries or taking its state lock. The registry has no
+bridge reference or I/O; bridge refresh locks still serialize multi-step
+identity/read operations. See the [session ownership and lock contract](../modules/remote-core/bridge/README.md#session-ownership-and-locks).
 
 ## Navigation and presentation
 

@@ -87,16 +87,16 @@ class SessionRotationTest(unittest.TestCase):
                 "arguments": {"question": "Old question?", "choices": ["Yes", "No"]},
             },
         }])
-        self.bridge.started_sessions["p1"] = "before-clear"
-        self.bridge.agent_tuning["p1"] = {
+        self.bridge.sessions.remember_launch_session("p1", "before-clear")
+        self.bridge.sessions.set_tuning("p1", {
             "model": "old-model", "effort": "max", "context": "long_context"
-        }
+        })
         return self.poll()
 
     def test_poll_follows_rotation_without_a_status_event_and_publishes_once(self):
         old = self.seed_old_session()
         self.assertEqual(old["providerSessionId"], "before-clear")
-        self.assertIn("old-question", self.bridge.pending_human_requests)
+        self.assertIn("old-question", self.bridge.sessions.question_ids())
         self.write_session("after-clear", "new conversation")
         self.snapshot = self.make_snapshot("after-clear")
 
@@ -106,12 +106,15 @@ class SessionRotationTest(unittest.TestCase):
         self.assertEqual(new["providerSessionId"], "after-clear")
         self.assertEqual(new["items"][0]["text"], "new conversation")
         self.assertEqual(new, unchanged)
-        self.assertEqual(self.bridge.started_sessions["p1"], "after-clear")
-        self.assertNotIn("p1", self.bridge.agent_tuning)
-        self.assertNotIn("before-clear", self.bridge.session_tuning_cache)
-        self.assertFalse(any(key[2] == "before-clear" for key in self.bridge.conversation_cache))
-        self.assertNotIn("old-question", self.bridge.pending_human_requests)
-        self.assertNotIn("old-question", self.bridge.human_request_scopes)
+        self.assertEqual(self.bridge.sessions.launched_session("p1"), "after-clear")
+        self.assertEqual(self.bridge.sessions.tuning("p1"), {})
+        self.assertIsNone(self.bridge.sessions.cached_tuning("before-clear"))
+        self.assertFalse(any(
+            key.session_id == "before-clear"
+            for key in self.bridge.sessions.conversation_keys()
+        ))
+        self.assertNotIn("old-question", self.bridge.sessions.question_ids())
+        self.assertIsNone(self.bridge.sessions.question("old-question"))
         self.assertEqual(
             self.bridge.runtime["agents"][0]["tuning"],
             {"model": "gpt-5.4", "effort": "low", "context": None},
@@ -165,7 +168,7 @@ class SessionRotationTest(unittest.TestCase):
         self.assertEqual(conversation["items"][0]["text"], "main request")
         self.assertEqual(conversation["items"][1]["markdown"], "main reply")
         self.assertIsNone(conversation["activeHumanRequest"])
-        self.assertNotIn("child-question", self.bridge.pending_human_requests)
+        self.assertNotIn("child-question", self.bridge.sessions.question_ids())
         self.assertEqual(self.bridge.runtime["agents"][0]["tuning"]["model"], "gpt-5.4")
 
     def test_empty_rotated_semantic_session_does_not_show_old_terminal_text(self):
@@ -219,7 +222,7 @@ class SessionRotationTest(unittest.TestCase):
 
     def test_retune_refreshes_without_polling_and_never_resumes_original_id(self):
         self.write_session("before-clear")
-        self.bridge.started_sessions["p1"] = "before-clear"
+        self.bridge.sessions.remember_launch_session("p1", "before-clear")
         self.bridge._refresh_runtime()
         self.write_session("after-clear")
         self.snapshot = self.make_snapshot("after-clear")
@@ -234,33 +237,33 @@ class SessionRotationTest(unittest.TestCase):
         index = start["args"].index("--session-id")
         self.assertEqual(start["args"][index + 1], "after-clear")
         self.assertNotIn("before-clear", start["args"])
-        self.assertEqual(self.bridge.started_sessions["p1"], "after-clear")
+        self.assertEqual(self.bridge.sessions.launched_session("p1"), "after-clear")
 
     def test_authoritative_id_overrides_launch_id_on_first_detection(self):
-        self.bridge.started_sessions["p1"] = "original-launch"
-        self.bridge.agent_tuning["p1"] = {"model": "original-model"}
+        self.bridge.sessions.remember_launch_session("p1", "original-launch")
+        self.bridge.sessions.set_tuning("p1", {"model": "original-model"})
         self.write_session("before-clear")
         conversation = self.poll()
         self.assertEqual(conversation["providerSessionId"], "before-clear")
-        self.assertEqual(self.bridge.started_sessions["p1"], "before-clear")
-        self.assertNotIn("p1", self.bridge.agent_tuning)
+        self.assertEqual(self.bridge.sessions.launched_session("p1"), "before-clear")
+        self.assertEqual(self.bridge.sessions.tuning("p1"), {})
 
     def test_missing_identity_after_detection_does_not_restore_remembered_id(self):
         self.seed_old_session()
         self.snapshot = self.make_snapshot(None)
         self.poll()
-        self.assertNotIn("p1", self.bridge.started_sessions)
+        self.assertIsNone(self.bridge.sessions.launched_session("p1"))
         self.assertIsNone(self.poll()["providerSessionId"])
-        self.assertNotIn("old-question", self.bridge.pending_human_requests)
+        self.assertNotIn("old-question", self.bridge.sessions.question_ids())
 
     def test_first_native_identity_does_not_erase_creation_settings(self):
         self.snapshot = self.make_snapshot(None, "claude")
         self.poll()
         tuning = {"model": "sonnet", "effort": "high", "context": None}
-        self.bridge.agent_tuning["p1"] = tuning
+        self.bridge.sessions.set_tuning("p1", tuning)
         self.snapshot = self.make_snapshot("first-claude-session", "claude")
         self.poll()
-        self.assertEqual(self.bridge.agent_tuning["p1"], tuning)
+        self.assertEqual(self.bridge.sessions.tuning("p1"), tuning)
         self.assertEqual(self.bridge.runtime["agents"][0]["tuning"], tuning)
 
     def test_pending_launch_keeps_settings_when_the_reported_id_matches_bootstrap(self):
@@ -268,12 +271,12 @@ class SessionRotationTest(unittest.TestCase):
             "id": self.agent_id, "paneId": "p1", "provider": "copilot",
             "providerSessionId": None,
         }
-        self.bridge.started_sessions["p1"] = "before-clear"
+        self.bridge.sessions.remember_launch_session("p1", "before-clear")
         tuning = {"model": "gpt-5.4", "effort": "high", "context": None}
-        self.bridge.agent_tuning["p1"] = tuning
+        self.bridge.sessions.set_tuning("p1", tuning)
         self.write_session("before-clear")
         self.poll()
-        self.assertEqual(self.bridge.agent_tuning["p1"], tuning)
+        self.assertEqual(self.bridge.sessions.tuning("p1"), tuning)
         self.assertEqual(self.bridge.runtime["agents"][0]["tuning"], tuning)
 
     def test_shared_session_cache_cannot_return_another_agent_id(self):
