@@ -12,6 +12,11 @@ files, monitoring, Docker, and tunnels. There is no interactive terminal.
 Provider adapters return semantic messages where supported; raw output is an
 explicit compatibility view.
 
+Supported providers are **OpenCode** (preferred), **GitHub Copilot**,
+**Claude Code**, and **Codex**. OpenCode manages its upstream model accounts on
+the remote host; see [OpenCode integration](docs/opencode-integration.md) for
+setup, supported behavior, and the native API integration direction.
+
 Each enabled device has its own supervised connection and cached runtime.
 Dropped connections retain transcripts and durable pending sends, with a floating
 status indicator and server-page controls rather than repeated dialogs.

@@ -38,9 +38,11 @@ custom text rather than pretending they are provider option IDs. Normalization
 and input conversion live in the bridge and
 [`human-request.ts`](../../src/features/agents/human-request.ts).
 
-The current Claude/Codex adapters do not produce structured questions, and
-Cursor Agent uses raw fallback output (replacing the former OpenCode support). Do not infer controls from unstructured
-terminal text.
+The current Claude/Codex adapters do not produce structured questions.
+The earlier Cursor fallback integration has been superseded by the OpenCode
+adapter. OpenCode's native question and permission replies are separate API
+operations and are not implemented by this Copilot-specific dialog decision.
+Do not infer controls from unstructured terminal text.
 
 ## Durable queue behavior
 

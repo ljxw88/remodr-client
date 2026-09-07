@@ -1,4 +1,5 @@
 import {
+  catalogueUnavailableReason,
   contextChoices,
   contextLabel,
   contextsFor,
@@ -15,6 +16,11 @@ import {
 import { launchableAgentProviderSchema } from '@/domain/herdr';
 
 jest.mock('@/domain/model-catalogues/copilot.json', () => require('./__fixtures__/copilot.json'));
+jest.mock('@/domain/model-catalogues/opencode.json', () => ({
+  schemaVersion: 1, provider: 'opencode', updatedAt: null,
+  sources: [{ kind: 'manual', location: 'test fixture' }], notes: [], models: [],
+  unavailableReason: 'OpenCode models depend on the configured provider accounts. Refresh the catalogue or use Auto.',
+}));
 
 describe('what a model can be asked for', () => {
   it('offers the efforts that model has and no others', () => {
@@ -120,7 +126,7 @@ describe('the catalogue itself', () => {
 
   it('does not confuse launch configuration with live retuning support', () => {
     expect(supportsRetuning('copilot')).toBe(true);
-    for (const provider of ['claude', 'codex', 'cursor', 'unknown'] as const) {
+    for (const provider of ['claude', 'codex', 'opencode', 'unknown'] as const) {
       expect(supportsRetuning(provider)).toBe(false);
     }
   });
@@ -184,6 +190,17 @@ describe('what is already in force', () => {
 });
 
 describe('changing model', () => {
+  it('preserves OpenCode provider/model IDs without inventing tuning flags', () => {
+    expect(tuningForModel('opencode', 'configured-provider/account-model', {
+      model: 'other/model', effort: 'high', context: 'long_context',
+    })).toEqual({ model: 'configured-provider/account-model', effort: null, context: null });
+    expect(modelLabel('opencode', 'configured-provider/account-model')).toBe('configured-provider/account-model');
+    expect(modelsFor('opencode')).toEqual([]);
+    expect(catalogueUnavailableReason('opencode')).toBe(
+      'OpenCode models depend on the configured provider accounts. Refresh the catalogue or use Auto.',
+    );
+  });
+
   it('keeps settings the new model still offers', () => {
     expect(
       tuningForModel('copilot', 'gpt-5.6-sol', {

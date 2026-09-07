@@ -17,8 +17,8 @@ import { beginAgentSettingsFlow, beginRenameAgentFlow } from './agent-edit-flow'
 import { TuningFields } from './tuning-fields';
 
 jest.mock('@/domain/model-catalogues/copilot.json', () => require('../../domain/__fixtures__/copilot.json'));
-jest.mock('@/domain/model-catalogues/cursor.json', () => ({
-  schemaVersion: 1, provider: 'cursor', updatedAt: null,
+jest.mock('@/domain/model-catalogues/opencode.json', () => ({
+  schemaVersion: 1, provider: 'opencode', updatedAt: null,
   sources: [{ kind: 'manual', location: 'test fixture' }],
   notes: [], unavailableReason: 'CLI not installed', models: [],
 }));
@@ -244,19 +244,19 @@ describe('agent settings and model pages', () => {
     flowDrafts.discard(incompatible);
   });
 
-  it('does not expose Copilot-only live retuning for Cursor', () => {
+  it('does not expose Copilot-only live retuning for OpenCode', () => {
     flowDrafts.update(flowId, (draft) =>
-      draft.kind === 'agent-settings' ? { ...draft, provider: 'cursor' } : draft);
+      draft.kind === 'agent-settings' ? { ...draft, provider: 'opencode' } : draft);
     TestRenderer.act(() => { renderer = TestRenderer.create(createElement(AgentSettingsPage)); });
     expect(renderer.root.findByType(MissingFlow)).toBeDefined();
     expect(herdrRepository.retuneAgent).not.toHaveBeenCalled();
   });
 
-  it('explains unavailable discovery while allowing Cursor creation with Auto', () => {
+  it('explains unavailable discovery while allowing OpenCode creation with Auto', () => {
     flowDrafts.discard(flowId);
     flowId = flowDrafts.create({
       kind: 'new-agent', deviceId: 'device-a', name: '', workspaceId: 'space-a',
-      provider: 'cursor', bypassPermissions: true,
+      provider: 'opencode', bypassPermissions: true,
       tuning: { model: null, effort: null, context: null },
     });
     jest.mocked(useLocalSearchParams).mockReturnValue({ flowId });

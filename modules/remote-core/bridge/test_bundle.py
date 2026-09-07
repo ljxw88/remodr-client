@@ -159,7 +159,7 @@ class PackagedRuntimeTest(unittest.TestCase):
             )
             version = json.loads(result.stdout)
             self.assertEqual(version["protocol"], 1)
-            self.assertEqual(version["providers"], ["copilot", "claude", "codex", "cursor"])
+            self.assertEqual(version["providers"], ["opencode", "copilot", "claude", "codex"])
             self.assertTrue(version["bridgeVersion"])
             self.assertEqual(result.stderr, "")
             self.assertEqual(set(root.iterdir()), {output, home})

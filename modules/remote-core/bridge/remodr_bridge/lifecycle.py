@@ -229,8 +229,13 @@ def create_agent(host: Bridge, payload: dict[str, Any]) -> dict[str, Any]:
     name = provider
     args = list(adapter.spec.bypass_arguments) if bypass_permissions else []
     args.extend(tuning)
-    session_id = host._new_session_arguments(provider, label, args)
     try:
+        workspace = next(
+            (entry for entry in host.runtime.get("workspaces", []) if entry.get("id") == workspace_id),
+            {},
+        )
+        cwd = workspace.get("cwd")
+        session_id = adapter.prepare_launch(label, args, cwd if isinstance(cwd, str) else None)
         try:
             host._start_agent(name, provider, pane_id, args)
         except BridgeError as error:

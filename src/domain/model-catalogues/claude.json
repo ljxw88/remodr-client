@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "provider": "claude",
-  "updatedAt": "2026-09-05T23:34:44.015Z",
+  "updatedAt": "2026-09-07T20:19:29.058Z",
   "sources": [
     {
       "kind": "cli",

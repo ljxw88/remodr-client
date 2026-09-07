@@ -44,6 +44,7 @@ class ProviderSpec:
     aliases: tuple[str, ...] = ()
     substring_match: bool = False
     bypass_arguments: tuple[str, ...] = ()
+    interrupt_keys: tuple[str, ...] = ("ctrl-c",)
     tuning_flags: dict[str, str] = field(default_factory=dict)
     efforts: tuple[str, ...] = ()
     retunable: bool = False
@@ -104,6 +105,9 @@ class ProviderAdapter:
     @staticmethod
     def new_session_arguments(label: str, args: list[str]) -> str | None:
         return None
+
+    def prepare_launch(self, label: str, args: list[str], cwd: str | None) -> str | None:
+        return self.new_session_arguments(label, args)
 
     def resolve_session(
         self, raw: dict[str, Any], native_session_id: str | None, *, inspect: bool

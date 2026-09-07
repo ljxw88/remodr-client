@@ -451,7 +451,7 @@ describe('HerdrRepository multi-device runtime', () => {
     expect(transport.request.mock.calls.some(([action]) => action === 'agent.send_message')).toBe(false);
   });
 
-  it('connects to an older bridge that still advertises OpenCode', async () => {
+  it('connects to an older bridge that still advertises removed Cursor Agent support', async () => {
     const transport = fakeTransport();
     transport.request.mockResolvedValue({
       ...runtime,
@@ -459,11 +459,11 @@ describe('HerdrRepository multi-device runtime', () => {
         { provider: 'copilot', available: true },
         { provider: 'claude', available: true },
         { provider: 'codex', available: true },
-        { provider: 'opencode', available: true },
+        { provider: 'cursor', available: true },
       ],
       agents: [
         ...runtime.agents,
-        { ...runtime.agents[0], id: 'legacy-agent', paneId: 'p2', provider: 'opencode' },
+        { ...runtime.agents[0], id: 'legacy-agent', paneId: 'p2', provider: 'cursor' },
       ],
     });
     const repository = repositoryWith([transport]);

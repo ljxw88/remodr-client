@@ -14,17 +14,24 @@ previous development baselines, not an exhaustive support matrix or a claim
 about what is installed on the reader's server.
 
 The bridge reads Herdr's provider catalog at runtime. It does not assume that
-Claude Code, Codex, Copilot, or Cursor Agent is installed. Default session/socket
+OpenCode, Copilot, Claude Code, or Codex is installed. Default session/socket
 values are `default` and `~/.config/herdr/herdr.sock`; see the bridge's
 `HERDR_SESSION` and `HERDR_SOCKET` handling for overrides.
 
 Incoming snapshots also tolerate providers unsupported by this app, including
-OpenCode from an older bundled bridge. Their manifests are marked unavailable
+Cursor Agent from an older bundled bridge. Their manifests are marked unavailable
 with an explicit reason, and existing agents/conversations use the `unknown`
 provider rather than failing the entire connection. Outbound creation still
-accepts only the four supported providers; OpenCode is never mapped to Cursor.
+accepts only OpenCode, Copilot, Claude Code and Codex; removed providers are never
+mapped to a different supported provider.
 Reloading JavaScript does not replace the native bundled bridge: rebuild and
-reinstall the app to deploy updated Cursor launch support.
+reinstall the app to deploy the OpenCode adapter.
+
+OpenCode is listed first and selected by default when available. Its integration
+uses the exact session reported by Herdr's OpenCode plugins, not a guessed
+session from the project directory. See [OpenCode integration](opencode-integration.md)
+for account support, installation requirements, read-only storage limits and the
+future native HTTP/SSE boundary.
 
 Model, reasoning-effort, and context choices in the mobile picker come from the
 bundled [per-provider JSON catalogues](../src/domain/model-catalogues/), loaded
@@ -118,10 +125,10 @@ foreground launcher chain to the native runtime.
 
 | Provider | Current conversation source | Limits |
 | --- | --- | --- |
+| OpenCode | Read-only SQLite session/message storage, scoped by Herdr's native session ID | Semantic text and tool activity; requires matching data directory and installed Herdr integration; native question/permission APIs and live model switching are not yet wired |
 | Copilot | `~/.copilot/session-state/<id>/events.jsonl`, plus session database TODOs | Structured messages, tool activity and `ask_user` questions; requires a known provider session |
 | Claude Code | Matching JSONL files under `~/.claude/projects/` | Defensive role/content parsing, no structured question normalizer |
 | Codex | SQLite-indexed JSONL rollouts under `CODEX_HOME` (default `~/.codex`) | Legacy messages and paginated completed items; no structured question normalizer |
-| Cursor Agent | Herdr `agent.read` | Explicit raw-output compatibility view; no semantic transcript adapter |
 | Unknown or unreadable adapter | Herdr `agent.read` | Explicit raw-output compatibility view |
 
 Adapter code does not imply support for every future CLI log schema. If a

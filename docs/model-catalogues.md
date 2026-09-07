@@ -2,7 +2,7 @@
 
 Model data is bundled in separate JSON files under
 [`src/domain/model-catalogues`](../src/domain/model-catalogues/):
-`copilot.json`, `codex.json`, `claude.json`, and `cursor.json`. The app does not
+`opencode.json`, `copilot.json`, `claude.json`, and `codex.json`. The app does not
 query provider services from the phone. Refresh these files on a maintenance
 machine, review the diff, and ship the updated app.
 
@@ -25,7 +25,7 @@ app's Zod schema; it does not need a separate transpiler.
 ```sh
 npm run models:refresh
 npm run models:refresh -- --provider copilot,codex
-npm run models:refresh -- --provider cursor --dry-run
+npm run models:refresh -- --provider opencode --dry-run
 npm run models:refresh -- --check
 ```
 
@@ -47,25 +47,19 @@ Select one provider explicitly when the other CLIs are unavailable.
 
 | Provider | Source | Details and limitations |
 | --- | --- | --- |
+| OpenCode | `opencode models` | Configured `provider/model` selectors, including nested model IDs. Uses the CLI's own provider configuration; no inference prompt or credential-file reads by Remodr. |
 | Copilot | `copilot --headless --stdio --no-auto-update`, `connect` then `models.list` | Native model names, efforts, limits, policy and billing/context metadata. Auto and disabled entries are excluded. |
 | Codex | `codex app-server`, `model/list` with pagination | Native model choices and effort defaults; numeric context metadata is joined by exact ID from the installed version's official release catalogue. |
 | Claude Code | Native stream-JSON `initialize.models`, the protocol behind Agent SDK `supportedModels()` | Picker aliases, resolved IDs and efforts. Initializes a subprocess, but sends no user message. Hooks/MCP are disabled and sessions are not persisted. |
-| Cursor Agent | `agent models`; optional `https://api.cursor.com/v1/models` enrichment | CLI IDs are authoritative. With `CURSOR_API_KEY`, exact IDs or explicit aliases receive SDK/API parameters and variants; no guessed conversion into CLI flags. |
 
-Executable overrides are `COPILOT_BIN`, `CODEX_BIN`, `CLAUDE_BIN`, and
-`CURSOR_AGENT_BIN` (for example, `cursor-agent` rather than `agent`). Values
+Executable overrides are `OPENCODE_BIN`, `COPILOT_BIN`, `CLAUDE_BIN`, and
+`CODEX_BIN`. Values
 must be executable paths/names, not shell command strings. Authentication is
-handled by the native CLI; the script never reads credential files. An
-explicit `CURSOR_API_KEY` is sent only to Cursor's official API in an HTTP
-header and is never written to JSON.
-
-Without an API key, Cursor discovery first checks `agent status --format json`
-(exit code zero alone also means "logged out"). Unauthenticated, partial, or
-unverified status fails before `agent models`. With an API key, the script
-validates it against the official model endpoint first. Child stdin is closed
-and commands have timeouts. These checks avoid normal login onboarding, but
-the CLI can still initiate login if credentials expire between the status
-check and model discovery; this is not a guarantee of zero CLI startup effects.
+handled by the native CLI; the script never reads credential files. Child stdin
+is closed and commands have timeouts. Native CLI initialization may load configured
+plugins and consult provider services; this is not a guarantee of zero startup
+effects. OpenCode discovery does not prove that each listed model is authorized
+for inference, nor that another server has the same configuration.
 
 Copilot pricing `maxPromptTokens` (and its older `contextMax` spelling) are
 **prompt budgets**, not total context windows. Context-tier labels add the
@@ -84,29 +78,31 @@ limits or default effort. Those fields remain `null`; supported efforts and
 extended-context IDs such as `opus[1m]` are still preserved. An Anthropic API
 model list is deliberately not substituted for a Claude Code account list.
 
-Cursor was not installed on the machine preparing the initial snapshots.
-Its JSON therefore contains an explicit `unavailableReason`, no fabricated
-models, and a null timestamp; the model page explains the missing catalogue
-while still offering Auto. Install/authenticate the CLI, then run:
+The bundled OpenCode catalogue was discovered from the installed CLI, not
+invented from model-family names. It is a maintenance-machine snapshot, not
+proof of remote account availability. Auto uses the remote OpenCode configuration.
+An installation without a discovered catalogue can use an explicit
+`unavailableReason` and null timestamp rather than fabricated models.
+To refresh the snapshot after configuring OpenCode:
 
 ```sh
-CURSOR_AGENT_BIN=cursor-agent npm run models:refresh -- --provider cursor
+npm run models:refresh -- --provider opencode
 ```
 
-The Cursor text parser rejects unrecognized output rather than silently
-publishing a partial list. If the CLI changes its output format, update the
-parser and its fixture before refreshing. The initial grammar was verified
-against the official `2026.09.02-c22c1a3` distribution's `src/commands/models.ts`:
-it requires the complete header/footer, permits ID-only rows, handles
-current/default annotations, and rejects duplicates. `--output-format json` is not used:
-Cursor documents that option for inference output, not the `models` command.
+The OpenCode parser requires one `provider/model` selector per line and rejects
+duplicate IDs or unrecognized output rather than publishing a partial list.
+The format is verified against [OpenCode 1.18.29's models command](https://github.com/anomalyco/opencode/blob/v1.18.29/packages/opencode/src/cli/cmd/models.ts).
+It deliberately does not use `--verbose` or persist arbitrary provider metadata:
+custom endpoints, headers and options need not be bundled in the mobile app.
+IDs are kept intact, for example `openrouter/vendor/model`; no model-name
+suffix is converted into a generic reasoning flag. Numeric limits remain unknown.
 
 Upstream contracts:
 [Copilot SDK](https://github.com/github/copilot-sdk),
 [Codex app server](https://github.com/openai/codex/tree/main/codex-rs/app-server),
 [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/typescript),
-[Cursor CLI](https://cursor.com/docs/cli/reference/parameters), and
-[Cursor SDK model parameters](https://cursor.com/docs/sdk/typescript#model-parameters).
+[OpenCode CLI](https://opencode.ai/docs/cli/), and
+[OpenCode providers](https://opencode.ai/docs/providers/).
 
 ## Data contract
 
@@ -139,13 +135,14 @@ shipped snapshots with the same schema used at app startup.
 ## Launching versus changing a running agent
 
 All four providers support model selection at creation. Copilot, Codex, and
-Claude Code also accept their verified reasoning settings. Cursor's variants
-are selected by model ID rather than invented reasoning/context flags.
+Claude Code also accept their verified reasoning settings. OpenCode model selectors
+include the upstream provider namespace; no generic effort/context flags are invented.
 
 Live **Model Settings** remain Copilot-only. Its session log, model-switch,
 and resume behavior have a dedicated bridge adapter; merely adding a JSON
-catalogue must not send Copilot commands to another running CLI. Cursor
-conversation output uses the explicit raw-output compatibility view.
+catalogue must not send Copilot commands to another running CLI. OpenCode's
+native per-session model controls require the future API integration described
+in [OpenCode integration](opencode-integration.md).
 
 ## Adding a provider
 

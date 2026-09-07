@@ -44,7 +44,7 @@ class CompletionRevisionTest(unittest.TestCase):
             with self.subTest(revision=revision):
                 runtime = bridge._normalize_snapshot({
                     "panes": [{"pane_id": "p1"}],
-                    "agents": [{"pane_id": "p1", "agent": "cursor", "state_change_seq": revision}],
+                    "agents": [{"pane_id": "p1", "agent": "opencode", "state_change_seq": revision}],
                 })
                 self.assertNotIn("statusRevision", runtime["agents"][0])
 

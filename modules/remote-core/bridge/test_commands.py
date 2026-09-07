@@ -575,6 +575,18 @@ class DurableCommandsTest(unittest.TestCase):
         self.assertTrue(self.send(payload=payload)["ok"])
         self.assertEqual(self.bridge._herdr_request.call_count, 1)
 
+    def test_opencode_interrupt_uses_escape_and_retains_durable_receipt(self):
+        self.bridge.raw_agents["agent-1"].update(provider="opencode", providerSessionId="ses_native")
+        self.payload["precondition"].update(provider="opencode", providerSessionId="ses_native")
+        first = self.send(action="agent.interrupt")
+        self.assertTrue(first["ok"])
+        self.bridge._herdr_request.assert_called_once_with(
+            "agent.send_keys", {"target": "pane-1", "keys": ["escape"]},
+        )
+        self.assertEqual(self.status()["state"], "succeeded")
+        self.assertEqual(self.send(action="agent.interrupt"), first)
+        self.assertEqual(self.bridge._herdr_request.call_count, 1)
+
     def test_nullable_or_changed_expected_identity_is_not_replay_safe(self):
         for session_id, pane_id in ((None, "pane-1"), ("", "pane-1"), ("old", "pane-1"),
                                     ("session-1", "old"), ("session-1", None)):

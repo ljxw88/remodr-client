@@ -220,7 +220,10 @@ class Bridge:
             agent = self._require_agent(payload)
             self._herdr_mutation(
                 "agent.send_keys",
-                {"target": agent["paneId"], "keys": ["ctrl-c"]},
+                {
+                    "target": agent["paneId"],
+                    "keys": list(self.provider_adapter(agent["provider"]).spec.interrupt_keys),
+                },
             )
             return {"accepted": True}
         raise BridgeError("UNKNOWN_ACTION", f"Unsupported action: {action}")

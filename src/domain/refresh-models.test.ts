@@ -1,5 +1,5 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import copilot from './__fixtures__/copilot.json';
 
@@ -8,7 +8,8 @@ const { parseArgs, refresh, writeCatalogue } = require('../../scripts/refresh-mo
 describe('model refresh publication', () => {
   let directory: string;
   beforeEach(async () => {
-    directory = await mkdtemp(path.join(tmpdir(), 'remodr-models-'));
+    directory = path.join(process.cwd(), `.remodr-models-test-${randomUUID()}`);
+    await mkdir(directory);
     await writeFile(path.join(directory, 'copilot.json'), JSON.stringify(copilot));
   });
   afterEach(async () => {
@@ -16,9 +17,9 @@ describe('model refresh publication', () => {
   });
 
   it('selects all vendors by default and validates arguments', () => {
-    expect(parseArgs([]).providers).toEqual(['copilot', 'codex', 'claude', 'cursor']);
-    expect(parseArgs(['--provider', 'codex,cursor', '--provider', 'codex']).providers).toEqual(['codex', 'cursor']);
-    expect(() => parseArgs(['--provider', 'opencode'])).toThrow();
+    expect(parseArgs([]).providers).toEqual(['opencode', 'copilot', 'claude', 'codex']);
+    expect(parseArgs(['--provider', 'codex,opencode', '--provider', 'codex']).providers).toEqual(['codex', 'opencode']);
+    expect(() => parseArgs(['--provider', 'cursor'])).toThrow();
     expect(() => parseArgs(['--unknown'])).toThrow();
     expect(() => parseArgs(['--provider'])).toThrow();
     expect(() => parseArgs(['--check', '--dry-run'])).toThrow();
@@ -34,13 +35,13 @@ describe('model refresh publication', () => {
 
   it('leaves all snapshots untouched if any selected vendor fails', async () => {
     const before = await readFile(path.join(directory, 'copilot.json'), 'utf8');
-    await expect(refresh(parseArgs(['--provider', 'copilot,cursor']), {
+    await expect(refresh(parseArgs(['--provider', 'copilot,opencode']), {
       directory, log: jest.fn(),
       fetchProvider: async (provider: string) => {
-        if (provider === 'cursor') throw new Error('Cursor is not installed');
+        if (provider === 'opencode') throw new Error('OpenCode is not installed');
         return { ...copilot, updatedAt: '2026-09-05T12:00:00.000Z' };
       },
-    })).rejects.toThrow('Cursor is not installed');
+    })).rejects.toThrow('OpenCode is not installed');
     expect(await readFile(path.join(directory, 'copilot.json'), 'utf8')).toBe(before);
   });
 

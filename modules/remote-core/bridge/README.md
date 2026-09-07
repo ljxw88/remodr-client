@@ -22,7 +22,7 @@ resolution, and transcript parsing:
   TODOs, and Copilot-specific tuning.
 - `codex/`: thread/status-line identity, rollout parsing, and Codex configuration.
 - `claude/`: Claude Code launch settings and transcript handling.
-- `cursor/`: Cursor Agent launch settings and explicit terminal fallback.
+- `opencode/`: OpenCode launch settings, native session identity and read-only SQLite transcripts.
 
 Shared orchestration, protocol, transport, and durable storage stay outside
 provider packages. The provider registry is the integration point; adding a
@@ -47,7 +47,7 @@ and restrictions below remain unchanged.
 Copilot's `processes.py`, `sessions.py`, `transcript.py`, and `tuning.py` separate
 OS process inspection, identity resolution, transcript decoding, and live
 retuning. Codex separates `sessions.py` from `transcript.py`; Claude has its own
-transcript reader. Cursor explicitly inherits the raw-output fallback.
+transcript reader. OpenCode reads its exact reported session from SQLite.
 Runtime publication and Herdr I/O stay with the host. Session state belongs to
 `Bridge.sessions`, whose explicit registry methods replace mutable host
 dictionaries. Durable-command state remains in the ledger.
@@ -152,29 +152,44 @@ not silently bless changed bridge output.
 
 ## Providers and model settings
 
-The bridge supports **GitHub Copilot, Claude Code, Codex, and Cursor Agent**.
+The bridge supports **OpenCode, GitHub Copilot, Claude Code, and Codex**, in that
+preferred selection order.
 Availability comes only from Herdr's `server.agent_manifests`, never the bridge
 host's `PATH`. Herdr must advertise the provider and launch its interactive CLI.
-The mobile provider ID and Herdr launch kind for Cursor are `cursor`; detection
-also recognizes `cursor-agent` / `cursor_agent`. The generic executable name
-`agent` alone is not sufficient evidence of Cursor. OpenCode is not advertised
-or launchable; existing OpenCode panes become `unknown` and retain terminal
-fallback instead of breaking the mobile provider schema.
+The mobile provider ID and Herdr launch kind for OpenCode are `opencode`.
+Removed Cursor Agent panes become `unknown` and retain terminal fallback instead
+of being misidentified as OpenCode. The generic executable name `agent` alone
+does not identify a supported provider.
 
 `agent.create` accepts optional `model`, `effort`, and `context` fields:
 
 | Provider | Model | Effort | Context | Permission bypass |
 | --- | --- | --- | --- | --- |
+| OpenCode | `--model <provider/model>` | Unsupported | Unsupported | `--auto` |
 | Copilot | `--model <id>` | `--effort <value>` | `--context <value>` | `--allow-all-tools` |
 | Claude Code | `--model <id-or-alias>` | `--effort <value>` | Unsupported | `--dangerously-skip-permissions` |
 | Codex | `--model <id>` | `-c 'model_reasoning_effort="<value>"'` | Unsupported | `--dangerously-bypass-approvals-and-sandbox` |
-| Cursor Agent (`agent`) | `--model <id>` | Unsupported | Unsupported | `--force` |
 
 Codex's config assignment is a single argument containing a quoted TOML string;
 the table's surrounding single quotes are shell notation, not part of the
 argument. `bypassPermissions: false` omits the bypass flag for every provider;
-an absent setting retains the existing default of `true`. Cursor's `--force`
-allows commands unless explicitly denied; it does not disable its sandbox.
+an absent setting retains the existing default of `true`. OpenCode's `--auto`
+approves permissions unless explicitly denied. Omitting it leaves the user's
+OpenCode permission policy in effect; it does not force an ask-every-time policy.
+
+OpenCode creation uses a temporary password-protected loopback server to create
+an empty session in the known workspace cwd, then closes that server and launches
+the Herdr TUI with `--session <existing-id>`. The native Herdr session report is
+still required before durable sends. Bootstrap sends no inference prompt and
+does not rewrite user credentials or plugin configuration.
+
+OpenCode conversations read the exact session's supported SQLite rows through a
+read-only transaction, including WAL data. Missing identity keeps the explicit
+terminal fallback; invalid identifiers, missing exact sessions, unsupported
+schemas and active reverts do not silently select another session. No live API
+question/permission controls, streaming subscription or in-chat retuning is
+advertised. See [OpenCode integration](../../../docs/opencode-integration.md)
+for storage overrides, installation and account support.
 
 Omitted, null, or blank tuning values retain CLI defaults. Non-string values
 fail with `INVALID_MODEL`, `INVALID_EFFORT`, or `INVALID_CONTEXT`; populated
@@ -190,7 +205,7 @@ contract.
 Actual model availability and model-specific effort support depend on the
 installed CLI/account. The bridge passes nonempty model IDs through; the app's
 JSON catalogs decide which choices to offer. Only Copilot accepts `default`
-and `long_context` as a separate context setting. Claude/Cursor context or
+and `long_context` as a separate context setting. Claude/OpenCode context or
 thinking variants must be represented by the CLI's model ID, not invented flags.
 
 **Live retuning remains Copilot-only.** Both hello
@@ -201,14 +216,14 @@ every other provider with `PROVIDER_NOT_TUNABLE` before issuing CLI input.
 Copilot retains its existing `/model` and session-restart behavior; its
 `--session-id`, `/exit`, and session-log parsing never apply to other providers.
 Non-Copilot tuning reports only settings remembered from bridge-created agents;
-externally started sessions have unknown settings. Cursor conversations use
-terminal fallback, not an unverified structured-session adapter.
+externally started sessions may have unknown settings. OpenCode's semantic
+read adapter does not imply native HTTP model switching or question controls.
 
 Flag references:
 [Claude CLI](https://code.claude.com/docs/en/cli-reference),
 [Codex CLI](https://developers.openai.com/codex/cli/reference/) and
 [configuration](https://developers.openai.com/codex/config-reference/),
-[Cursor parameters](https://cursor.com/docs/cli/reference/parameters).
+[OpenCode CLI](https://opencode.ai/docs/cli/).
 
 ## Output activity for agent ordering
 

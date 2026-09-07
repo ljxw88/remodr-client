@@ -210,12 +210,12 @@ class SessionRotationTest(unittest.TestCase):
                 self.assertEqual(conversation["items"], [])
 
     def test_terminal_fallback_always_carries_explicit_session_identity(self):
-        for session in (None, "cursor-session"):
+        for session in (None, "ses_rotation"):
             with self.subTest(session=session):
-                self.snapshot = self.make_snapshot(session, "cursor")
+                self.snapshot = self.make_snapshot(session, "opencode")
                 conversation = self.poll()
                 self.assertEqual(conversation["agentId"], self.agent_id)
-                self.assertEqual(conversation["provider"], "cursor")
+                self.assertEqual(conversation["provider"], "opencode")
                 self.assertIn("providerSessionId", conversation)
                 self.assertEqual(conversation["providerSessionId"], session)
                 self.assertFalse(conversation["semantic"])

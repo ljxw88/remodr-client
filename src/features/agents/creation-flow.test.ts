@@ -94,6 +94,44 @@ function deferred<T>() {
 }
 
 describe('creation drafts', () => {
+  it('prefers available OpenCode regardless of manifest order and falls back in launch order', () => {
+    const owner = device();
+    owner.runtime.providers = [
+      { provider: 'codex', available: true, aliases: [] },
+      { provider: 'claude', available: true, aliases: [] },
+      { provider: 'copilot', available: true, aliases: [] },
+      { provider: 'opencode', available: true, aliases: [] },
+    ];
+    expect(newAgentDraft(owner).provider).toBe('opencode');
+    owner.runtime.providers[3].available = false;
+    expect(newAgentDraft(owner).provider).toBe('copilot');
+    owner.runtime.providers[2].available = false;
+    expect(newAgentDraft(owner).provider).toBe('claude');
+    owner.runtime.providers[1].available = false;
+    expect(newAgentDraft(owner).provider).toBe('codex');
+    owner.runtime.providers = [];
+    expect(newAgentDraft(owner).provider).toBe('opencode');
+  });
+
+  it('keeps an explicit available provider when switching to a device with OpenCode', () => {
+    const draft = agentDraftForProvider(newAgentDraft(device()), 'codex');
+    const other = device('device-b');
+    other.runtime.providers.push({ provider: 'opencode', available: true, aliases: [] });
+    expect(newAgentDraft(other).provider).toBe('opencode');
+    expect(agentDraftForDevice(draft, other).provider).toBe('codex');
+    other.runtime.providers.find((manifest) => manifest.provider === 'codex')!.available = false;
+    expect(agentDraftForDevice(draft, other).provider).toBe('opencode');
+  });
+
+  it('passes OpenCode provider/model identifiers without stale effort or context flags', () => {
+    expect(agentCreationInput({
+      ...newAgentDraft(device()), provider: 'opencode',
+      tuning: { model: 'configured-provider/account/model', effort: 'high', context: 'long_context' },
+    })).toMatchObject({
+      provider: 'opencode', model: 'configured-provider/account/model', effort: undefined, context: undefined,
+    });
+  });
+
   it('starts with the requested owning space, CLI defaults, optional name, and existing permission default', () => {
     expect(newAgentDraft(device(), 'space-2')).toEqual({
       kind: 'new-agent', deviceId: 'device-a', name: '', workspaceId: 'space-2', provider: 'copilot',
@@ -180,7 +218,7 @@ describe('creation drafts', () => {
     expect(agentCreationInput({ ...newAgentDraft(device()), name: '  Plan  ' }).name).toBe('Plan');
   });
 
-  it.each(['claude', 'codex', 'cursor'] as const)('sends explicit launch models for %s', (provider) => {
+  it.each(['claude', 'codex', 'opencode'] as const)('sends explicit launch models for %s', (provider) => {
     expect(agentCreationInput({
       ...newAgentDraft(device()), provider,
       tuning: { model: 'account-model', effort: null, context: null },

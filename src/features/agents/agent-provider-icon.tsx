@@ -21,7 +21,7 @@ export function providerBrandColor(provider: AgentProvider): string {
       return '#D97757';
     case 'codex':
       return '#10A37F';
-    case 'cursor':
+    case 'opencode':
       return '#737373';
     default:
       return '#94A3B8';
@@ -36,8 +36,8 @@ export function AgentProviderIcon({ provider, size = 22, tintColor }: Props) {
       return <ClaudeIcon size={size} color={tintColor} />;
     case 'codex':
       return <CodexIcon size={size} color={tintColor} />;
-    case 'cursor':
-      return <CursorIcon size={size} color={tintColor} />;
+    case 'opencode':
+      return <OpenCodeIcon size={size} color={tintColor} />;
     default:
       return <UnknownAgentIcon size={size} color={tintColor} />;
   }
@@ -83,11 +83,11 @@ function CodexIcon({ size, color }: IconProps) {
   );
 }
 
-function CursorIcon({ size, color }: IconProps) {
+function OpenCodeIcon({ size, color }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
-        d="M4 2 21 12l-8 2-4 8L4 2Zm3 5 3 10 2-5 5-1L7 7Z"
+        d="M3 4h18v16H3V4Zm2 2v12h14V6H5Zm2 3h2v6H7V9Zm4 4h6v2h-6v-2Z"
         fillRule="evenodd"
         fill={color}
       />
