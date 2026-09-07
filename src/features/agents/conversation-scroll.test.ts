@@ -25,6 +25,9 @@ jest.mock('expo-router', () => ({
   useFocusEffect: () => undefined,
   useIsFocused: () => true,
 }));
+jest.mock('react-native-safe-area-context', () => ({
+  useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+}));
 jest.mock('@/components/ui/screen', () => ({ Screen: ({ children }: { children: import('react').ReactNode }) => children }));
 jest.mock('@/components/ui/scroll-edge-frame', () => ({
   ScrollEdgeFrame: ({ children }: { children: (props: object) => import('react').ReactNode }) => children(mockEdge),

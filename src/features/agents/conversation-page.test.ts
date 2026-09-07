@@ -9,6 +9,7 @@ import { herdrRepository } from '@/services/herdr-repository';
 import { useConnectionSnapshot, useForeground, usePendingCommands } from '@/features/connection/use-connection';
 import { ConversationComposer } from './conversation-composer';
 import { ConversationMessageList } from './conversation-message-list';
+import { ConversationActivityPanel } from './conversation-activity-panel';
 import { HumanRequestBar } from './human-request-bar';
 import { useConversationController } from './use-conversation-controller';
 import { useAgentConversation, useHerdr } from './use-herdr';
@@ -50,6 +51,7 @@ jest.mock('./conversation-composer', () => ({
   ConversationComposer: ({ requestBar }: { requestBar?: import('react').ReactNode }) => requestBar,
 }));
 jest.mock('./conversation-message-list', () => ({ ConversationMessageList: () => null }));
+jest.mock('./conversation-activity-panel', () => ({ ConversationActivityPanel: () => null }));
 jest.mock('./human-request-bar', () => ({ HumanRequestBar: () => null }));
 jest.mock('@/features/connection/connection-status', () => ({ ConnectionStatus: () => null }));
 jest.mock('@/features/connection/use-connection', () => ({
@@ -135,6 +137,36 @@ describe('conversation page assembly', () => {
     await mount();
     expect(renderer!.root.findByType(ConversationMessageList).props.error).toBe('Read failed');
     expect(composer().props.error).toBeNull();
+  });
+
+  it('passes only messages to the inverted transcript and keys activity to route and provider session', async () => {
+    const items: AgentConversation['items'] = [
+      { id: 'user', kind: 'user_message', text: 'Help' },
+      { id: 'tool', kind: 'tool_activity', title: 'Read', state: 'running' },
+      { id: 'plan', kind: 'todo_update', todos: [{ text: 'Inspect', state: 'pending' }] },
+      { id: 'reply', kind: 'assistant_message', markdown: 'Checking' },
+    ];
+    jest.mocked(useAgentConversation).mockReturnValue({ ...currentConversation, items });
+    await mount();
+    expect(renderer!.root.findByType(ConversationMessageList).props.data.map((item: { id: string }) => item.id))
+      .toEqual(['reply', 'user']);
+    const panel = () => renderer!.root.findByType(ConversationActivityPanel);
+    expect(panel().props).toMatchObject({
+      items, active: true, keyboardInset: 80,
+      sessionKey: JSON.stringify(['a', 'copilot', 'pane-a', 'session-a']),
+    });
+    runtime.devices['device-a'].runtime.agents = [{ ...currentAgent, providerSessionId: 'session-b' }];
+    mockFocused = false;
+    await TestRenderer.act(async () => { renderer!.update(createElement(AgentConversationScreen)); });
+    expect(panel().props.sessionKey).toBe(JSON.stringify(['a', 'copilot', 'pane-a', 'session-b']));
+    expect(panel().props.active).toBe(false);
+    jest.mocked(useLocalSearchParams).mockReturnValue({ id: 'b' });
+    runtime.devices['device-a'].runtime.agents = [{ ...currentAgent, id: 'b' }];
+    mockFocused = true;
+    jest.mocked(useForeground).mockReturnValue(false);
+    await TestRenderer.act(async () => { renderer!.update(createElement(AgentConversationScreen)); });
+    expect(panel().props.sessionKey).toBe(JSON.stringify(['b', 'copilot', 'pane-a', 'session-a']));
+    expect(panel().props.active).toBe(false);
   });
 
   it.each([[true, true], [false, false], [undefined, true]] as const)(

@@ -111,10 +111,19 @@ renders as native views, and the latest received text appears immediately.
 Structured questions use `HumanRequestBar` above the composer; resolved
 questions remain in the transcript.
 
-The conversation route assembles `ConversationMessageList` and
-`ConversationComposer`, each with its own presentation styles. The list owns
-rows, tool/plan display, empty states and the inverted native list; it forwards
+The conversation route assembles `ConversationMessageList`,
+`ConversationActivityPanel`, and `ConversationComposer`, each with its own
+presentation styles. The list owns message rows, empty states and the inverted
+native list; tools and plan snapshots are filtered out before virtualization, not
+rendered as empty rows. It forwards
 measurements and gestures to the existing `useConversationScroll` controller.
+The collapsed “Plan & tools” control below the context header opens a bounded,
+top-anchored popup over the transcript, without moving the composer. It shows
+all available tools newest first and only the latest actual `todo_update`
+(an empty update clears the plan). Tool failures remain visible in the collapsed
+summary. Outside taps, the same control, and native back dismiss the popup;
+route/session changes, blur/background, and viewport changes reset it.
+The semantic conversation store is unchanged.
 The composer receives input/send/model callbacks and a question-bar slot, rather
 than importing repository operations. The route retains agent actions, durable
 send handling, and the shared enqueue guard used by typed and structured answers.

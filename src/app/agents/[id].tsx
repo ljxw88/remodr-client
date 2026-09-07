@@ -25,6 +25,7 @@ import { beginAgentSettingsFlow, beginRenameAgentFlow } from '@/features/agents/
 import { ActionMenu } from '@/components/ui/action-menu';
 import { ConversationComposer } from '@/features/agents/conversation-composer';
 import { ConversationMessageList } from '@/features/agents/conversation-message-list';
+import { ConversationActivityPanel } from '@/features/agents/conversation-activity-panel';
 import { HumanRequestBar } from '@/features/agents/human-request-bar';
 import { useAgentConversation, useHerdr } from '@/features/agents/use-herdr';
 import { useConversationController } from '@/features/agents/use-conversation-controller';
@@ -33,9 +34,9 @@ import { usePersistedDraft } from '@/features/agents/use-persisted-draft';
 import { ConnectionStatus } from '@/features/connection/connection-status';
 import { useConnectionSnapshot, useForeground, usePendingCommands } from '@/features/connection/use-connection';
 import {
-  groupToolActivity,
+  conversationTranscript,
   currentToolActivity,
-  type ConversationDisplayItem,
+  type TranscriptItem,
 } from '@/features/agents/conversation-display';
 import { useTheme } from '@/hooks/use-theme';
 import { useKeyboardOverlap } from '@/hooks/use-keyboard-overlap';
@@ -88,7 +89,7 @@ export default function AgentConversationScreen() {
   const navigating = useRef(false);
   const actionVisible = useRef(false);
   const mounted = useRef(false);
-  const listRef = useRef<FlatList<ConversationDisplayItem>>(null);
+  const listRef = useRef<FlatList<TranscriptItem>>(null);
   const scrollToLatest = useCallback((animated: boolean) => {
     listRef.current?.scrollToOffset({ offset: 0, animated });
   }, []);
@@ -167,7 +168,7 @@ export default function AgentConversationScreen() {
    * construction rather than by scrolling there once the rows have measured.
    */
   const displayItems = useMemo(
-    () => groupToolActivity(conversation?.items ?? []).reverse(),
+    () => conversationTranscript(conversation?.items ?? []).reverse(),
     [conversation?.items],
   );
   const activeTool = currentToolActivity(conversation?.items ?? [], agentStatus);
@@ -283,6 +284,12 @@ export default function AgentConversationScreen() {
             composer and reconnect overlay outside it. */}
         <View style={styles.flex}>
           <AgentHeader agent={agent} connected={ownerConnected} />
+          <ConversationActivityPanel
+            sessionKey={JSON.stringify([id, agent.provider, agent.paneId, agent.providerSessionId ?? null])}
+            items={conversation?.items ?? []}
+            active={focused && foreground}
+            keyboardInset={keyboardHeight}
+          />
           <ConversationMessageList
             conversationId={id}
             data={displayItems}

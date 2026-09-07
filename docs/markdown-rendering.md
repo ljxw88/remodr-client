@@ -26,7 +26,8 @@ received Markdown string
 | [`markdown-theme.ts`](../src/components/markdown/markdown-theme.ts) | Message typography, block spacing, syntax and diff colors |
 | [`conversation-refresh.ts`](../src/features/agents/conversation-refresh.ts) | Visible-chat polling cadence and shared in-flight gate |
 | [`use-conversation-controller.ts`](../src/features/agents/use-conversation-controller.ts) | Restore, refresh lifecycle, retry/error state and completion receipts |
-| [`conversation-message-list.tsx`](../src/features/agents/conversation-message-list.tsx) | Inverted transcript list, message/tool/plan rows and empty states |
+| [`conversation-message-list.tsx`](../src/features/agents/conversation-message-list.tsx) | Inverted transcript list, message rows and empty states; activity filtered before rendering |
+| [`conversation-activity-panel.tsx`](../src/features/agents/conversation-activity-panel.tsx) | Collapsed top control and bounded popup for the latest plan and tool history, outside the transcript |
 | [`conversation-composer.tsx`](../src/features/agents/conversation-composer.tsx) | Input, send/model controls, question-bar slot and measured overlay layout |
 
 The chat calls `MarkdownMessage` directly for assistant rows. There is no
