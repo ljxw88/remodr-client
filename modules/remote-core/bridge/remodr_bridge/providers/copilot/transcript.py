@@ -290,8 +290,6 @@ def load_todos(session_dir: Path) -> dict[str, Any] | None:
         connection.close()
         if not rows:
             return None
-        if all(row[2] == "done" for row in rows):
-            return None
         return {
             "id": "todos",
             "kind": "todo_update",
