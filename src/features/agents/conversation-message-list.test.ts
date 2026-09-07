@@ -86,7 +86,7 @@ describe('ConversationMessageList', () => {
   it('preserves inversion, row identity, tuning, ref, stable anchoring, and measured bottom space', () => {
     const data: ConversationDisplayItem[] = [{ id: 'm', kind: 'assistant_message', markdown: 'Hello' }];
     const listRef = createRef<FlatList<TranscriptItem>>();
-    render({ data, listRef });
+    render({ data, listRef, topInset: 52 });
     expect(list().props).toMatchObject({
       inverted: true, keyboardShouldPersistTaps: 'handled', keyboardDismissMode: 'on-drag',
       showsVerticalScrollIndicator: false, initialNumToRender: 20, maxToRenderPerBatch: 20, windowSize: 7,
@@ -98,6 +98,7 @@ describe('ConversationMessageList', () => {
     const instance = list().instance;
     expect(listRef.current).toBe(instance);
     expect(StyleSheet.flatten(list().props.ListHeaderComponent.props.style).height).toBe(180);
+    expect(StyleSheet.flatten(list().props.ListFooterComponent.props.style).height).toBe(52);
     expect(renderer!.root.findByType(ScrollEdgeFrame).props).toMatchObject({
       inverted: true, bottomHeight: Math.max(ScrollEdgeFade.bottomHeight, 180),
     });

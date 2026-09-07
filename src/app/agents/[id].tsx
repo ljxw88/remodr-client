@@ -35,6 +35,7 @@ import { ConnectionStatus } from '@/features/connection/connection-status';
 import { useConnectionSnapshot, useForeground, usePendingCommands } from '@/features/connection/use-connection';
 import {
   conversationTranscript,
+  conversationActivity,
   currentToolActivity,
   type TranscriptItem,
 } from '@/features/agents/conversation-display';
@@ -84,6 +85,7 @@ export default function AgentConversationScreen() {
   const [sendError, setSendError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [composerHeight, setComposerHeight] = useState(0);
+  const [activityHeight, setActivityHeight] = useState(0);
   const [closingAgent, setClosingAgent] = useState(false);
   const closingAgentRef = useRef(false);
   const navigating = useRef(false);
@@ -171,6 +173,10 @@ export default function AgentConversationScreen() {
     () => conversationTranscript(conversation?.items ?? []).reverse(),
     [conversation?.items],
   );
+  const hasActivity = useMemo(() => {
+    const { tools, todos } = conversationActivity(conversation?.items ?? []);
+    return tools.length > 0 || todos.length > 0;
+  }, [conversation?.items]);
   const activeTool = currentToolActivity(conversation?.items ?? [], agentStatus);
   const working = agentStatus === 'working';
   const workingLabel = activeTool?.title
@@ -284,12 +290,7 @@ export default function AgentConversationScreen() {
             composer and reconnect overlay outside it. */}
         <View style={styles.flex}>
           <AgentHeader agent={agent} connected={ownerConnected} />
-          <ConversationActivityPanel
-            sessionKey={JSON.stringify([id, agent.provider, agent.paneId, agent.providerSessionId ?? null])}
-            items={conversation?.items ?? []}
-            active={focused && foreground}
-            keyboardInset={keyboardHeight}
-          />
+          <View testID="conversation-stage" style={styles.flex}>
           <ConversationMessageList
             conversationId={id}
             data={displayItems}
@@ -300,9 +301,18 @@ export default function AgentConversationScreen() {
             error={conversationError}
             hasConversation={conversation != null}
             bottomInset={composerHeight + keyboardHeight}
+            topInset={hasActivity ? activityHeight : 0}
             onRetry={retryConversation}
             scroll={scroll}
           />
+          <ConversationActivityPanel
+            sessionKey={JSON.stringify([id, agent.provider, agent.paneId, agent.providerSessionId ?? null])}
+            items={conversation?.items ?? []}
+            active={focused && foreground}
+            keyboardInset={keyboardHeight}
+            onHeightChange={setActivityHeight}
+          />
+          </View>
         </View>
         <ConversationComposer
           value={draft}

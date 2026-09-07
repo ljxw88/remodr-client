@@ -117,12 +117,49 @@ presentation styles. The list owns message rows, empty states and the inverted
 native list; tools and plan snapshots are filtered out before virtualization, not
 rendered as empty rows. It forwards
 measurements and gestures to the existing `useConversationScroll` controller.
-The collapsed “Plan & tools” control below the context header opens a bounded,
-top-anchored popup over the transcript, without moving the composer. It shows
-all available tools newest first and only the latest actual `todo_update`
-(an empty update clears the plan). Tool failures remain visible in the collapsed
-summary. Outside taps, the same control, and native back dismiss the popup;
-route/session changes, blur/background, and viewport changes reset it.
+Below the context row, a thin horizontal section contains separate Plan and Tools
+glass chips. The section floats over the transcript as a sibling of its blur
+target: the conversation continues behind and between the controls rather than
+starting beneath a full-width header strip. The section and horizontal scroller
+have transparent backgrounds, with no added navigation divider or outer fill.
+Soft shadows belong only to the individual chip/panel silhouettes; shared chrome
+glass blurs the content beneath those surfaces. Expanded panels use
+The home Device/Space filters and activity controls share `ChipGeometry`: 38dp
+outer height, 12dp side padding and 4dp inline gaps. The activity heading subtracts
+its rim from that height so expanded and collapsed label baselines match.
+The panel retains 8dp bottom viewport spacing and compact corners. Both collapsed chips and expanded
+panels share the same top surface inset, and retain an inset
+collapse control. Selecting one replaces the chips with its bounded floating
+glass panel; it is not a navigation control or modal. A measured transcript
+footer inset (the top in an inverted list) keeps the oldest messages reachable
+below the overlay. Resets publish collapsed clearance before native layout, and
+removed activity clears it; old expanded measurements cannot survive a session
+or visibility change. The collapsed scroller shrink-wraps its chips, capped at
+the available width, so its transparent remainder does not intercept transcript
+touches. The panels use the shared `GlassSurface` material, with no
+nested plan card or opaque full-width bar.
+Each list is inverted with newest/bottom data first, so it opens at the bottom
+without a delayed scroll. Native anchoring follows new content near the bottom
+and preserves a reader inspecting older rows. Only the latest actual
+`todo_update` is shown; an empty update clears the plan. Tool failures have a
+quiet chip indicator and explicit row labels. Disclosure chevrons lead the label
+at the left in both states. Shared row geometry keeps the label vertically aligned
+across expansion; the expanded heading centers its title between equal-width
+leading/trailing groups that flex equally as counts or font sizes change.
+List rows align their status markers beneath the category icon; the right row
+padding includes the same disclosure-column inset to balance the visible edges.
+Running spinners and static markers share a 14dp footprint. Tool status belongs
+to the title row, leaving the description free to use the full text column.
+No additional gap below the heading enlarges its band. Caption
+typography remains 12sp/18sp line height, including plan steps and tool text.
+The heading/collapse control
+and native Back restore the chips; route/session changes, blur/background, and
+viewport changes reset the section. The composer remains independently anchored.
+The heading is a normal-flow Pressable, not an absolute touch/tint layer.
+The inverted list sits in its own clipped viewport directly below the heading,
+so scrolling rows cannot draw or receive touches through the heading. Opening
+at the bottom can leave an older row partially visible at the viewport's top;
+that row remains fully reachable by scrolling.
 The semantic conversation store is unchanged.
 The composer receives input/send/model callbacks and a question-bar slot, rather
 than importing repository operations. The route retains agent actions, durable

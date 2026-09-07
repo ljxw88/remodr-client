@@ -155,6 +155,11 @@ describe('conversation page assembly', () => {
       items, active: true, keyboardInset: 80,
       sessionKey: JSON.stringify(['a', 'copilot', 'pane-a', 'session-a']),
     });
+    const stage = renderer!.root.findByProps({ testID: 'conversation-stage' });
+    expect(stage.findAllByType(ConversationMessageList)).toHaveLength(1);
+    expect(stage.findAllByType(ConversationActivityPanel)).toHaveLength(1);
+    await TestRenderer.act(async () => panel().props.onHeightChange(52));
+    expect(renderer!.root.findByType(ConversationMessageList).props.topInset).toBe(52);
     runtime.devices['device-a'].runtime.agents = [{ ...currentAgent, providerSessionId: 'session-b' }];
     mockFocused = false;
     await TestRenderer.act(async () => { renderer!.update(createElement(AgentConversationScreen)); });

@@ -111,6 +111,12 @@ Use 10dp radii for tags, 18dp for controls, 24dp for elevated glass modules,
 and full pills for buttons, status chips, and circular controls. Interactive
 targets must be at least 44×44dp; primary controls should be 48dp tall.
 
+Device/Space filter capsules and chat activity disclosures share `ChipGeometry`:
+38dp visual height, 12dp horizontal content padding and 4dp inline gaps. Expanded
+activity headings keep the same label baseline, while the title centers between
+equal flexible side groups. Activity chips retain a 44dp outer touch target;
+the compact collapse target stays inside the heading and never covers list rows.
+
 ## Typography
 
 Use Inter 400, 500, and 600. Semibold establishes hierarchy without heavy,

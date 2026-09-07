@@ -17,7 +17,7 @@ import { FinishDot } from '@/components/ui/finish-dot';
 import { Screen } from '@/components/ui/screen';
 import { ScrollEdgeFrame } from '@/components/ui/scroll-edge-frame';
 import { ThemedText } from '@/components/themed-text';
-import { Radius, Spacing } from '@/constants/theme';
+import { ChipGeometry, Radius, Spacing } from '@/constants/theme';
 import { unreadCompletionCount, unreadCompletionsBySpace } from '@/domain/agent-completion';
 import { type AgentWorkspace } from '@/domain/herdr';
 import { connectAgentRuntime } from '@/features/agents/connect-runtime';
@@ -532,7 +532,7 @@ const styles = StyleSheet.create({
    * inside the pill instead of tracing its edge.
    */
   filterChip: {
-    minHeight: 38,
+    minHeight: ChipGeometry.minHeight,
     maxWidth: 190,
     justifyContent: 'center',
     borderRadius: Radius.pill,
@@ -541,8 +541,8 @@ const styles = StyleSheet.create({
   filterChipContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.half,
-    paddingHorizontal: Spacing.one + Spacing.half,
+    gap: ChipGeometry.gap,
+    paddingHorizontal: ChipGeometry.paddingHorizontal,
   },
   deviceDot: {
     width: 6,

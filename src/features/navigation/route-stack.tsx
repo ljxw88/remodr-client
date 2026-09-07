@@ -1,6 +1,6 @@
 import { Stack, useIsFocused } from 'expo-router';
 import { useLayoutEffect, useRef, type ComponentProps, type ReactNode } from 'react';
-import { Animated, StyleSheet, View } from 'react-native';
+import { Animated, Platform, StyleSheet, View } from 'react-native';
 
 import { AppBackground } from '@/components/ui/app-background';
 import { BlurBackdropProvider } from '@/components/ui/blur-backdrop';
@@ -16,9 +16,8 @@ type Props = {
    * floating over it.
    *
    * Off unless a screen actually has such chrome. A blur target costs a
-   * RenderNode pass, and it blanks its contents for the frame a dismissal
-   * takes — harmless while pushes are cuts, but not worth carrying on a stack
-   * with nothing to blur.
+   * RenderNode pass and needs coordinated native teardown so disposed targets
+   * cannot leave black chrome visible. Stacks without chrome need neither.
    */
   blurBackdrop?: boolean;
   /** Quieter backing for form workflows; ordinary routes retain the app gradient. */
@@ -49,13 +48,27 @@ type Props = {
  * having nothing it fails to cover.
  */
 export function RouteStack({ children, blurBackdrop = false, quiet = false }: Props) {
+  const root = useRef<View | null>(null);
+  useLayoutEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const view = root.current;
+    // Restore after effect replay or a change to the backdrop configuration.
+    view?.setNativeProps({ style: { opacity: 1 } });
+    return () => {
+      if (blurBackdrop) {
+        // Native screens can draw the departing tree after the blur target is
+        // disposed. Cut the whole stack before child cleanup, not each surface.
+        view?.setNativeProps({ style: { opacity: 0 } });
+      }
+    };
+  }, [blurBackdrop]);
   const screenOptions = useStackScreenOptions();
   const stack = (
     <Stack screenOptions={screenOptions} screenLayout={screenLayout}>{children}</Stack>
   );
 
   return (
-    <View style={styles.root}>
+    <View ref={root} collapsable={false} style={styles.root}>
       {quiet ? null : <AppBackground />}
       {blurBackdrop ? <BlurBackdropProvider>{stack}</BlurBackdropProvider> : stack}
     </View>

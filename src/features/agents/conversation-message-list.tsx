@@ -27,6 +27,7 @@ type Props = {
   error: string | null;
   hasConversation: boolean;
   bottomInset: number;
+  topInset?: number;
   onRetry: () => void;
   scroll: Pick<ReturnType<typeof useConversationScroll>,
     'schedule' | 'onScroll' | 'onScrollBeginDrag' | 'onScrollEndDrag' |
@@ -45,6 +46,7 @@ export function ConversationMessageList({
   error,
   hasConversation,
   bottomInset,
+  topInset = 0,
   onRetry,
   scroll,
 }: Props) {
@@ -90,6 +92,7 @@ export function ConversationMessageList({
           maintainVisibleContentPosition={HISTORY_ANCHOR}
           // Inverted, so this measured spacer sits below the newest message.
           ListHeaderComponent={<View style={{ height: bottomInset }} />}
+          ListFooterComponent={<View style={{ height: topInset }} />}
           ListEmptyComponent={
             <View style={styles.empty}>
               {error ? (

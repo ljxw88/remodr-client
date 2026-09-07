@@ -61,5 +61,9 @@ backdrop blur. See [ADR 016](016-page-first-navigation.md).
 - Measure a plain wrapper/child rather than putting layout measurement on the
   blur target.
 - Retest the whole transcript when changing stack animation: outgoing-target
-  blanking was observed with animated dismissal. Current stacks use
-  `animation: 'none'` and entrance motion inside the destination.
+  blanking also occurs with `animation: 'none'`. Android blur-backed
+  `RouteStack` roots become invisible in layout-effect teardown, before child
+  targets are disposed, so native dismissal cannot draw black orphaned chrome.
+  Setup restores visibility for effect replay. Ordinary renders, focus changes,
+  and other platforms do not retire the root. This relies on cut navigation;
+  entrance motion remains inside the destination.

@@ -1,201 +1,253 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, Modal, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { BackHandler, FlatList, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { menuPosition } from '@/components/ui/action-menu';
 import { AppIcon } from '@/components/ui/app-icon';
-import { Radius, Spacing } from '@/constants/theme';
+import { GlassSurface } from '@/components/ui/glass-surface';
+import { ChipGeometry, ControlHeight, Radius, Spacing } from '@/constants/theme';
 import type { ConversationItem } from '@/domain/herdr';
 import { useTheme } from '@/hooks/use-theme';
-import { PlanRow, ToolActivityRow } from './conversation-activity-rows';
+import { PlanStep, ToolActivityRow } from './conversation-activity-rows';
+import { ActivityLayout } from './conversation-activity-layout';
 import { conversationActivity, planProgress, type PlanItem, type ToolActivityItem } from './conversation-display';
-
-type Anchor = { x: number; y: number; width: number; height: number };
 
 type Props = {
   items: ConversationItem[];
   sessionKey: string;
   active: boolean;
   keyboardInset: number;
+  onHeightChange?: (height: number) => void;
 };
+type Section = 'plan' | 'tools';
+type Row = { id: string; kind: 'plan'; todo: PlanItem } | { id: string; kind: 'tool'; tool: ToolActivityItem };
 
-/** A top-anchored native popup leaves the transcript and composer geometry intact. */
-export function ConversationActivityPanel({ items, sessionKey, active, keyboardInset }: Props) {
+// Inversion opens at the newest/bottom content without a delayed scroll or flash.
+const BOTTOM_ANCHOR = { minIndexForVisible: 0, autoscrollToTopThreshold: 24 };
+const SURFACE_TOP_INSET = Spacing.half + 2;
+const COLLAPSED_HEIGHT = Math.max(ControlHeight.regular, SURFACE_TOP_INSET + ChipGeometry.minHeight);
+
+export function ConversationActivityPanel({ items, sessionKey, active, keyboardInset, onHeightChange }: Props) {
   const dimensions = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { tools, todos } = useMemo(() => conversationActivity(items), [items]);
   if (tools.length === 0 && todos.length === 0) return null;
-
   return (
-    <ActivityPopup
-      key={JSON.stringify([sessionKey, active, dimensions.width, dimensions.height, dimensions.fontScale, keyboardInset, insets.top, insets.bottom])}
+    <ActivitySection
+      key={JSON.stringify([sessionKey, active, dimensions.width, dimensions.height, keyboardInset])}
       tools={tools}
       todos={todos}
       active={active}
-      keyboardInset={keyboardInset}
-      dimensions={dimensions}
-      insets={insets}
+      onHeightChange={onHeightChange}
+      panelHeight={Math.max(0, Math.min(260,
+        (dimensions.height - insets.top - Math.max(insets.bottom, keyboardInset)) * 0.32))}
     />
   );
 }
 
-function ActivityPopup({ tools, todos, active, keyboardInset, dimensions, insets }: {
+function ActivitySection({ tools, todos, active, panelHeight, onHeightChange }: {
   tools: ToolActivityItem[];
   todos: PlanItem[];
   active: boolean;
-  keyboardInset: number;
-  dimensions: ReturnType<typeof useWindowDimensions>;
-  insets: ReturnType<typeof useSafeAreaInsets>;
+  panelHeight: number;
+  onHeightChange?: (height: number) => void;
 }) {
   const theme = useTheme();
-  const trigger = useRef<View | null>(null);
-  const generation = useRef(0);
-  const [anchor, setAnchor] = useState<Anchor | null>(null);
+  const [selected, setSelected] = useState<Section | null>(null);
+  const visible = active && (selected === 'plan' ? todos.length > 0 : selected === 'tools' && tools.length > 0)
+    ? selected : null;
+  if (selected && !visible) setSelected(null);
   const { done, total } = planProgress(todos);
   const failed = tools.filter((tool) => tool.state === 'failed').length;
-  const running = tools.filter((tool) => tool.state === 'running').length;
-  const pending = tools.filter((tool) => tool.state === 'pending').length;
-  const open = anchor != null && active;
-  const invalidateMeasurement = useCallback(() => {
-    generation.current++;
-  }, []);
-  function close() {
-    invalidateMeasurement();
-    setAnchor(null);
-  }
+  const running = tools.some((tool) => tool.state === 'running' || tool.state === 'pending');
+  const rows = useMemo<Row[]>(() => visible === 'plan'
+    ? todos.map((todo, index) => ({ id: todo.id ?? `${index}:${todo.text}`, kind: 'plan' as const, todo })).reverse()
+    : tools.map((tool) => ({ id: tool.id, kind: 'tool' as const, tool })), [visible, todos, tools]);
 
-  // The keyed popup resets on session/visibility/viewport changes. Late native
-  // measurements from an unmounted popup must not restore its open state.
-  useLayoutEffect(() => invalidateMeasurement, [invalidateMeasurement]);
+  useLayoutEffect(() => {
+    // Retire the previous panel's clearance before a reset can paint it behind
+    // collapsed chips. Native layout still supplies font-scaled measurements.
+    onHeightChange?.((visible ? panelHeight + SURFACE_TOP_INSET : COLLAPSED_HEIGHT) + Spacing.one);
+    return () => onHeightChange?.(0);
+  }, [onHeightChange, panelHeight, visible]);
 
-  const summary = [
-    tools.length > 0 ? `${tools.length} tool ${tools.length === 1 ? 'call' : 'calls'}` : null,
-    failed > 0 ? `${failed} failed` : null,
-    running > 0 ? `${running} running` : null,
-    pending > 0 ? `${pending} pending` : null,
-    total > 0 ? `Plan ${done} of ${total}` : null,
-  ].filter(Boolean).join(' · ');
-  const width = Math.max(0, Math.min(anchor?.width ?? dimensions.width, dimensions.width - Spacing.four));
-  const position = anchor ? menuPosition(anchor, { width, height: 0 }, {
-    ...dimensions, top: insets.top, bottom: Math.max(insets.bottom, keyboardInset),
-  }) : { left: 0, top: 0 };
-  const maxHeight = Math.max(0, Math.min(
-    (dimensions.height - insets.top - Math.max(insets.bottom, keyboardInset)) * 0.4,
-    dimensions.height - Math.max(insets.bottom, keyboardInset) - position.top - Spacing.two,
-  ));
-
-  function show() {
-    if (!active) return;
-    const token = ++generation.current;
-    trigger.current?.measureInWindow((x, y, measuredWidth, measuredHeight) => {
-      if (token !== generation.current || measuredWidth <= 0 || measuredHeight <= 0) return;
-      setAnchor({ x, y, width: measuredWidth, height: measuredHeight });
+  useEffect(() => {
+    if (!visible) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setSelected(null);
+      return true;
     });
+    return () => subscription.remove();
+  }, [visible]);
+
+  function labelRow(section: Section, label: string, detail: string, expanded = false) {
+    const chevron = (
+      <AppIcon
+        name={expanded
+          ? { ios: 'chevron.up', android: 'expand_less', web: 'expand_less' }
+          : { ios: 'chevron.down', android: 'expand_more', web: 'expand_more' }}
+        size={ActivityLayout.iconSize} tintColor={theme.textMuted} fallback={expanded ? '⌃' : '⌄'}
+      />
+    );
+    const icon = (
+      <AppIcon
+        name={section === 'plan'
+          ? { ios: 'checklist', android: 'checklist', web: 'checklist' }
+          : { ios: 'wrench', android: 'build', web: 'build' }}
+        size={ActivityLayout.iconSize}
+        tintColor={section === 'tools' && running ? theme.accent : theme.textSecondary}
+        fallback={section === 'plan' ? '✓' : '·'}
+      />
+    );
+    const failure = section === 'tools' && failed > 0
+      ? <View testID="activity-failure-dot" style={[styles.dot, { backgroundColor: theme.danger }]} />
+      : null;
+    if (expanded) {
+      return (
+        <View testID={`activity-${section}-heading`} style={styles.labelRow}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants">
+          <View testID="activity-heading-leading" style={styles.headingSide}>{chevron}{icon}</View>
+          <ThemedText testID="activity-label" type="caption" style={styles.centeredTitle} numberOfLines={1}>
+            {label}
+          </ThemedText>
+          <View testID="activity-heading-trailing" style={[styles.headingSide, styles.headingTrailing]}>
+            <ThemedText type="caption" themeColor="textMuted" style={styles.detail} numberOfLines={1}>{detail}</ThemedText>
+            {failure}
+          </View>
+        </View>
+      );
+    }
+    return (
+      <View testID={`activity-${section}-content`} style={[styles.labelRow, styles.chipContent]}>
+        {chevron}
+        {icon}
+        <ThemedText testID="activity-label" type="caption">{label}</ThemedText>
+        <ThemedText type="caption" themeColor="textMuted" style={styles.detail}>{detail}</ThemedText>
+        {failure}
+      </View>
+    );
   }
 
-  function toggle(expanded: boolean) {
+  function chip(section: Section, label: string, detail: string) {
     return (
       <Pressable
-        ref={expanded ? undefined : trigger}
-        testID={expanded ? 'activity-close' : 'activity-trigger'}
+        testID={`activity-${section}-chip`}
         accessibilityRole="button"
-        accessibilityLabel={`Plan & tools. ${summary}. ${open ? 'Collapse' : 'Expand'} activity`}
-        accessibilityState={{ expanded: open }}
-        onPress={open ? close : show}
-        onLayout={expanded ? undefined : close}
-        style={({ pressed }) => [
-          styles.trigger, { backgroundColor: theme.background, borderColor: theme.glassBorder },
-          pressed && styles.pressed,
-        ]}>
-        <View style={styles.copy}>
-          <ThemedText type="smallBold">Plan &amp; tools</ThemedText>
-          <ThemedText type="caption" numberOfLines={2} style={{ color: failed ? theme.danger : theme.textMuted }}>
-            {summary}
-          </ThemedText>
+        accessibilityLabel={`Show ${label.toLowerCase()}`}
+        accessibilityHint={section === 'plan' ? `${done} of ${total} steps complete` :
+          `${tools.length} tool calls${failed ? `, ${failed} failed` : ''}. Opens at latest activity.`}
+        accessibilityState={{ expanded: false, disabled: !active }}
+        disabled={!active}
+        onPress={() => setSelected(section)}
+        style={({ pressed }) => [styles.chipTarget, { opacity: pressed ? 0.72 : active ? 1 : 0.5 }]}>
+        <View testID={`activity-${section}-shadow`} style={styles.chipShadow}>
+          <GlassSurface tone="chrome" style={styles.chip}>
+            {labelRow(section, label, detail)}
+          </GlassSurface>
         </View>
-        <AppIcon
-          name={{
-            ios: open ? 'chevron.up' : 'chevron.down',
-            android: open ? 'expand_less' : 'expand_more',
-            web: open ? 'expand_less' : 'expand_more',
-          }}
-          size={16}
-          tintColor={theme.textMuted}
-          fallback={open ? '⌃' : '⌄'}
-        />
       </Pressable>
     );
   }
 
   return (
-    <View style={styles.container}>
-      {toggle(false)}
-      {open ? (
-        <Modal transparent animationType="none" statusBarTranslucent onRequestClose={close}>
-          <View style={styles.overlay}>
+    <View testID="activity-section" pointerEvents="box-none" style={styles.section}
+      onLayout={(event) => onHeightChange?.(event.nativeEvent.layout.height + Spacing.one)}>
+      {visible ? (
+        <View testID="activity-panel-shadow" style={styles.panelShadow}>
+        <GlassSurface
+          testID="activity-panel"
+          tone="chrome"
+          strength="strong"
+          style={[styles.panel, { height: panelHeight }]}
+          accessible={false}
+          onAccessibilityEscape={() => setSelected(null)}>
+          <View testID="activity-heading">
             <Pressable
-              testID="activity-backdrop"
-              style={StyleSheet.absoluteFill}
-              onPress={close}
-              accessible={false}
-              importantForAccessibility="no"
-            />
-            <View
-              style={StyleSheet.absoluteFill}
-              pointerEvents="box-none"
-              accessibilityViewIsModal
-              accessibilityLabel="Plan & tools"
-              onAccessibilityEscape={close}>
-              {/* The modal intercepts touches, so repeat the same trigger at its
-                  measured position to keep tap-to-collapse available. */}
-              <View style={{ position: 'absolute', left: anchor.x, top: anchor.y, width: anchor.width }}>
-                {toggle(true)}
-              </View>
-              <View
-                testID="activity-popup"
-                style={[styles.popup, position, { width, maxHeight, backgroundColor: theme.background, borderColor: theme.glassBorder }]}>
-                <FlatList
-                  testID="activity-list"
-                  data={tools}
-                  keyExtractor={(item) => item.id}
-                  renderItem={({ item }) => <ToolActivityRow item={item} />}
-                  ListHeaderComponent={
-                    <View style={styles.sections}>
-                      {total > 0 ? <PlanRow todos={todos} /> : null}
-                      {tools.length > 0 ? <ThemedText type="smallBold">Tools · newest first</ThemedText> : null}
-                    </View>
-                  }
-                  style={styles.list}
-                  contentContainerStyle={styles.content}
-                  keyboardShouldPersistTaps="handled"
-                  nestedScrollEnabled
-                  initialNumToRender={12}
-                />
-              </View>
-            </View>
+              testID="activity-collapse"
+              accessibilityRole="button"
+              accessibilityLabel={`Collapse ${visible === 'plan' ? 'plan' : 'tool use'}`}
+              accessibilityHint={visible === 'plan' ? `${done} of ${total} steps complete` : `${tools.length} tool calls`}
+              accessibilityState={{ expanded: true }}
+              onPress={() => setSelected(null)}
+              style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}>
+              {labelRow(visible, visible === 'plan' ? 'Plan' : 'Tools',
+                visible === 'plan' ? `${done}/${total}` : String(tools.length), true)}
+            </Pressable>
           </View>
-        </Modal>
-      ) : null}
+          <View testID="activity-viewport" style={styles.viewport}>
+          <FlatList<Row>
+            key={visible}
+            testID="activity-content"
+            inverted
+            data={rows}
+            keyExtractor={(row) => row.id}
+            renderItem={({ item }) => item.kind === 'plan'
+              ? <PlanStep todo={item.todo} />
+              : <ToolActivityRow item={item.tool} />}
+            maintainVisibleContentPosition={BOTTOM_ANCHOR}
+            initialNumToRender={12}
+            windowSize={5}
+            nestedScrollEnabled
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            style={styles.list}
+            contentContainerStyle={[styles.content, visible === 'tools' && styles.toolSpacing]}
+          />
+          </View>
+        </GlassSurface>
+        </View>
+      ) : (
+        <ScrollView
+          testID="activity-strip"
+          horizontal
+          style={styles.strip}
+          removeClippedSubviews={false}
+          showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.chips}>
+          {todos.length > 0 ? chip('plan', 'Plan', `${done}/${total}`) : null}
+          {tools.length > 0 ? chip('tools', 'Tools', String(tools.length)) : null}
+        </ScrollView>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { marginHorizontal: Spacing.two, marginVertical: Spacing.half },
-  trigger: {
-    minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: Spacing.one,
-    paddingHorizontal: Spacing.one + Spacing.half, paddingVertical: Spacing.one,
-    borderRadius: Radius.control, borderWidth: StyleSheet.hairlineWidth,
+  section: {
+    position: 'absolute',
+    top: Spacing.half,
+    left: Spacing.two,
+    right: Spacing.two,
+    backgroundColor: 'transparent',
   },
-  copy: { flex: 1, gap: 2 },
-  overlay: { flex: 1 },
-  popup: {
-    position: 'absolute', borderRadius: Radius.control, borderWidth: 1,
-    overflow: 'hidden', boxShadow: '0 8px 24px rgba(0, 0, 0, 0.2)',
+  strip: { alignSelf: 'flex-start', maxWidth: '100%', backgroundColor: 'transparent', overflow: 'visible' },
+  chips: { alignItems: 'center', gap: Spacing.one },
+  chipTarget: { minHeight: COLLAPSED_HEIGHT, paddingTop: SURFACE_TOP_INSET, justifyContent: 'flex-start' },
+  chip: {
+    minHeight: ChipGeometry.minHeight,
+    borderRadius: Radius.pill, borderWidth: ActivityLayout.borderWidth, padding: 0,
   },
-  list: { flexGrow: 0 },
-  content: { padding: Spacing.one },
-  sections: { gap: Spacing.one, marginBottom: Spacing.half },
-  pressed: { opacity: 0.6 },
+  labelRow: {
+    minHeight: ActivityLayout.headingMinHeight, paddingHorizontal: ChipGeometry.paddingHorizontal,
+    flexDirection: 'row', alignItems: 'center',
+  },
+  chipContent: { gap: ChipGeometry.gap },
+  chipShadow: { borderRadius: Radius.pill, boxShadow: '0 3px 10px rgba(0, 0, 0, 0.18)' },
+  panelShadow: {
+    marginTop: SURFACE_TOP_INSET,
+    borderRadius: Radius.control,
+    boxShadow: '0 5px 16px rgba(0, 0, 0, 0.18)',
+  },
+  dot: { width: 5, height: 5, borderRadius: 3 },
+  panel: { borderRadius: Radius.control, borderWidth: ActivityLayout.borderWidth, padding: 0 },
+  headingSide: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: ChipGeometry.gap },
+  headingTrailing: { justifyContent: 'flex-end' },
+  centeredTitle: { flexShrink: 1, marginHorizontal: ChipGeometry.gap, textAlign: 'center' },
+  detail: { flexShrink: 1, fontVariant: ['tabular-nums'] },
+  viewport: { flex: 1, marginBottom: Spacing.one, overflow: 'hidden' },
+  list: { flex: 1 },
+  content: { paddingHorizontal: ChipGeometry.paddingHorizontal, paddingVertical: 0, gap: Spacing.half },
+  toolSpacing: { gap: Spacing.one },
 });
