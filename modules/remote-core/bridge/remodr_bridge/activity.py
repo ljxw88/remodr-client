@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from .errors import BridgeError
@@ -16,6 +17,7 @@ class OutputActivity:
     def __init__(self, host: Bridge) -> None:
         self.host = host
         self.entries: dict[str, tuple[tuple[Any, ...], str | None, int | None]] = {}
+        self.sources: dict[str, tuple[tuple[Any, ...], Path]] = {}
         self.errors: dict[str, str] = {}
 
     @staticmethod
@@ -32,8 +34,16 @@ class OutputActivity:
         previous = self.entries.get(key)
         if previous and previous[0] != binding:
             previous = None
+        source = self.sources.get(key)
+        if source and source[0] != binding:
+            source = None
         try:
-            path = adapter.output_path(agent)
+            if source:
+                path = source[1]
+            else:
+                path = adapter.output_path(agent)
+                if path is not None:
+                    self.sources[key] = (binding, path)
             if path is not None:
                 timestamp = path.stat().st_mtime_ns // 1_000_000
                 signature = None
@@ -64,6 +74,7 @@ class OutputActivity:
 
     def invalidate(self, agent_id: str) -> None:
         self.entries.pop(agent_id, None)
+        self.sources.pop(agent_id, None)
         self.errors.pop(agent_id, None)
 
     def prune(self, agent_ids: set[str]) -> None:

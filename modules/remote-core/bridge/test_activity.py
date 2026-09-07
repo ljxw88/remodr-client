@@ -30,6 +30,17 @@ class OutputActivityTest(unittest.TestCase):
             self.host._herdr_request.assert_not_called()
             self.adapter.load_conversation.assert_not_called()
 
+    def test_transcript_source_is_resolved_once_per_binding(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.jsonl"
+            path.write_text("output")
+            self.adapter.output_path.return_value = path
+
+            self.activity.observe(self.agent, "t1", self.adapter)
+            self.activity.observe(self.agent, "t1", self.adapter)
+
+            self.adapter.output_path.assert_called_once_with(self.agent)
+
     def test_raw_output_uses_a_baseline_then_changes_not_status_or_title(self):
         self.assertIsNone(self.activity.observe(self.agent, "t1", self.adapter))
         changed_metadata = {**self.agent, "status": "done", "title": "Renamed"}
