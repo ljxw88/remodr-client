@@ -299,7 +299,26 @@ chromatic orb.
   returns to the bottom; scrolling back near the bottom also resumes following.
   Opening the keyboard alone must not interrupt history reading.
 - Group every tool call within a user turn into one thin, expandable line:
-  `Worked for 20m (6 tool calls)`.
+  `Worked for 20m (6 tool calls)`. Read the present tense while the agent is
+  still inside them — `Working (6 tool calls)` — so what it is doing now and
+  what it has already done are never the same sentence.
+- Say on that folded line how many of those calls failed, in the danger
+  colour. A failure that needs opening to be seen is a failure the reader is
+  entitled to assume did not happen.
+- One layer of disclosure, not two. Opening the group lists each call with its
+  detail already beside it; a call is not itself something you can open. Past
+  two layers nobody knows where they are.
+- Dim finished calls rather than colouring them. A column of green ticks says
+  nothing a reader did not assume, and leaves nothing for the one failure among
+  them to stand out against.
+- The plan is state, not an event. Keep only the newest `todo_update` of a
+  turn: the agent rewrites its plan as it works, and every earlier copy is
+  wrong. Introduce it with how much of it is done — `Plan · 4 of 7`.
+- Draw every plan state differently — done, in progress, blocked, and pending.
+  Where the agent is now and what is stuck are the two things a reader wants
+  from a plan, so they are the two that must not look like everything else.
+  Finished steps are dimmed rather than hidden, so what is left carries the
+  weight without losing the record of where the work has been.
 - Show a persistent named activity indicator above the composer while the
   agent is sending, working, or running a tool.
 - Keep the rounded composer fixed above navigation with functional blur and

@@ -2,6 +2,7 @@ import type { ConversationItem } from '@/domain/herdr';
 import {
   groupToolActivity,
   currentToolActivity,
+  planProgress,
   toolActivitySummary,
 } from '@/features/agents/conversation-display';
 
@@ -69,7 +70,7 @@ describe('conversation display', () => {
     const group = grouped[0];
     expect(group.kind).toBe('tool_group');
     if (group.kind === 'tool_group') {
-      expect(toolActivitySummary(group)).toBe('Worked for 20m (2 tool calls)');
+      expect(toolActivitySummary(group).label).toBe('Worked for 20m (2 tool calls)');
     }
   });
 
@@ -79,7 +80,60 @@ describe('conversation display', () => {
     ]);
     const group = grouped[0];
     if (group.kind === 'tool_group') {
-      expect(toolActivitySummary(group)).toBe('Worked (1 tool call)');
+      expect(toolActivitySummary(group).label).toBe('Worked (1 tool call)');
     }
+  });
+  it('says a group is still working rather than claiming a duration for it', () => {
+    const grouped = groupToolActivity([
+      { id: 't1', kind: 'tool_activity', title: 'Reading', state: 'completed',
+        timestamp: '2026-09-02T12:00:00Z' },
+      { id: 't2', kind: 'tool_activity', title: 'Testing', state: 'running',
+        timestamp: '2026-09-02T12:20:00Z' },
+    ]);
+    const group = grouped[0];
+    if (group.kind !== 'tool_group') throw new Error('expected a group');
+    expect(toolActivitySummary(group)).toEqual({
+      label: 'Working (2 tool calls)', failed: 0, running: true,
+    });
+  });
+
+  it('counts failures, so a folded group cannot hide one', () => {
+    const grouped = groupToolActivity([
+      { id: 't1', kind: 'tool_activity', title: 'Reading', state: 'completed',
+        timestamp: '2026-09-02T12:00:00Z' },
+      { id: 't2', kind: 'tool_activity', title: 'Testing', state: 'failed',
+        timestamp: '2026-09-02T12:20:00Z' },
+      { id: 't3', kind: 'tool_activity', title: 'Building', state: 'failed',
+        timestamp: '2026-09-02T12:20:00Z' },
+    ]);
+    const group = grouped[0];
+    if (group.kind !== 'tool_group') throw new Error('expected a group');
+    expect(toolActivitySummary(group)).toMatchObject({ failed: 2, running: false });
+  });
+
+  it('keeps only the last plan of a turn, and one per turn', () => {
+    const plan = (id: string, text: string): ConversationItem => ({
+      id, kind: 'todo_update', todos: [{ text, state: 'pending' }],
+    });
+    const display = groupToolActivity([
+      { id: 'u1', kind: 'user_message', text: 'go' },
+      plan('p1', 'first draft'),
+      plan('p2', 'second draft'),
+      plan('p3', 'settled'),
+      { id: 'u2', kind: 'user_message', text: 'again' },
+      plan('p4', 'next turn'),
+    ]);
+    expect(display.filter((item) => item.kind === 'todo_update').map((item) => item.id))
+      .toEqual(['p3', 'p4']);
+  });
+
+  it('counts a plan\'s finished steps for the line that introduces it', () => {
+    expect(planProgress([
+      { text: 'a', state: 'done' },
+      { text: 'b', state: 'in_progress' },
+      { text: 'c', state: 'blocked' },
+      { text: 'd', state: 'pending' },
+    ])).toEqual({ done: 1, total: 4 });
+    expect(planProgress([])).toEqual({ done: 0, total: 0 });
   });
 });
