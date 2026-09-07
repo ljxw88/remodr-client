@@ -184,6 +184,20 @@ describe('HerdrRepository completion notifications', () => {
     expect(repository.getCompletion('agent-1')?.unread).toBe(false);
   });
 
+  it('does not persist activity-only runtime refreshes', async () => {
+    const { repository, transport } = await setup();
+    jest.mocked(AsyncStorage.setItem).mockClear();
+    transport.request.mockResolvedValueOnce({
+      ...completed(),
+      runtimeRevision: 11,
+      agents: [{ ...completed().agents[0], lastOutputAt: 123 }],
+    });
+
+    await repository.refreshRuntime(undefined, true);
+
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  });
+
   it('persists acknowledgement across duplicate snapshots, reconnects and application restart', async () => {
     const { repository } = await setup();
     const id = repository.getCompletion('agent-1')!.id;

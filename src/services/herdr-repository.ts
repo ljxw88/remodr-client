@@ -88,6 +88,14 @@ function emptyDeviceState(deviceId: string): DeviceRuntimeState {
   };
 }
 
+function durableRuntime(runtime: HerdrRuntimeState): Omit<HerdrRuntimeState, 'runtimeRevision'> {
+  const { runtimeRevision: _runtimeRevision, agents, ...rest } = runtime;
+  return {
+    ...rest,
+    agents: agents.map(({ lastOutputAt: _lastOutputAt, ...agent }) => agent),
+  };
+}
+
 export class HerdrRepository {
   private devices = new Map<string, DeviceConnection>();
   private selectedDeviceId: string | null = null;
@@ -451,7 +459,7 @@ export class HerdrRepository {
       await device.transport.request('runtime.snapshot', includeActivity ? { includeActivity: true } : {}),
     );
     if (generation !== device.generation) throw new ConnectionError('ERR_BRIDGE_CLOSED', 'Stale runtime response.');
-    await this.installRuntime(deviceId, runtime, !includeActivity);
+    await this.installRuntime(deviceId, runtime);
   }
 
   private async requestForAgent<T>(
@@ -956,13 +964,13 @@ export class HerdrRepository {
   private async installRuntime(
     fallbackDeviceId: string,
     runtime: HerdrRuntimeState,
-    persist = true,
   ): Promise<void> {
     if (runtime.deviceId && runtime.deviceId !== fallbackDeviceId) {
       throw new ConnectionError('INVALID_RESPONSE', 'Runtime belongs to a different device.');
     }
     const deviceId = fallbackDeviceId;
     const device = this.deviceConnection(deviceId);
+    const previousRuntime = device.state.runtime;
     if (device.runtimeGeneration === device.generation
       && runtime.runtimeRevision != null && device.state.runtime.runtimeRevision != null
       && runtime.runtimeRevision < device.state.runtime.runtimeRevision) {
@@ -1009,7 +1017,9 @@ export class HerdrRepository {
     if (invalidated.size) this.publishConversations();
     this.publish();
     await Promise.all(removals);
-    if (persist) await this.persistRuntimes();
+    if (JSON.stringify(durableRuntime(previousRuntime)) !== JSON.stringify(durableRuntime(runtime))) {
+      await this.persistRuntimes();
+    }
   }
 
   private reindexAgents() {
