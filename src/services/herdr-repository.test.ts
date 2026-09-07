@@ -387,6 +387,13 @@ describe('HerdrRepository multi-device runtime', () => {
         expect(transport.request).toHaveBeenCalledWith('runtime.snapshot', { includeActivity: true });
       });
 
+      it('does not persist activity polling snapshots', async () => {
+        const { repository } = await setup();
+        jest.mocked(AsyncStorage.setItem).mockClear();
+        await repository.refreshRuntime(deviceId, true);
+        expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+      });
+
       it('retains observed output recency across same-session snapshots but not session replacement', async () => {
         const { repository, transport, rotate } = await setup();
         const current = sessionRuntime('old-session');

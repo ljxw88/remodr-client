@@ -451,7 +451,7 @@ export class HerdrRepository {
       await device.transport.request('runtime.snapshot', includeActivity ? { includeActivity: true } : {}),
     );
     if (generation !== device.generation) throw new ConnectionError('ERR_BRIDGE_CLOSED', 'Stale runtime response.');
-    await this.installRuntime(deviceId, runtime);
+    await this.installRuntime(deviceId, runtime, !includeActivity);
   }
 
   private async requestForAgent<T>(
@@ -956,6 +956,7 @@ export class HerdrRepository {
   private async installRuntime(
     fallbackDeviceId: string,
     runtime: HerdrRuntimeState,
+    persist = true,
   ): Promise<void> {
     if (runtime.deviceId && runtime.deviceId !== fallbackDeviceId) {
       throw new ConnectionError('INVALID_RESPONSE', 'Runtime belongs to a different device.');
@@ -1008,7 +1009,7 @@ export class HerdrRepository {
     if (invalidated.size) this.publishConversations();
     this.publish();
     await Promise.all(removals);
-    await this.persistRuntimes();
+    if (persist) await this.persistRuntimes();
   }
 
   private reindexAgents() {
