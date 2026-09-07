@@ -1,5 +1,4 @@
 const { execFile } = require('node:child_process');
-const { Buffer } = require('node:buffer');
 const { promisify, stripVTControlCharacters } = require('node:util');
 const { tmpdir } = require('node:os');
 const { z } = require('zod');
@@ -11,8 +10,6 @@ const nonempty = z.string().min(1);
 const positive = (value) => Number.isInteger(value) && value > 0 ? value : null;
 const modelsArray = (schema) => z.array(schema).min(1);
 const CODEX_NOTES = 'Native model/list may use the CLI cache or bundled fallback; discovery is not proof of a fresh network response or account entitlement.';
-// Renderer verified in Cursor CLI 2026.09.02-c22c1a3, src/commands/models.ts.
-const CURSOR_MODELS_FOOTER = "Tip: use --model <id> (or /model <id> in interactive mode) to switch. Parameterized models also accept quoted overrides, e.g. --model 'claude-opus-4-8[context=1m,effort=high,fast=false]'.";
 
 function base(id, label, details) {
   return {
@@ -95,40 +92,19 @@ function normalizeClaude(raw) {
   });
 }
 
-function parseCursorModels(text) {
-  const models = [];
-  // `models` is a text command; --output-format applies to inference, not discovery.
+function parseOpenCodeModels(text) {
+  // OpenCode 1.18.29's models command emits one provider/model selector per line.
+  // Avoid --verbose: custom provider metadata may include private configuration.
   const lines = stripVTControlCharacters(text).split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
-  if (lines.length === 1 && lines[0] === 'No models available for this account.') {
-    throw new Error('Cursor returned no selectable models');
-  }
-  if (lines[0] !== 'Available models' || lines.at(-1) !== CURSOR_MODELS_FOOTER) {
-    throw new Error('Unrecognized or incomplete Cursor models output; refusing a partial catalogue. See docs/model-catalogues.md.');
-  }
+  if (!lines.length) throw new Error('OpenCode returned no selectable models');
   const seen = new Set();
-  for (const line of lines.slice(1, -1)) {
-    const unannotated = line.replace(/ \((?:current|default|current, default)\)$/, '');
-    const match = /^(\S+)(?: - (.+))?$/.exec(unannotated);
-    if (!match) throw new Error('Unrecognized Cursor models output; refusing a partial catalogue. See docs/model-catalogues.md.');
-    if (seen.has(match[1])) throw new Error(`Duplicate Cursor model ID: ${match[1]}`);
-    seen.add(match[1]);
-    models.push(base(match[1], match[2] || match[1], { cliLabel: line }));
-  }
-  const selectable = models.filter((model) => model.id !== 'auto');
-  if (!selectable.length) throw new Error('Cursor returned no selectable models');
-  return selectable;
-}
-
-function assertCursorAuthenticated(text) {
-  const status = z.object({
-    status: nonempty,
-    isAuthenticated: z.boolean(),
-    message: z.string().optional(),
-  }).parse(JSON.parse(text));
-  if (status.status !== 'authenticated' || !status.isAuthenticated
-    || status.message === 'Logged in (unable to fetch user details)') {
-    throw new Error('Cursor authentication is unverified. Run agent login before refreshing, or provide CURSOR_API_KEY.');
-  }
+  return lines.map((id) => {
+    const match = /^([A-Za-z0-9._-]+)\/([^\s\x00-\x1f\x7f]+)$/.exec(id);
+    if (!match) throw new Error('Unrecognized OpenCode models output; refusing a partial catalogue.');
+    if (seen.has(id)) throw new Error(`Duplicate OpenCode model ID: ${id}`);
+    seen.add(id);
+    return base(id, id, { providerID: match[1], modelID: match[2] });
+  });
 }
 
 async function fetchJson(url, headers = {}) {
@@ -224,42 +200,22 @@ async function fetchClaude() {
   }
 }
 
-async function fetchCursor() {
-  const command = process.env.CURSOR_AGENT_BIN || 'agent';
-  let api;
-  if (process.env.CURSOR_API_KEY) {
-    const url = 'https://api.cursor.com/v1/models';
-    api = z.object({
-      items: z.array(z.object({
-        id: nonempty, aliases: z.array(nonempty).optional(),
-      }).passthrough()),
-    }).parse(await fetchJson(url, {
-      Authorization: `Basic ${Buffer.from(`${process.env.CURSOR_API_KEY}:`).toString('base64')}`,
-    }));
-  } else {
-    // Status exits zero even when logged out. Its JSON must affirm authentication.
-    assertCursorAuthenticated(await commandOutput(command, ['status', '--format', 'json']));
-  }
-  const models = parseCursorModels(await commandOutput(command, ['models']));
-  const sources = [{ kind: 'cli', location: 'Cursor Agent: agent models' }];
-  const notes = ['Cursor CLI model IDs encode selectable variants; no generic effort or context flags are invented.'];
-  if (api) {
-    for (const model of models) {
-      const exact = api.items.find((item) => item.id === model.id || item.aliases?.includes(model.id));
-      if (exact) model.details.sdkApi = exact;
-    }
-    sources.push({ kind: 'api', location: 'https://api.cursor.com/v1/models' });
-    notes.push('SDK/API parameter and variant details are attached only to exact CLI IDs or explicit aliases; cloud metadata is not treated as CLI account availability.');
-  } else {
-    notes.push('Set CURSOR_API_KEY to enrich exact CLI matches with official SDK/API parameters and variants. CLI text does not expose numeric context limits.');
-  }
-  return catalogue('cursor', models, sources, notes);
+async function fetchOpenCode() {
+  const command = process.env.OPENCODE_BIN || 'opencode';
+  const models = parseOpenCodeModels(await commandOutput(command, ['models']));
+  return catalogue('opencode', models, [
+    { kind: 'cli', location: 'opencode models (provider/model selectors)' },
+  ], [
+    'Configured OpenCode provider/model selectors from this maintenance machine; remote project configuration, credentials and account entitlement can differ.',
+    'No inference prompt is sent. OpenCode manages authentication and plugin initialization; Remodr does not read credential files or persist verbose provider configuration.',
+    'Numeric limits and generic effort/context controls are not inferred. Auto uses the remote OpenCode configuration.',
+  ]);
 }
 
-const adapters = { copilot: fetchCopilot, codex: fetchCodex, claude: fetchClaude, cursor: fetchCursor };
+const adapters = { opencode: fetchOpenCode, copilot: fetchCopilot, codex: fetchCodex, claude: fetchClaude };
 async function discover(provider) {
   if (!Object.hasOwn(adapters, provider)) throw new Error(`Unsupported provider: ${provider}`);
   return adapters[provider]();
 }
 
-module.exports = { discover, normalizeCopilot, normalizeCodex, normalizeClaude, parseCursorModels, assertCursorAuthenticated };
+module.exports = { discover, normalizeCopilot, normalizeCodex, normalizeClaude, parseOpenCodeModels };

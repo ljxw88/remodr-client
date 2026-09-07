@@ -8,7 +8,7 @@ import {
 import copilot from '@/domain/model-catalogues/copilot.json';
 import codex from '@/domain/model-catalogues/codex.json';
 import claude from '@/domain/model-catalogues/claude.json';
-import cursor from '@/domain/model-catalogues/cursor.json';
+import opencode from '@/domain/model-catalogues/opencode.json';
 
 export const REASONING_EFFORTS = reasoningEffortSchema.options;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
@@ -18,13 +18,13 @@ export type ContextOption = ModelSpec['contexts'][number];
 export type { ModelSpec } from '@/domain/model-catalogue-schema';
 export { supportsRetuning } from '@/domain/agent-capabilities';
 
-const CATALOGUES = { copilot, codex, claude, cursor };
+const CATALOGUES = { opencode, copilot, claude, codex };
 const UNAVAILABLE: Partial<Record<AgentProvider, string>> = {};
 const CATALOGUE: Record<AgentProvider, ModelSpec[]> = {
   copilot: [],
   codex: [],
   claude: [],
-  cursor: [],
+  opencode: [],
   unknown: [],
 };
 for (const [provider, data] of Object.entries(CATALOGUES)) {

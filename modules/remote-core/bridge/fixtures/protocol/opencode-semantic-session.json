@@ -1,0 +1,86 @@
+{
+  "frames": [
+    {
+      "session": {"provider": "opencode", "paneId": "contract-pane", "providerSessionId": "ses_contract"},
+      "capabilities": {
+        "supportsRetuning": false,
+        "structuredConversation": true,
+        "streamingConversation": false,
+        "structuredQuestions": false,
+        "toolActivity": true,
+        "todos": false,
+        "fallback": true
+      },
+      "events": [],
+      "databaseMessages": [
+        {"id": "msg_system", "type": "system", "seq": 1, "data": {"text": "Synthetic hidden system context."}},
+        {"id": "msg_user", "type": "user", "seq": 2, "data": {"text": "Inspect the synthetic fixture.", "files": [], "agents": []}},
+        {"id": "msg_assistant", "type": "assistant", "seq": 3, "data": {"content": [
+          {"type": "reasoning", "id": "reasoning", "text": "Synthetic private reasoning."},
+          {"type": "text", "id": "text", "text": "I inspected the fixture."},
+          {"type": "tool", "id": "read", "name": "read", "state": {"status": "completed", "input": {"path": "fixture.txt"}}},
+          {"type": "tool", "id": "question", "name": "question", "state": {"status": "running", "input": {}}}
+        ]}}
+      ],
+      "terminalText": "This terminal output must not replace the semantic transcript.",
+      "conversation": {
+        "agentId": "agent_4933996907bac635c6ea",
+        "provider": "opencode",
+        "providerSessionId": "ses_contract",
+        "semantic": true,
+        "items": [
+          {"id": "opencode:ses_contract:msg_user", "kind": "user_message", "text": "Inspect the synthetic fixture."},
+          {"id": "opencode:ses_contract:msg_assistant:text", "kind": "assistant_message", "markdown": "I inspected the fixture."},
+          {"id": "opencode:ses_contract:msg_assistant:read", "kind": "tool_activity", "tool": "read", "title": "Reading", "detail": "fixture.txt", "state": "completed"},
+          {"id": "opencode:ses_contract:msg_assistant:question", "kind": "tool_activity", "tool": "question", "title": "Question", "detail": null, "state": "running"}
+        ],
+        "activeHumanRequest": null
+      }
+    },
+    {
+      "session": {"provider": "opencode", "paneId": "contract-pane", "providerSessionId": "ses_empty"},
+      "capabilities": {
+        "supportsRetuning": false,
+        "structuredConversation": true,
+        "streamingConversation": false,
+        "structuredQuestions": false,
+        "toolActivity": true,
+        "todos": false,
+        "fallback": true
+      },
+      "events": [],
+      "databaseMessages": [],
+      "terminalText": "Old output must not leak into the new empty session.",
+      "conversation": {
+        "agentId": "agent_4933996907bac635c6ea",
+        "provider": "opencode",
+        "providerSessionId": "ses_empty",
+        "semantic": true,
+        "items": [],
+        "activeHumanRequest": null
+      }
+    },
+    {
+      "session": {"provider": "opencode", "paneId": "contract-pane", "providerSessionId": null},
+      "capabilities": {
+        "supportsRetuning": false,
+        "structuredConversation": false,
+        "streamingConversation": false,
+        "structuredQuestions": false,
+        "toolActivity": false,
+        "todos": false,
+        "fallback": true
+      },
+      "events": [],
+      "terminalText": "No native session identity is currently available.",
+      "conversation": {
+        "agentId": "agent_4933996907bac635c6ea",
+        "provider": "opencode",
+        "providerSessionId": null,
+        "semantic": false,
+        "items": [{"id": "raw:contract-pane:7", "kind": "raw_output", "text": "No native session identity is currently available."}],
+        "activeHumanRequest": null
+      }
+    }
+  ]
+}

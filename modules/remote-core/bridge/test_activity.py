@@ -15,7 +15,7 @@ class OutputActivityTest(unittest.TestCase):
         self.adapter = Mock()
         self.adapter.output_path.return_value = None
         self.activity = OutputActivity(self.host)
-        self.agent = {"id": "a1", "paneId": "p1", "provider": "cursor", "providerSessionId": "s1"}
+        self.agent = {"id": "a1", "paneId": "p1", "provider": "opencode", "providerSessionId": "ses_activity"}
 
     def test_transcript_timestamp_is_not_replaced_by_poll_time(self):
         with tempfile.TemporaryDirectory() as directory:

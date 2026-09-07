@@ -77,7 +77,7 @@ async function refresh(options, { directory = CATALOGUE_DIR, fetchProvider = dis
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
-    console.log('Usage: npm run models:refresh -- [--provider copilot,codex,claude,cursor] [--dry-run | --check]');
+    console.log('Usage: npm run models:refresh -- [--provider opencode,copilot,claude,codex] [--dry-run | --check]');
     console.log('Run discovery on a maintenance machine with the selected CLIs installed and authenticated.');
     return;
   }

@@ -10,14 +10,13 @@ from remodr_bridge.errors import BridgeError
 from remodr_bridge.providers import ADAPTER_TYPES
 from remodr_bridge.providers.base import ProviderAdapter, ProviderSpec
 from remodr_bridge.providers.claude import ClaudeAdapter
-from remodr_bridge.providers.cursor import CursorAdapter
 
 
 class ProbeAdapter(ProviderAdapter):
     """Replace a registered provider to verify every orchestration surface routes."""
 
     spec = replace(
-        CursorAdapter.spec,
+        ProviderSpec("opencode", "Probe"),
         bypass_arguments=("--probe-bypass",),
         tuning_flags={"model": "--probe-model"},
         retunable=True,
@@ -61,13 +60,13 @@ class ProviderRegistryTest(unittest.TestCase):
         self.assertFalse(capabilities["streamingConversation"])
 
     def test_registry_drives_identity_conversations_tuning_and_capabilities(self):
-        with patch.dict(ADAPTER_TYPES, {"cursor": ProbeAdapter}):
+        with patch.dict(ADAPTER_TYPES, {"opencode": ProbeAdapter}):
             bridge = Bridge()
-            bridge.agent_catalog = [{"provider": "cursor", "available": True}]
+            bridge.agent_catalog = [{"provider": "opencode", "available": True}]
             normalized = bridge._normalize_snapshot({
                 "panes": [{"pane_id": "p1"}],
                 "agents": [{
-                    "pane_id": "p1", "agent": "cursor",
+                    "pane_id": "p1", "agent": "opencode",
                     "agent_session": {"value": "native-session"},
                 }],
             })
@@ -81,30 +80,30 @@ class ProviderRegistryTest(unittest.TestCase):
             })
             self.assertEqual(
                 bridge._retune_current_agent({"agentId": agent["id"]}),
-                {"retunedBy": "cursor"},
+                {"retunedBy": "opencode"},
             )
-            capabilities = bridge._capabilities(check_store=False)["providerCapabilities"]["cursor"]
+            capabilities = bridge._capabilities(check_store=False)["providerCapabilities"]["opencode"]
             self.assertTrue(capabilities["supportsRetuning"])
             self.assertTrue(capabilities["structuredConversation"])
             self.assertFalse(capabilities["streamingConversation"])
 
     def test_registry_drives_creation_settings_and_session_arguments(self):
-        with patch.dict(ADAPTER_TYPES, {"cursor": ProbeAdapter}):
+        with patch.dict(ADAPTER_TYPES, {"opencode": ProbeAdapter}):
             bridge = Bridge()
             bridge.runtime["workspaces"] = [{"id": "w1"}]
             bridge.runtime["agents"] = [{"id": "a1", "paneId": "p1"}]
             bridge._refresh_runtime = Mock()
             bridge._agent_catalog_snapshot = Mock(
-                return_value=[{"provider": "cursor", "available": True}]
+                return_value=[{"provider": "opencode", "available": True}]
             )
             bridge._herdr_request = Mock(return_value={"root_pane": {"pane_id": "p1"}})
             bridge._start_agent = Mock()
             bridge._create_agent({
-                "provider": "cursor", "workspaceId": "w1", "name": "Probe",
+                "provider": "opencode", "workspaceId": "w1", "name": "Probe",
                 "model": "chosen", "bypassPermissions": True,
             })
             bridge._start_agent.assert_called_once_with(
-                "cursor", "cursor", "p1",
+                "opencode", "opencode", "p1",
                 ["--probe-bypass", "--probe-model", "chosen", "--probe-session", "Probe"],
             )
             self.assertEqual(bridge.sessions.launched_session("p1"), "probe-launch")
@@ -151,9 +150,9 @@ class ProviderRegistryTest(unittest.TestCase):
                 self.assertEqual(adapter.session_tuning(session), {})
                 bridge._herdr_request.assert_not_called()
 
-    def test_cursor_and_unknown_do_not_claim_semantic_or_retuning_support(self):
+    def test_opencode_without_identity_and_unknown_do_not_claim_semantic_or_retuning_support(self):
         bridge = Bridge()
-        for name in ("cursor", "unknown"):
+        for name in ("opencode", "unknown"):
             adapter = bridge.providers[name]
             self.assertIsNone(adapter.load_conversation({"id": "a1"}))
             self.assertFalse(adapter.agent_capabilities("s1")["structuredConversation"])

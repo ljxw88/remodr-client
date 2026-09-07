@@ -25,6 +25,7 @@ import { beginAgentSettingsFlow, beginRenameAgentFlow } from '@/features/agents/
 import { ActionMenu } from '@/components/ui/action-menu';
 import { ConversationComposer } from '@/features/agents/conversation-composer';
 import { ConversationMessageList } from '@/features/agents/conversation-message-list';
+import { ConversationActivityPanel } from '@/features/agents/conversation-activity-panel';
 import { HumanRequestBar } from '@/features/agents/human-request-bar';
 import { useAgentConversation, useHerdr } from '@/features/agents/use-herdr';
 import { useConversationController } from '@/features/agents/use-conversation-controller';
@@ -33,9 +34,10 @@ import { usePersistedDraft } from '@/features/agents/use-persisted-draft';
 import { ConnectionStatus } from '@/features/connection/connection-status';
 import { useConnectionSnapshot, useForeground, usePendingCommands } from '@/features/connection/use-connection';
 import {
-  groupToolActivity,
+  conversationTranscript,
+  conversationActivity,
   currentToolActivity,
-  type ConversationDisplayItem,
+  type TranscriptItem,
 } from '@/features/agents/conversation-display';
 import { useTheme } from '@/hooks/use-theme';
 import { useKeyboardOverlap } from '@/hooks/use-keyboard-overlap';
@@ -83,12 +85,13 @@ export default function AgentConversationScreen() {
   const [sendError, setSendError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [composerHeight, setComposerHeight] = useState(0);
+  const [activityHeight, setActivityHeight] = useState(0);
   const [closingAgent, setClosingAgent] = useState(false);
   const closingAgentRef = useRef(false);
   const navigating = useRef(false);
   const actionVisible = useRef(false);
   const mounted = useRef(false);
-  const listRef = useRef<FlatList<ConversationDisplayItem>>(null);
+  const listRef = useRef<FlatList<TranscriptItem>>(null);
   const scrollToLatest = useCallback((animated: boolean) => {
     listRef.current?.scrollToOffset({ offset: 0, animated });
   }, []);
@@ -167,9 +170,13 @@ export default function AgentConversationScreen() {
    * construction rather than by scrolling there once the rows have measured.
    */
   const displayItems = useMemo(
-    () => groupToolActivity(conversation?.items ?? []).reverse(),
+    () => conversationTranscript(conversation?.items ?? []).reverse(),
     [conversation?.items],
   );
+  const hasActivity = useMemo(() => {
+    const { tools, todos } = conversationActivity(conversation?.items ?? []);
+    return tools.length > 0 || todos.length > 0;
+  }, [conversation?.items]);
   const activeTool = currentToolActivity(conversation?.items ?? [], agentStatus);
   const working = agentStatus === 'working';
   const workingLabel = activeTool?.title
@@ -283,6 +290,7 @@ export default function AgentConversationScreen() {
             composer and reconnect overlay outside it. */}
         <View style={styles.flex}>
           <AgentHeader agent={agent} connected={ownerConnected} />
+          <View testID="conversation-stage" style={styles.flex}>
           <ConversationMessageList
             conversationId={id}
             data={displayItems}
@@ -293,9 +301,18 @@ export default function AgentConversationScreen() {
             error={conversationError}
             hasConversation={conversation != null}
             bottomInset={composerHeight + keyboardHeight}
+            topInset={hasActivity ? activityHeight : 0}
             onRetry={retryConversation}
             scroll={scroll}
           />
+          <ConversationActivityPanel
+            sessionKey={JSON.stringify([id, agent.provider, agent.paneId, agent.providerSessionId ?? null])}
+            items={conversation?.items ?? []}
+            active={focused && foreground}
+            keyboardInset={keyboardHeight}
+            onHeightChange={setActivityHeight}
+          />
+          </View>
         </View>
         <ConversationComposer
           value={draft}

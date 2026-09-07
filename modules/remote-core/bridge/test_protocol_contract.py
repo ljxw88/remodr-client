@@ -1,6 +1,7 @@
 """Read-only golden contracts shared with src/domain/protocol-contract.test.ts."""
 
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,7 +15,8 @@ CONVERSATIONS = (
     "copilot-session-replacement.json",
     "claude-empty-session.json",
     "codex-empty-session.json",
-    "cursor-null-session-fallback.json",
+    "unknown-null-session-fallback.json",
+    "opencode-semantic-session.json",
 )
 
 
@@ -33,6 +35,7 @@ class ProtocolContractTest(unittest.TestCase):
         environment = patch.dict("os.environ", {
             "HOME": str(self.home),
             "CODEX_HOME": str(self.home / ".codex"),
+            "REMODR_OPENCODE_DB": str(self.home / "opencode.db"),
             "HERDR_SOCKET": str(self.home / "herdr.sock"),
             "HERDR_SESSION": "contract-session",
             "REMOTE_WORKSPACE_DEVICE_ID": "contract-device",
@@ -61,7 +64,7 @@ class ProtocolContractTest(unittest.TestCase):
                 "workspaces": [{"workspace_id": "contract-workspace", "label": "Synthetic"}],
                 "panes": [{"pane_id": session["paneId"]}],
                 "agents": [{
-                    "agent": session["provider"],
+                    "agent": self.frame.get("rawProvider", session["provider"]),
                     "pane_id": session["paneId"],
                     "workspace_id": "contract-workspace",
                     "agent_status": "idle",
@@ -89,6 +92,19 @@ class ProtocolContractTest(unittest.TestCase):
             "codex": self.home / ".codex" / "sessions" / f"{session_id}.jsonl",
         }
         path = paths.get(session["provider"])
+        if session["provider"] == "opencode" and session_id:
+            with sqlite3.connect(self.home / "opencode.db") as connection:
+                connection.executescript("""
+                    CREATE TABLE IF NOT EXISTS session (id TEXT PRIMARY KEY, revert TEXT, model TEXT);
+                    CREATE TABLE IF NOT EXISTS session_message
+                    (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER, data TEXT);
+                """)
+                connection.execute("INSERT OR REPLACE INTO session (id) VALUES (?)", (session_id,))
+                connection.executemany(
+                    "INSERT OR REPLACE INTO session_message VALUES (?, ?, ?, ?, ?)",
+                    [(row["id"], session_id, row["type"], row["seq"], json.dumps(row["data"]))
+                     for row in frame["databaseMessages"]],
+                )
         if path:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(

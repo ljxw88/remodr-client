@@ -12,6 +12,7 @@ a list of unfinished milestones.
 | Connect a physical phone to Metro while using SSH over a VPN | [Physical Android development](physical-android-development.md) |
 | Understand component ownership and the data flow | [Architecture](architecture.md) |
 | Understand bridge deployment, provider support, and protocol boundaries | [Herdr integration](herdr-mobile-architecture.md) |
+| Configure OpenCode and understand the native API integration direction | [OpenCode integration](opencode-integration.md) |
 | Refresh provider model lists, context limits, and reasoning settings | [Model catalogues](model-catalogues.md) |
 | Change reconnect, outbox, or background behavior | [Connection resilience](connection-resilience.md) |
 | Handle credentials, host trust, or persisted conversation data | [Security](security.md) |

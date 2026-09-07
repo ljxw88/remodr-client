@@ -1,9 +1,9 @@
 import type { ConversationItem } from '@/domain/herdr';
 import {
-  groupToolActivity,
+  conversationActivity,
+  conversationTranscript,
   currentToolActivity,
   planProgress,
-  toolActivitySummary,
 } from '@/features/agents/conversation-display';
 
 describe('conversation display', () => {
@@ -25,7 +25,7 @@ describe('conversation display', () => {
     ], 'working')).toBe(staleTool);
   });
 
-  it('groups all tool activity in one user turn', () => {
+  it('separates tool history from the transcript without changing the source', () => {
     const items: ConversationItem[] = [
       { id: 'u1', kind: 'user_message', text: 'Fix it.' },
       { id: 'a1', kind: 'assistant_message', markdown: 'Checking.' },
@@ -37,94 +37,42 @@ describe('conversation display', () => {
       { id: 'u2', kind: 'user_message', text: 'Thanks.' },
     ];
 
-    const grouped = groupToolActivity(items);
+    const transcript = conversationTranscript(items);
 
-    expect(grouped.map((item) => item.kind)).toEqual([
+    expect(transcript.map((item) => item.kind)).toEqual([
       'user_message',
       'assistant_message',
       'assistant_message',
-      'tool_group',
       'assistant_message',
       'user_message',
     ]);
-    expect(grouped[3].kind === 'tool_group' && grouped[3].items).toHaveLength(3);
+    expect(conversationActivity(items).tools.map((item) => item.id)).toEqual(['t3', 't2', 't1']);
+    expect(items.map((item) => item.id)).toEqual(['u1', 'a1', 't1', 't2', 'a2', 't3', 'a3', 'u2']);
   });
 
-  it('summarizes duration and tool count from reliable timestamps', () => {
-    const grouped = groupToolActivity([
-      {
-        id: 't1',
-        kind: 'tool_activity',
-        title: 'Reading',
-        state: 'completed',
-        timestamp: '2026-09-02T12:00:00Z',
-      },
-      {
-        id: 't2',
-        kind: 'tool_activity',
-        title: 'Testing',
-        state: 'completed',
-        timestamp: '2026-09-02T12:20:00Z',
-      },
-    ]);
-    const group = grouped[0];
-    expect(group.kind).toBe('tool_group');
-    if (group.kind === 'tool_group') {
-      expect(toolActivitySummary(group).label).toBe('Worked for 20m (2 tool calls)');
-    }
+  it('filters legacy groups and plans before virtualization', () => {
+    expect(conversationTranscript([
+      { id: 'group', kind: 'tool_group', items: [staleTool] },
+      staleTool,
+      { id: 'plan', kind: 'todo_update', todos: [] },
+    ])).toEqual([]);
   });
 
-  it('does not fabricate a duration when timestamps are unavailable', () => {
-    const grouped = groupToolActivity([
-      { id: 't1', kind: 'tool_activity', title: 'Reading', state: 'completed' },
-    ]);
-    const group = grouped[0];
-    if (group.kind === 'tool_group') {
-      expect(toolActivitySummary(group).label).toBe('Worked (1 tool call)');
-    }
-  });
-  it('says a group is still working rather than claiming a duration for it', () => {
-    const grouped = groupToolActivity([
-      { id: 't1', kind: 'tool_activity', title: 'Reading', state: 'completed',
-        timestamp: '2026-09-02T12:00:00Z' },
-      { id: 't2', kind: 'tool_activity', title: 'Testing', state: 'running',
-        timestamp: '2026-09-02T12:20:00Z' },
-    ]);
-    const group = grouped[0];
-    if (group.kind !== 'tool_group') throw new Error('expected a group');
-    expect(toolActivitySummary(group)).toEqual({
-      label: 'Working (2 tool calls)', failed: 0, running: true,
-    });
-  });
-
-  it('counts failures, so a folded group cannot hide one', () => {
-    const grouped = groupToolActivity([
-      { id: 't1', kind: 'tool_activity', title: 'Reading', state: 'completed',
-        timestamp: '2026-09-02T12:00:00Z' },
-      { id: 't2', kind: 'tool_activity', title: 'Testing', state: 'failed',
-        timestamp: '2026-09-02T12:20:00Z' },
-      { id: 't3', kind: 'tool_activity', title: 'Building', state: 'failed',
-        timestamp: '2026-09-02T12:20:00Z' },
-    ]);
-    const group = grouped[0];
-    if (group.kind !== 'tool_group') throw new Error('expected a group');
-    expect(toolActivitySummary(group)).toMatchObject({ failed: 2, running: false });
-  });
-
-  it('keeps only the last plan of a turn, and one per turn', () => {
+  it('keeps only the latest plan across turns, including an empty replacement', () => {
     const plan = (id: string, text: string): ConversationItem => ({
       id, kind: 'todo_update', todos: [{ text, state: 'pending' }],
     });
-    const display = groupToolActivity([
+    const items: ConversationItem[] = [
       { id: 'u1', kind: 'user_message', text: 'go' },
       plan('p1', 'first draft'),
       plan('p2', 'second draft'),
       plan('p3', 'settled'),
       { id: 'u2', kind: 'user_message', text: 'again' },
       plan('p4', 'next turn'),
-    ]);
-    expect(display.filter((item) => item.kind === 'todo_update').map((item) => item.id))
-      .toEqual(['p3', 'p4']);
+    ];
+    expect(conversationActivity(items).todos).toEqual([{ text: 'next turn', state: 'pending' }]);
+    expect(conversationActivity([...items, { id: 'clear', kind: 'todo_update', todos: [] }]).todos).toEqual([]);
+    expect(conversationActivity([staleTool]).todos).toEqual([]);
   });
 
   it('counts a plan\'s finished steps for the line that introduces it', () => {

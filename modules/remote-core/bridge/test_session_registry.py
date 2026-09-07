@@ -170,7 +170,7 @@ class SessionRegistryTest(unittest.TestCase):
 
     def test_forgetting_a_pane_removes_every_binding_and_is_idempotent(self):
         self.seed(self.key, "p1")
-        same_pane = SessionKey("a3", "cursor", "s3")
+        same_pane = SessionKey("a3", "opencode", "ses_registry")
         self.seed(same_pane, "p1")
         self.seed(self.other, "p2")
         self.sessions.forget_pane("p1")

@@ -40,10 +40,12 @@ const InsideBlurTargetContext = createContext(false);
  * `renderToHardwareTextureAndroid`.
  *
  * A pushed route used to be disqualified outright for that reason. It no
- * longer is, but only because pushes are cuts now: with `animation: 'none'`
- * the window between dismissal starting and the screen being gone is a single
- * frame, so there is no sliding blank to see. That makes this a standing
- * reason not to reintroduce a stack animation — see `stack-screen-options.ts`.
+ * longer is, but only because pushes are cuts now. `animation: 'none'` alone
+ * still left several frames of empty content and black chrome on Android.
+ * `RouteStack` therefore hides its native root in layout-effect teardown,
+ * before child blur targets are disposed. It restores the root on setup so
+ * effect replay cannot leave a mounted stack invisible. This is a cut, not
+ * an animated-dismissal solution; see `stack-screen-options.ts`.
  */
 export function BlurBackdropProvider({ children }: { children: ReactNode }) {
   const target = useRef<View | null>(null);

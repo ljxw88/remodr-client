@@ -146,6 +146,13 @@ export const Spacing = {
   five: 48,
 } as const;
 
+/** Shared by device/space filters and conversation activity disclosures. */
+export const ChipGeometry = {
+  minHeight: 38,
+  paddingHorizontal: Spacing.one + Spacing.half,
+  gap: Spacing.half,
+} as const;
+
 /**
  * The three heights a control is built to.
  *

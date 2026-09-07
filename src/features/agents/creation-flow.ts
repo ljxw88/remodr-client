@@ -11,7 +11,7 @@ import type { DeviceRuntimeState } from '@/services/herdr-repository';
 function firstProvider(device: DeviceRuntimeState): LaunchableAgentProvider {
   return launchableAgentProviderSchema.options.find((provider) =>
     device.runtime.providers.some((manifest) => manifest.provider === provider && manifest.available),
-  ) ?? 'copilot';
+  ) ?? 'opencode';
 }
 
 export function newAgentDraft(device: DeviceRuntimeState, initialSpaceId?: string | null): NewAgentDraft {
@@ -62,8 +62,8 @@ export function agentCreationInput(draft: NewAgentDraft): CreateAgentInput {
     bypassPermissions: draft.bypassPermissions,
     name: draft.name.trim() || undefined,
     model: (tunable && draft.tuning.model) || undefined,
-    effort: (tunable && draft.tuning.effort) || undefined,
-    context: (tunable && draft.tuning.context) || undefined,
+    effort: (tunable && draft.provider !== 'opencode' && draft.tuning.effort) || undefined,
+    context: (tunable && draft.provider !== 'opencode' && draft.tuning.context) || undefined,
   });
 }
 

@@ -5,11 +5,11 @@ from .base import ProviderAdapter, ProviderHost
 from .claude import ClaudeAdapter
 from .codex import CodexAdapter
 from .copilot import CopilotAdapter
-from .cursor import CursorAdapter
+from .opencode import OpenCodeAdapter
 
 ADAPTER_TYPES = {
     adapter.spec.name: adapter
-    for adapter in (CopilotAdapter, ClaudeAdapter, CodexAdapter, CursorAdapter)
+    for adapter in (OpenCodeAdapter, CopilotAdapter, ClaudeAdapter, CodexAdapter)
 }
 SUPPORTED_PROVIDERS = tuple(ADAPTER_TYPES)
 BYPASS_ARGUMENTS = {

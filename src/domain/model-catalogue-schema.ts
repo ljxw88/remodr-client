@@ -4,12 +4,12 @@ export const reasoningEffortSchema = z.enum([
   'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra',
 ]);
 export const contextTierSchema = z.enum(['default', 'long_context']);
-export const catalogueProviderSchema = z.enum(['copilot', 'codex', 'claude', 'cursor']);
+export const catalogueProviderSchema = z.enum(['opencode', 'copilot', 'claude', 'codex']);
 const providerEfforts: Record<z.infer<typeof catalogueProviderSchema>, readonly string[]> = {
   copilot: reasoningEffortSchema.options.filter((effort) => effort !== 'ultra'),
   codex: reasoningEffortSchema.options,
   claude: ['low', 'medium', 'high', 'xhigh', 'max'],
-  cursor: [],
+  opencode: [],
 };
 
 export const modelSpecSchema = z.object({
@@ -62,6 +62,9 @@ export const modelCatalogueSchema = z.object({
     ctx.addIssue({ code: 'custom', message: 'A populated catalogue cannot be marked unavailable' });
   }
   for (const model of catalogue.models) {
+    if (catalogue.provider === 'opencode' && !/^[A-Za-z0-9._-]+\/\S+$/.test(model.id)) {
+      ctx.addIssue({ code: 'custom', message: 'opencode: model ID must use provider/model format' });
+    }
     if (model.efforts.some((effort) => !providerEfforts[catalogue.provider].includes(effort))) {
       ctx.addIssue({ code: 'custom', message: `${catalogue.provider}: effort is not supported by the bridge` });
     }

@@ -4,10 +4,10 @@ import { contextTierSchema, reasoningEffortSchema } from '@/domain/model-catalog
 export { contextTierSchema, reasoningEffortSchema } from '@/domain/model-catalogue-schema';
 
 export const launchableAgentProviderSchema = z.enum([
+  'opencode',
   'copilot',
   'claude',
   'codex',
-  'cursor',
 ]);
 export type LaunchableAgentProvider = z.infer<typeof launchableAgentProviderSchema>;
 
@@ -342,8 +342,8 @@ export function providerLabel(provider: AgentProvider): string {
       return 'Claude Code';
     case 'codex':
       return 'Codex';
-    case 'cursor':
-      return 'Cursor Agent';
+    case 'opencode':
+      return 'OpenCode';
     default:
       return 'Agent';
   }

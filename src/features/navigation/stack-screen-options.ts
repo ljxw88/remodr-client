@@ -44,8 +44,9 @@ export function useStackScreenOptions(): ScreenOptions {
      * resource decides.
      *
      * Note this is not what made a dismissed chat throw its transcript away.
-     * Every animation, this one included, stops a blur target drawing while
-     * its screen leaves — see `components/ui/blur-backdrop.tsx`.
+     * Even with no animation, native teardown can outlive the blur target.
+     * `RouteStack` cuts its native root before child disposal to prevent that
+     * partial frame — see `components/ui/blur-backdrop.tsx`.
      */
     animation: 'none',
   };

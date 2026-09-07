@@ -1,6 +1,4 @@
-const { normalizeCopilot, normalizeCodex, normalizeClaude, parseCursorModels, assertCursorAuthenticated } = require('../../scripts/model-sources.cjs');
-const cursorFooter = "Tip: use --model <id> (or /model <id> in interactive mode) to switch. Parameterized models also accept quoted overrides, e.g. --model 'claude-opus-4-8[context=1m,effort=high,fast=false]'.";
-const cursorOutput = (rows: string) => `Available models\n\n${rows}\n\n${cursorFooter}\n`;
+const { normalizeCopilot, normalizeCodex, normalizeClaude, parseOpenCodeModels } = require('../../scripts/model-sources.cjs');
 
 describe('vendor model normalization', () => {
   it('uses Copilot prompt budgets plus output capacity for tier labels', () => {
@@ -65,20 +63,22 @@ describe('vendor model normalization', () => {
     expect(normalizeClaude([{ ...raw, supportsEffort: false }])[0].efforts).toEqual([]);
   });
 
-  it('parses Cursor model IDs as opaque selectors rather than inferring flags from suffixes', () => {
-    const models = parseCursorModels(cursorOutput('auto - Auto\n\x1b[32msonnet-thinking\x1b[0m - Sonnet Thinking (current, default)\nopus-max - Opus Max\nunnamed-model\nopus[context=1m,effort=high] - Opus (current)'));
+  it('preserves OpenCode provider/model namespaces without inventing flags or exposing metadata', () => {
+    const models = parseOpenCodeModels('\x1b[32mopenai/example\x1b[0m\r\nanthropic/example\nopenrouter/vendor/model\n');
     expect(models.map((model: { id: string }) => model.id)).toEqual([
-      'sonnet-thinking', 'opus-max', 'unnamed-model', 'opus[context=1m,effort=high]',
+      'openai/example', 'anthropic/example', 'openrouter/vendor/model',
     ]);
-    expect(models[0]).toMatchObject({ label: 'Sonnet Thinking', efforts: [], contexts: [] });
-    expect(models[2].label).toBe('unnamed-model');
-    expect(() => parseCursorModels('Please log in to continue')).toThrow('Unrecognized');
-    expect(() => parseCursorModels(cursorOutput('id - Valid\nunknown format'))).toThrow('Unrecognized');
-    expect(() => parseCursorModels(cursorOutput('auto - Auto'))).toThrow('no selectable models');
-    expect(() => parseCursorModels('No models available for this account.')).toThrow('no selectable models');
-    expect(() => parseCursorModels(cursorOutput('same - Name\nsame - Other'))).toThrow('Duplicate');
-    expect(() => parseCursorModels('Available models\nid - Name\nTip: use --model')).toThrow('incomplete');
-    expect(() => parseCursorModels(`id - Name\n${cursorFooter}`)).toThrow('incomplete');
+    expect(models[0]).toMatchObject({
+      label: 'openai/example', efforts: [], contexts: [],
+      limits: { contextTokens: null, outputTokens: null },
+      details: { providerID: 'openai', modelID: 'example' },
+    });
+    expect(models[2].details).toEqual({ providerID: 'openrouter', modelID: 'vendor/model' });
+    for (const bad of ['Please log in', 'provider/', '/model', 'provider/model extra', 'provider/model\n{"apiKey":"not-a-real-key"}']) {
+      expect(() => parseOpenCodeModels(bad)).toThrow('Unrecognized');
+    }
+    expect(() => parseOpenCodeModels('')).toThrow('no selectable models');
+    expect(() => parseOpenCodeModels('p/m\np/m\n')).toThrow('Duplicate');
   });
 
   it('refuses malformed responses instead of treating them as empty catalogues', () => {
@@ -88,16 +88,4 @@ describe('vendor model normalization', () => {
     expect(() => normalizeClaude([{ id: 'x', displayName: 'X' }])).toThrow();
   });
 
-  it('checks Cursor auth JSON rather than trusting a zero status exit code', () => {
-    expect(() => assertCursorAuthenticated(JSON.stringify({
-      status: 'authenticated', isAuthenticated: true,
-    }))).not.toThrow();
-    for (const state of [
-      { status: 'unauthenticated', isAuthenticated: false },
-      { status: 'partially-authenticated', isAuthenticated: false },
-      { status: 'authenticated', isAuthenticated: true, message: 'Logged in (unable to fetch user details)' },
-    ]) {
-      expect(() => assertCursorAuthenticated(JSON.stringify(state))).toThrow('authentication is unverified');
-    }
-  });
 });

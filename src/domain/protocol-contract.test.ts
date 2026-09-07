@@ -1,7 +1,8 @@
 import copilot from '../../modules/remote-core/bridge/fixtures/protocol/copilot-session-replacement.json';
 import claude from '../../modules/remote-core/bridge/fixtures/protocol/claude-empty-session.json';
 import codex from '../../modules/remote-core/bridge/fixtures/protocol/codex-empty-session.json';
-import cursor from '../../modules/remote-core/bridge/fixtures/protocol/cursor-null-session-fallback.json';
+import unknown from '../../modules/remote-core/bridge/fixtures/protocol/unknown-null-session-fallback.json';
+import opencode from '../../modules/remote-core/bridge/fixtures/protocol/opencode-semantic-session.json';
 import commands from '../../modules/remote-core/bridge/fixtures/protocol/durable-command-responses.json';
 
 import {
@@ -19,10 +20,11 @@ import {
 } from '@/domain/herdr';
 
 const fixtures = [
+  ['opencode-semantic-session', opencode],
   ['copilot-session-replacement', copilot],
   ['claude-empty-session', claude],
   ['codex-empty-session', codex],
-  ['cursor-null-session-fallback', cursor],
+  ['unknown-null-session-fallback', unknown],
 ] as const;
 
 type Frame = (typeof fixtures)[number][1]['frames'][number];
@@ -84,7 +86,7 @@ describe('shared Python/mobile protocol contracts', () => {
   });
 
   it('distinguishes explicit null identity from an omitted legacy identity', () => {
-    const frame = cursor.frames[0];
+    const frame = unknown.frames[0];
     const current = conversationSchema.parse(frame.conversation);
     const { providerSessionId: _sessionId, ...legacyWire } = frame.conversation;
     const legacy = conversationSchema.parse(legacyWire);

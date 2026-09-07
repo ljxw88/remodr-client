@@ -1,7 +1,8 @@
 {
   "frames": [
     {
-      "session": {"provider": "cursor", "paneId": "contract-pane", "providerSessionId": null},
+      "rawProvider": "cursor",
+      "session": {"provider": "unknown", "paneId": "contract-pane", "providerSessionId": null},
       "capabilities": {
         "supportsRetuning": false,
         "structuredConversation": false,
@@ -15,7 +16,7 @@
       "terminalText": "Synthetic terminal-only output.",
       "conversation": {
         "agentId": "agent_4933996907bac635c6ea",
-        "provider": "cursor",
+        "provider": "unknown",
         "providerSessionId": null,
         "semantic": false,
         "items": [{"id": "raw:contract-pane:7", "kind": "raw_output", "text": "Synthetic terminal-only output."}],

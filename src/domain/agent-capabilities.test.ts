@@ -10,7 +10,7 @@ describe('live retuning capabilities', () => {
     expect(retuningUnavailableReason('copilot', capabilities) == null).toBe(supported);
   });
 
-  it.each(['claude', 'codex', 'cursor', 'unknown'] as const)(
+  it.each(['claude', 'codex', 'opencode', 'unknown'] as const)(
     'does not enable %s merely because a server advertises support',
     (provider) => {
       expect(supportsRetuning(provider, { supportsRetuning: true })).toBe(false);

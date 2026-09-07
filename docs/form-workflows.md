@@ -118,7 +118,9 @@ mutation.
 Model selection only changes the draft. Model/effort/context compatibility comes
 from the [per-provider JSON catalogues](model-catalogues.md), through
 `agent-catalogue.ts`. Model selection at creation is available for Copilot,
-Codex, Claude Code, and Cursor Agent. Live Model Settings require a client
+OpenCode, Codex, and Claude Code. OpenCode is the preferred first provider when
+available; a deliberate user selection is retained when it remains valid.
+Live Model Settings require a client
 implementation (currently Copilot only) and the agent's reported retuning
 capability. An explicit `false` disables entry and Apply; an omitted field keeps
 legacy Copilot behavior. Availability is read from the current runtime, not

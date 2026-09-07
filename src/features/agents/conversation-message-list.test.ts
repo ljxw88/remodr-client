@@ -8,7 +8,7 @@ import { ScrollEdgeFrame } from '@/components/ui/scroll-edge-frame';
 import { ScrollEdgeFade } from '@/constants/theme';
 import { remoteAgentSchema } from '@/domain/herdr';
 import { CommandDelivery } from '@/features/connection/connection-status';
-import { type ConversationDisplayItem } from './conversation-display';
+import { type ConversationDisplayItem, type TranscriptItem } from './conversation-display';
 import { ConversationMessageList } from './conversation-message-list';
 
 const mockEdge = {
@@ -67,7 +67,7 @@ describe('ConversationMessageList', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     props = {
-      conversationId: 'a', data: [], listRef: createRef<FlatList<ConversationDisplayItem>>(),
+      conversationId: 'a', data: [], listRef: createRef<FlatList<TranscriptItem>>(),
       agent, onEdit: jest.fn(), connected: true, error: null,
       hasConversation: true, bottomInset: 180, onRetry: jest.fn(),
       scroll: {
@@ -85,19 +85,20 @@ describe('ConversationMessageList', () => {
 
   it('preserves inversion, row identity, tuning, ref, stable anchoring, and measured bottom space', () => {
     const data: ConversationDisplayItem[] = [{ id: 'm', kind: 'assistant_message', markdown: 'Hello' }];
-    const listRef = createRef<FlatList<ConversationDisplayItem>>();
-    render({ data, listRef });
+    const listRef = createRef<FlatList<TranscriptItem>>();
+    render({ data, listRef, topInset: 52 });
     expect(list().props).toMatchObject({
       inverted: true, keyboardShouldPersistTaps: 'handled', keyboardDismissMode: 'on-drag',
       showsVerticalScrollIndicator: false, initialNumToRender: 20, maxToRenderPerBatch: 20, windowSize: 7,
     });
-    expect(list().props.data).toBe(data);
+    expect(list().props.data).toEqual(data);
     expect(list().props.keyExtractor(data[0])).toBe('m');
     const anchor = list().props.maintainVisibleContentPosition;
     expect(anchor).toEqual({ minIndexForVisible: 0 });
     const instance = list().instance;
     expect(listRef.current).toBe(instance);
     expect(StyleSheet.flatten(list().props.ListHeaderComponent.props.style).height).toBe(180);
+    expect(StyleSheet.flatten(list().props.ListFooterComponent.props.style).height).toBe(52);
     expect(renderer!.root.findByType(ScrollEdgeFrame).props).toMatchObject({
       inverted: true, bottomHeight: Math.max(ScrollEdgeFade.bottomHeight, 180),
     });
@@ -186,30 +187,29 @@ describe('ConversationMessageList', () => {
     expect(props.onEdit).toHaveBeenCalledWith('Historical');
   });
 
-  it('retains a single tool group disclosure and exposes failures while collapsed', () => {
+  it('removes tools, plans, and legacy groups from FlatList data, including tool-only empty state', () => {
     render({
-      data: [{
+      data: [
+        { id: 'single', kind: 'tool_activity', title: 'Reading', state: 'running' },
+        { id: 'plan', kind: 'todo_update', todos: [{ text: 'Working', state: 'in_progress' }] },
+        {
         id: 'tools', kind: 'tool_group', items: [
           { id: 't1', kind: 'tool_activity', title: 'Reading', state: 'completed', detail: 'file.ts' },
           { id: 't2', kind: 'tool_activity', title: 'Testing', state: 'failed', detail: '1 assertion failed' },
         ],
       }],
     });
-    const toggle = () => buttons().find((node) =>
-      String(node.props.accessibilityLabel).includes('tool calls'))!;
-    expect(toggle().props.accessibilityLabel).toBe('Worked (2 tool calls). 1 failed. Expand tool calls');
-    expect(toggle().props.accessibilityState).toEqual({ expanded: false });
-    expect(text()).not.toContain('file.ts');
-    TestRenderer.act(() => toggle().props.onPress());
-    expect(toggle().props.accessibilityState).toEqual({ expanded: true });
-    expect(text()).toContain('file.ts');
-    expect(text()).toContain('1 assertion failed');
-    expect(buttons()).toHaveLength(1);
-    TestRenderer.act(() => toggle().props.onPress());
-    expect(text()).not.toContain('file.ts');
+    expect(list().props.data).toEqual([]);
+    expect(text()).toContain('No conversation yet.');
+    expect(buttons()).toHaveLength(0);
+    const message = { id: 'message', kind: 'assistant_message' as const, markdown: 'Answer' };
+    render({ data: [...props.data, message] });
+    expect(list().props.data).toEqual([message]);
+    expect(text()).not.toContain('No conversation yet.');
+    expect(renderer!.root.findByType(MarkdownMessage).props.children).toBe('Answer');
   });
 
-  it('shows resolved questions only, plan states, and expandable compatibility output', () => {
+  it('shows resolved questions only and preserves expandable compatibility output', () => {
     const request = {
       id: 'q', kind: 'choice' as const, question: 'Continue?', options: [],
       allowCustomAnswer: true, multiSelect: false,
@@ -223,13 +223,14 @@ describe('ConversationMessageList', () => {
           { text: 'Blocked', state: 'blocked' }, { text: 'Pending', state: 'pending' },
         ] },
         { id: 'raw', kind: 'raw_output', text: 'Raw transcript' },
+        { id: 'status', kind: 'status_notice', status: 'idle', text: 'Waiting for your reply' },
       ],
     });
     expect(text()).not.toContain('Still open?');
     expect(text()).toContain('Continue?');
-    for (const label of ['Finished, done', 'Working, in progress', 'Blocked, blocked', 'Pending, pending']) {
-      expect(renderer!.root.findAll((node) => node.props.accessibilityLabel === label).length).toBeGreaterThan(0);
-    }
+    expect(list().props.data.map((item: ConversationDisplayItem) => item.id)).toEqual(['open', 'closed', 'raw', 'status']);
+    expect(text()).toContain('Waiting for your reply');
+    expect(text()).not.toContain('Finished');
     expect(text()).not.toContain('Raw transcript');
     const raw = buttons()[0];
     TestRenderer.act(() => raw.props.onPress());
