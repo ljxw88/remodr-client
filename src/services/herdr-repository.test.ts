@@ -1019,6 +1019,34 @@ describe('HerdrRepository multi-device runtime', () => {
     expect(first.request).toHaveBeenCalledTimes(1);
   });
 
+  it('does not recreate a removed device when an old scheduled flush fails persistence', async () => {
+    const transport = fakeTransport(runtime);
+    const createTransport = jest.fn(() => transport);
+    const disk = { getItem: jest.fn(async () => null), setItem: jest.fn(async () => undefined) };
+    const repository = new HerdrRepository(createTransport, new CommandOutbox(disk));
+    await repository.connect('ssh-1', 'device-1');
+    let finish!: (value: unknown) => void;
+    transport.request.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const warning = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      jest.useFakeTimers();
+      await repository.sendMessage('agent-1', 'Waiting for a baseline');
+      await jest.advanceTimersByTimeAsync(0);
+      expect(finish).toBeDefined();
+      await repository.disconnectDevice('device-1');
+      disk.setItem.mockRejectedValue(new Error('Queue storage unavailable'));
+      finish({ agentId: 'agent-1', provider: 'copilot', semantic: true, items: [] });
+      await jest.advanceTimersByTimeAsync(0);
+      expect(warning).toHaveBeenCalledWith('[OUTBOX] Could not process persisted commands', expect.any(Error));
+      expect(repository.getSnapshot().devices).not.toHaveProperty('device-1');
+      expect(createTransport).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.clearAllTimers();
+      jest.useRealTimers();
+      warning.mockRestore();
+    }
+  });
+
   it('still rejects enqueue when durable outbox storage fails', async () => {
     const transport = fakeTransport(runtime);
     const disk = { getItem: jest.fn(async () => null), setItem: jest.fn(async () => undefined) };

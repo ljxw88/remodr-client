@@ -20,7 +20,8 @@ their own retry timers.
 | [`connect-runtime.ts`](../src/features/agents/connect-runtime.ts) | Host/SSH/repository adapter and explicit connection preferences |
 | [`use-connection-lifecycle.ts`](../src/features/connection/use-connection-lifecycle.ts) | Network/foreground signals and confirmed service activity |
 | [`command-outbox.ts`](../src/services/command-outbox.ts) | Serialized local command persistence |
-| [`herdr-repository.ts`](../src/services/herdr-repository.ts) | Snapshots, pending overlays, dispatch and reconciliation |
+| [`herdr-repository.ts`](../src/services/herdr-repository.ts) | Runtime snapshots, intent validation, transport routing and pending overlays |
+| [`command-dispatcher.ts`](../src/services/command-dispatcher.ts) | Queue scheduling, dispatch, retry, receipt reconciliation and endpoint invalidation |
 | [`conversation-store.ts`](../src/services/conversation-store.ts) | Conversation reads/restores, session fencing, cache writes and invalidation |
 | [`connection-status.tsx`](../src/features/connection/connection-status.tsx) | Non-modal connection and message-delivery status |
 
