@@ -34,6 +34,7 @@ and restrictions below remain unchanged.
 | --- | --- |
 | `remodr_bridge/bridge.py` | Protocol dispatch, synchronized state, and orchestration |
 | `remodr_bridge/runtime.py` | Snapshot normalization and session reconciliation |
+| `remodr_bridge/activity.py` | Session-bound transcript/terminal output recency |
 | `remodr_bridge/lifecycle.py` | Workspace and agent create/rename/close operations |
 | `remodr_bridge/commands.py`, `ledger.py` | Durable command preconditions, receipts, and storage |
 | `remodr_bridge/questions.py` | Shared question-answer delivery |
@@ -131,6 +132,28 @@ Flag references:
 [configuration](https://developers.openai.com/codex/config-reference/),
 [Cursor parameters](https://cursor.com/docs/cli/reference/parameters).
 
+## Output activity for agent ordering
+
+`runtime.snapshot` accepts optional `{"includeActivity": true}`. These requests
+attach `lastOutputAt` (Unix milliseconds) to agents with known output recency.
+Ordinary snapshots and status events reuse observed activity without doing extra
+transcript or terminal reads.
+
+The provider adapter's `output_path()` selects the same session-specific
+transcript used for conversation reading. Copilot, Claude Code and Codex use
+its last-write time without parsing the entire conversation. Terminal-only
+providers use changes in a bounded, ANSI-stripped `recent_unwrapped` text
+sample; their first read establishes a baseline rather than inventing a
+historical output time. Polling, status changes, and tab renames do not themselves
+advance activity. Transcript writes include message and tool/session-log activity;
+terminal fallback reflects visible terminal text changes.
+
+Activity is isolated by agent/provider/session/terminal identity and pruned when
+agents disappear. Optional activity-read failures are diagnosed without failing
+the runtime snapshot. The mobile list requests activity only while focused,
+foregrounded, and connected; full transcript polling is not needed for unopened
+agents.
+
 ## Session identity and `/clear`
 
 Codex creation configures a live thread UUID in its status line because current
@@ -164,6 +187,13 @@ fallback, include:
   "providerSessionId": "the-session-used-for-this-read"
 }
 ```
+
+Runtime agent records also forward Herdr's `state_change_seq` as optional
+`statusRevision`. The mobile client uses it to distinguish completed work from
+duplicate status snapshots. Completion receipts and read/unread state remain
+client-owned; the bridge does not acknowledge or mutate Herdr's seen state.
+Snapshots include a bridge-local monotonic `runtimeRevision`, allowing clients
+to reject late snapshots within an attachment without relying on wall clocks.
 
 `providerSessionId` is explicitly `null` when unknown. A transcript is selected
 by that identity, never by the newest session under a working directory.

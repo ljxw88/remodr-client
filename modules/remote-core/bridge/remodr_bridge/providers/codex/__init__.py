@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from ..base import ProviderAdapter
@@ -29,6 +30,10 @@ class CodexAdapter(ProviderAdapter):
 
     def load_conversation(self, agent: dict[str, Any]) -> dict[str, Any] | None:
         return transcript.load_conversation(self.host, agent)
+
+    def output_path(self, agent: dict[str, Any]) -> Path | None:
+        session_id = sessions.session_uuid(agent.get("providerSessionId"))
+        return transcript.transcript_path(self.host, session_id) if session_id else None
 
     def identity_error(self, reason: str) -> str:
         return reason

@@ -7,12 +7,15 @@ from pathlib import Path
 from typing import Any
 from ...formatting import content_text
 
-def load_conversation(agent: dict[str, Any]) -> dict[str, Any] | None:
-    session_id = agent.get("providerSessionId")
-    if not isinstance(session_id, str):
+def transcript_path(session_id: Any) -> Path | None:
+    if not isinstance(session_id, str) or not session_id:
         return None
     candidates = list((Path.home() / ".claude" / "projects").glob("**/*.jsonl"))
-    path = next((item for item in candidates if session_id in item.name), None)
+    return next((item for item in candidates if session_id in item.name), None)
+
+
+def load_conversation(agent: dict[str, Any]) -> dict[str, Any] | None:
+    path = transcript_path(agent.get("providerSessionId"))
     return load_role_jsonl(agent, path, "claude") if path else None
 
 

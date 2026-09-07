@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from .bridge import Bridge
 
 def normalize_snapshot(
-    host: Bridge, snapshot: dict[str, Any], *, inspect_copilot: bool = True
+    host: Bridge, snapshot: dict[str, Any], *, inspect_copilot: bool = True, include_activity: bool = False
 ) -> dict[str, Any]:
     catalog = host.agent_catalog or host._fallback_agent_catalog()
     workspace_labels = {
@@ -96,6 +96,16 @@ def normalize_snapshot(
             "focused": bool(raw.get("focused")),
             "capabilities": capabilities,
         }
+        status_revision = raw.get("state_change_seq")
+        if type(status_revision) is int and 0 <= status_revision <= 9_007_199_254_740_991:
+            agent["statusRevision"] = status_revision
+        last_output = (
+            host.output_activity.observe(agent, raw.get("terminal_id"), adapter)
+            if include_activity
+            else host.output_activity.cached(agent, raw.get("terminal_id"))
+        )
+        if last_output is not None:
+            agent["lastOutputAt"] = last_output
         normalized_agents.append(agent)
         raw_agents[agent_id] = {**raw, **agent}
 
@@ -164,6 +174,7 @@ def normalize_snapshot(
                 agent_id, str(previous.get("paneId") or ""),
                 previous.get("providerSessionId"),
             )
+    host.output_activity.prune(set(raw_agents))
     with host.state_lock:
         host.raw_agents = raw_agents
     return {

@@ -51,6 +51,13 @@ export const agentTuningSchema = z.object({
 });
 export type AgentTuning = z.infer<typeof agentTuningSchema>;
 
+export const agentCompletionSchema = z.object({
+  id: z.string().min(1),
+  unread: z.boolean(),
+  statusRevision: z.number().int().nonnegative().nullable().default(null),
+});
+export type AgentCompletion = z.infer<typeof agentCompletionSchema>;
+
 export const remoteAgentSchema = z.object({
   id: z.string(),
   deviceId: z.string().optional(),
@@ -63,10 +70,16 @@ export const remoteAgentSchema = z.object({
   paneId: z.string(),
   cwd: z.string().nullable().optional(),
   status: agentStatusSchema,
+  statusRevision: z.number().int().nonnegative().nullable().catch(null).optional(),
+  /** Client-owned completion receipt and last server-observed status. */
+  observedStatus: agentStatusSchema.optional().catch(undefined),
+  completion: agentCompletionSchema.optional().catch(undefined),
   title: z.string(),
   focused: z.boolean(),
   capabilities: agentCapabilitiesSchema,
   tuning: agentTuningSchema.optional(),
+  /** Unix milliseconds of observed output activity, not snapshot receipt time. */
+  lastOutputAt: z.number().int().nonnegative().nullable().catch(null).optional(),
 });
 export type RemoteAgent = z.infer<typeof remoteAgentSchema>;
 
@@ -120,6 +133,7 @@ export const runtimeStateSchema = z.object({
   agents: z.array(remoteAgentSchema),
   providers: z.array(agentManifestSchema).default([]),
   lastRuntimeEvent: z.number().optional(),
+  runtimeRevision: z.number().int().nonnegative().optional(),
 });
 export type HerdrRuntimeState = z.infer<typeof runtimeStateSchema>;
 

@@ -13,20 +13,21 @@ import {
 
 import { AppIcon } from '@/components/ui/app-icon';
 import { EmptyState } from '@/components/ui/empty-state';
+import { FinishDot } from '@/components/ui/finish-dot';
 import { Screen } from '@/components/ui/screen';
 import { ScrollEdgeFrame } from '@/components/ui/scroll-edge-frame';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
+import { unreadCompletionCount, unreadCompletionsBySpace } from '@/domain/agent-completion';
 import { type AgentWorkspace } from '@/domain/herdr';
 import { connectAgentRuntime } from '@/features/agents/connect-runtime';
 import { HeaderRoundButton } from '@/features/agents/header-round-button';
 import { LiquidGlassButton } from '@/features/agents/liquid-glass-button';
 import { glassRim } from '@/components/ui/glass-surface';
 import { LiquidGlassRim } from '@/components/ui/liquid-glass-rim';
-import {
-  AgentWorkspaceList,
-  compareAgents,
-} from '@/features/agents/agent-workspace-list';
+import { AgentWorkspaceList } from '@/features/agents/agent-workspace-list';
+import { agentSections } from '@/features/agents/agent-ordering';
+import { startConversationRefresh } from '@/features/agents/conversation-refresh';
 import { beginNewAgentFlow, beginNewSpaceFlow } from '@/features/agents/creation-flow';
 import { selectWorkspace, useWorkspaceSelection } from '@/features/agents/workspace-selection';
 import { useHerdr } from '@/features/agents/use-herdr';
@@ -36,6 +37,7 @@ import {
 } from '@/features/navigation/floating-dock';
 import { useHostSession } from '@/features/connection/use-host-session';
 import { ConnectionStatus } from '@/features/connection/connection-status';
+import { useForeground } from '@/features/connection/use-connection';
 import { useHosts } from '@/features/hosts/use-hosts';
 import { useAppSettings } from '@/hooks/use-app-settings';
 import { useTheme } from '@/hooks/use-theme';
@@ -66,6 +68,8 @@ export default function AgentsScreen() {
   const selectedDeviceId = state.selectedDeviceId ?? state.runtime.deviceId ?? null;
   const selectedSpaceId = useWorkspaceSelection(selectedDeviceId);
   const navigating = useRef(false);
+  const refresh = useRef<Promise<void> | null>(null);
+  const foreground = useForeground();
   const selectedHost = hosts.find((host) => host.id === selectedDeviceId);
   const connected = state.connection === 'connected';
   const spaces = state.runtime.workspaces;
@@ -74,35 +78,32 @@ export default function AgentsScreen() {
       ? selectedSpaceId
       : null;
   const activeSpace = spaces.find((space) => space.id === activeSpaceId);
-  const visibleAgents = useMemo(
-    () =>
-      state.runtime.agents
-        .filter((agent) => !activeSpaceId || agent.workspaceId === activeSpaceId)
-        .sort(compareAgents),
-    [activeSpaceId, state.runtime.agents],
+  const sections = useMemo(
+    () => agentSections(state.runtime.agents, spaces, activeSpaceId),
+    [activeSpaceId, spaces, state.runtime.agents],
   );
-  const sections = useMemo(() => {
-    const spacesInScope = activeSpaceId
-      ? spaces.filter((space) => space.id === activeSpaceId)
-      : spaces;
-    const result = spacesInScope.map((space) => ({
-      space,
-      agents: visibleAgents.filter((agent) => agent.workspaceId === space.id),
-    }));
-    const knownSpaceIds = new Set(spaces.map((space) => space.id));
-    const unassigned = visibleAgents.filter((agent) => !knownSpaceIds.has(agent.workspaceId));
-    if (unassigned.length > 0 && !activeSpaceId) {
-      result.push({
-        space: {
-          id: 'unassigned',
-          name: 'Other',
-          status: 'unknown',
-        },
-        agents: unassigned,
-      });
+  // "Current device" per the completion contract: this device's own agents,
+  // independent of which space is selected, so switching spaces never hides
+  // (or looks like it clears) another space's unread finish.
+  const unreadBySpace = useMemo(
+    () => unreadCompletionsBySpace(state.runtime.agents),
+    [state.runtime.agents],
+  );
+  const unreadOnDevice = useMemo(
+    () => unreadCompletionCount(state.runtime.agents),
+    [state.runtime.agents],
+  );
+  const unreadByDevice = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const device of Object.values(state.devices)) {
+      counts[device.deviceId] = unreadCompletionCount(device.runtime.agents);
     }
-    return result.filter((section) => section.agents.length > 0);
-  }, [activeSpaceId, spaces, visibleAgents]);
+    return counts;
+  }, [state.devices]);
+  const unreadAcrossDevices = useMemo(
+    () => Object.values(unreadByDevice).reduce((sum, count) => sum + count, 0),
+    [unreadByDevice],
+  );
 
   const canCreateAgent = connected && spaces.length > 0;
   const canCreateSpace = connected && selectedHost != null;
@@ -110,7 +111,15 @@ export default function AgentsScreen() {
 
   useFocusEffect(useCallback(() => {
     navigating.current = false;
-  }, []));
+    if (!connected || !foreground || !selectedDeviceId) return;
+    return startConversationRefresh({
+      interval: 2000,
+      inFlight: refresh,
+      refresh: () => herdrRepository.refreshRuntime(selectedDeviceId, true),
+      onSuccess: () => undefined,
+      onError: (error) => console.warn('[AGENT_ACTIVITY] Could not refresh output activity', error),
+    });
+  }, [connected, foreground, selectedDeviceId]));
 
   function startCreation(kind: 'agent' | 'space') {
     if (navigating.current || !selectedDeviceId) return;
@@ -209,16 +218,30 @@ export default function AgentsScreen() {
           opens is either on screen or it is not, so a fill saying so as well
           would be telling you something you can already see.
         */}
-        <HeaderRoundButton
-          icon={agentFiltersExpanded ? CollapseFiltersIcon : ExpandFiltersIcon}
-          fallback={agentFiltersExpanded ? '⌃' : '⌄'}
-          accessibilityLabel={
-            agentFiltersExpanded ? 'Hide devices and spaces' : 'Show devices and spaces'
-          }
-          expanded={agentFiltersExpanded}
-          disabled={hosts.length === 0}
-          onPress={() => void setAgentFiltersExpanded(!agentFiltersExpanded)}
-        />
+        <View style={styles.headerRoundButtonWrap}>
+          <HeaderRoundButton
+            icon={agentFiltersExpanded ? CollapseFiltersIcon : ExpandFiltersIcon}
+            fallback={agentFiltersExpanded ? '⌃' : '⌄'}
+            accessibilityLabel={
+              agentFiltersExpanded ? 'Hide devices and spaces' : 'Show devices and spaces'
+            }
+            expanded={agentFiltersExpanded}
+            disabled={hosts.length === 0}
+            onPress={() => void setAgentFiltersExpanded(!agentFiltersExpanded)}
+          />
+          {/*
+            Collapsing the filters hides the per-device chips that would
+            otherwise say so; this stands in for them so a finish on a device
+            you are not looking at stays discoverable.
+          */}
+          {!agentFiltersExpanded && unreadAcrossDevices > 0 ? (
+            <FinishDot
+              count={unreadAcrossDevices}
+              label={`${unreadAcrossDevices} unread finished ${unreadAcrossDevices === 1 ? 'agent' : 'agents'} across your devices`}
+              style={styles.headerRoundButtonBadge}
+            />
+          ) : null}
+        </View>
       </View>
 
       {hosts.length > 0 && agentFiltersExpanded ? (
@@ -234,6 +257,7 @@ export default function AgentsScreen() {
                 hostId={host.id}
                 label={host.name}
                 selected={host.id === selectedDeviceId}
+                unreadCount={unreadByDevice[host.id] ?? 0}
                 onPress={() => selectDevice(host.id)}
               />
             ))}
@@ -256,6 +280,7 @@ export default function AgentsScreen() {
                 <FilterChip
                   label="All spaces"
                   selected={activeSpaceId == null}
+                  unreadCount={unreadOnDevice}
                   onPress={() => selectedDeviceId && selectWorkspace(selectedDeviceId, null)}
                 />
                 {spaces.map((space) => (
@@ -263,6 +288,7 @@ export default function AgentsScreen() {
                     key={space.id}
                     label={space.name}
                     selected={space.id === activeSpaceId}
+                    unreadCount={unreadBySpace[space.id] ?? 0}
                     onPress={() => selectedDeviceId && selectWorkspace(selectedDeviceId, space.id)}
                   />
                 ))}
@@ -364,12 +390,14 @@ function DeviceChip({
   label,
   selected,
   disabled = false,
+  unreadCount = 0,
   onPress,
 }: {
   hostId: string;
   label: string;
   selected: boolean;
   disabled?: boolean;
+  unreadCount?: number;
   onPress: () => void;
 }) {
   const theme = useTheme();
@@ -380,6 +408,7 @@ function DeviceChip({
       selected={selected}
       disabled={disabled}
       statusColor={session ? theme.success : theme.textMuted}
+      unreadCount={unreadCount}
       onPress={onPress}
     />
   );
@@ -390,12 +419,14 @@ function FilterChip({
   selected,
   disabled = false,
   statusColor,
+  unreadCount = 0,
   onPress,
 }: {
   label: string;
   selected: boolean;
   disabled?: boolean;
   statusColor?: string;
+  unreadCount?: number;
   onPress: () => void;
 }) {
   const theme = useTheme();
@@ -403,6 +434,11 @@ function FilterChip({
     <Pressable
       accessibilityRole="button"
       accessibilityState={{ disabled, selected }}
+      accessibilityLabel={
+        unreadCount > 0
+          ? `${label}, ${unreadCount} unread finished ${unreadCount === 1 ? 'agent' : 'agents'}`
+          : undefined
+      }
       disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [
@@ -423,9 +459,15 @@ function FilterChip({
         <ThemedText
           type="caption"
           numberOfLines={1}
-          style={{ color: selected ? theme.onAccent : theme.textSecondary }}>
+          style={{ color: selected ? theme.onAccent : theme.textSecondary, flexShrink: 1 }}>
           {label}
         </ThemedText>
+        {unreadCount > 0 ? (
+          <FinishDot
+            count={unreadCount}
+            label={`${unreadCount} unread finished ${unreadCount === 1 ? 'agent' : 'agents'} in ${label}`}
+          />
+        ) : null}
       </View>
     </Pressable>
   );
@@ -444,6 +486,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.one,
+  },
+  headerRoundButtonWrap: {
+    flexShrink: 0,
+  },
+  headerRoundButtonBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    zIndex: 2,
   },
   filters: {
     gap: Spacing.one,

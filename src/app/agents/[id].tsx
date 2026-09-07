@@ -215,13 +215,27 @@ export default function AgentConversationScreen() {
     if (!agentId || !ownerConnected || !foreground || !focused) {
       return;
     }
-    return startConversationRefresh({
+    let cancelled = false;
+    let readCompletionId: string | undefined;
+    const stop = startConversationRefresh({
       interval: conversationRefreshInterval(
         agentStatus, hasOpenRequest, agent?.capabilities.streamingConversation === true,
       ),
       inFlight: refreshRef,
-      refresh: () => herdrRepository.loadConversation(agentId),
-      onSuccess: () => setConversationError(null),
+      refresh: () => {
+        const completion = herdrRepository.getCompletion(agentId);
+        readCompletionId = completion?.unread ? completion.id : undefined;
+        return herdrRepository.loadConversation(agentId);
+      },
+      onSuccess: () => {
+        setConversationError(null);
+        if (readCompletionId) {
+          void herdrRepository.markCompletionRead(agentId, readCompletionId).catch((error) => {
+            console.warn('[COMPLETION] Could not save completion read state', error);
+            if (!cancelled) setConversationError(toUserMessage(error));
+          });
+        }
+      },
       onError: (error) => {
         console.warn('[CONVERSATION] Could not load conversation', error);
         setConversationError(
@@ -231,7 +245,9 @@ export default function AgentConversationScreen() {
         );
       },
     });
+    return () => { cancelled = true; stop(); };
   }, [
+    agent?.completion?.id,
     agent?.provider,
     agent?.providerSessionId,
     agent?.capabilities.streamingConversation,

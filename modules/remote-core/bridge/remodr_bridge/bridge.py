@@ -10,6 +10,7 @@ from typing import Any
 from . import commands, conversation, formatting, lifecycle, questions, runtime, subscriptions, transport
 from .constants import BRIDGE_VERSION, PROTOCOL, ORDERED_TUNING
 from .errors import BridgeError
+from .activity import OutputActivity
 from .ledger import CommandLedger
 from .providers.base import ProviderAdapter
 from .providers import SUPPORTED_PROVIDERS, create_registry, provider_type, normalize_provider, provider_label
@@ -51,6 +52,7 @@ class Bridge:
             "agents": [],
             "providers": [],
         }
+        self.runtime_revision = 0
         self.agent_catalog: list[dict[str, Any]] | None = None
         self.raw_agents: dict[str, dict[str, Any]] = {}
         self.pending_human_requests: dict[str, dict[str, Any]] = {}
@@ -62,6 +64,7 @@ class Bridge:
         self.command_context = threading.local()
         self.command_store_error: BridgeError | None = None
         self.providers = create_registry(self)
+        self.output_activity = OutputActivity(self)
 
     def provider_adapter(self, provider: str) -> ProviderAdapter:
         return self.providers.get(provider, self.providers["unknown"])
@@ -194,7 +197,10 @@ class Bridge:
                 result["response"] = self._stored_response(record)
             return result
         if action == "runtime.snapshot":
-            self._refresh_runtime()
+            if payload.get("includeActivity") is True:
+                self._refresh_runtime(include_activity=True)
+            else:
+                self._refresh_runtime()
             return self.runtime
         if action == "agent.conversation":
             with self.refresh_lock:
@@ -260,7 +266,7 @@ class Bridge:
             return bound
         return agent
 
-    def _refresh_runtime(self, *, inspect_copilot: bool = True) -> None:
+    def _refresh_runtime(self, *, inspect_copilot: bool = True, include_activity: bool = False) -> None:
         with self.refresh_lock:
             result = self._herdr_request("session.snapshot", {})
             snapshot = result.get("snapshot")
@@ -269,7 +275,11 @@ class Bridge:
                     "INVALID_HERDR_RESPONSE", "Herdr snapshot is missing."
                 )
             self._agent_catalog_snapshot()
-            normalized = self._normalize_snapshot(snapshot, inspect_copilot=inspect_copilot)
+            normalized = self._normalize_snapshot(
+                snapshot, inspect_copilot=inspect_copilot, include_activity=include_activity,
+            )
+            self.runtime_revision += 1
+            normalized["runtimeRevision"] = self.runtime_revision
             with self.state_lock:
                 self.runtime = normalized
             self._ensure_pane_subscriptions()
@@ -278,12 +288,12 @@ class Bridge:
         with self.refresh_lock:
             before = {
                 key: value for key, value in self.runtime.items()
-                if key != "lastRuntimeEvent"
+                if key not in ("lastRuntimeEvent", "runtimeRevision")
             }
             self._refresh_runtime()
             after = {
                 key: value for key, value in self.runtime.items()
-                if key != "lastRuntimeEvent"
+                if key not in ("lastRuntimeEvent", "runtimeRevision")
             }
             if before != after:
                 self.write_event("runtime.snapshot", self.runtime)
@@ -291,6 +301,7 @@ class Bridge:
     def _invalidate_agent_session(
         self, agent_id: str, pane_id: str, session_id: Any
     ) -> None:
+        self.output_activity.invalidate(agent_id)
         self.agent_tuning.pop(pane_id, None)
         self.session_tuning_cache.pop(session_id, None)
         self.conversation_cache = {
@@ -557,9 +568,11 @@ class Bridge:
         return lifecycle.pane_terminal_unchanged(self, pane_id, pinned_terminal_id)
 
     def _normalize_snapshot(
-        self, snapshot: dict[str, Any], *, inspect_copilot: bool = True
+        self, snapshot: dict[str, Any], *, inspect_copilot: bool = True, include_activity: bool = False
     ) -> dict[str, Any]:
-        return runtime.normalize_snapshot(self, snapshot, inspect_copilot=inspect_copilot)
+        return runtime.normalize_snapshot(
+            self, snapshot, inspect_copilot=inspect_copilot, include_activity=include_activity,
+        )
 
     def _agent_catalog_snapshot(self, force: bool = False) -> list[dict[str, Any]]:
         return runtime.agent_catalog_snapshot(self, force)

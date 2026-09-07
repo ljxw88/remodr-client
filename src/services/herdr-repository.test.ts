@@ -1,4 +1,4 @@
-import type { AgentConversation, BridgeEvent, HerdrRuntimeState } from '@/domain/herdr';
+import type { AgentConversation, AgentStatus, BridgeEvent, HerdrRuntimeState } from '@/domain/herdr';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   HerdrRepository,
@@ -115,6 +115,146 @@ describe('Herdr runtime reducer', () => {
   it('keeps the same snapshot for an unknown agent or unchanged state', () => {
     expect(reduceAgentStatus(runtime, 'missing', 'working')).toBe(runtime);
     expect(reduceAgentStatus(runtime, 'agent-1', 'idle')).toBe(runtime);
+  });
+});
+
+describe('HerdrRepository completion notifications', () => {
+  it('does not let an out-of-order snapshot retrigger an acknowledged finish', async () => {
+    const { repository, transport } = await setup();
+    transport.request.mockResolvedValueOnce({ ...completed('done', 12), runtimeRevision: 200 });
+    await repository.refreshRuntime();
+    await repository.loadConversation('agent-1');
+    const id = repository.getCompletion('agent-1')!.id;
+    await repository.markCompletionRead('agent-1', id);
+    const warning = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      transport.request.mockResolvedValueOnce({ ...completed('done', 10), runtimeRevision: 100 });
+      await repository.refreshRuntime();
+      transport.request.mockResolvedValueOnce({ ...completed('done', 12), runtimeRevision: 300 });
+      await repository.refreshRuntime();
+      expect(repository.getCompletion('agent-1')).toMatchObject({ id, unread: false });
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  const runtimeKey = 'remote-workspace.herdr.runtimes.v2';
+  let disk: Map<string, string>;
+
+  function completed(status: AgentStatus = 'done', revision = 10): HerdrRuntimeState {
+    return {
+      ...runtime,
+      agents: [{ ...runtime.agents[0], status, statusRevision: revision }],
+    };
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    disk = new Map();
+    jest.mocked(AsyncStorage.getItem).mockReset().mockImplementation(async (key) => disk.get(key) ?? null);
+    jest.mocked(AsyncStorage.setItem).mockReset().mockImplementation(async (key, value) => { disk.set(key, value); });
+    jest.mocked(AsyncStorage.removeItem).mockReset().mockImplementation(async (key) => { disk.delete(key); });
+  });
+  afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
+    jest.mocked(AsyncStorage.getItem).mockReset().mockResolvedValue(null);
+    jest.mocked(AsyncStorage.setItem).mockReset().mockResolvedValue(undefined);
+    jest.mocked(AsyncStorage.removeItem).mockReset().mockResolvedValue(undefined);
+  });
+
+  async function setup() {
+    const transport = fakeTransport(completed());
+    const repository = repositoryWith([transport]);
+    repository.selectDevice('device-1');
+    await repository.connect('ssh-1', 'device-1');
+    return { repository, transport };
+  }
+
+  it('does not acknowledge by selecting a device or by a background conversation refresh', async () => {
+    const { repository } = await setup();
+    const receipt = repository.getCompletion('agent-1')!;
+    repository.selectDevice('other-device');
+    repository.selectDevice('device-1');
+    await repository.markCompletionRead('agent-1', receipt.id);
+    expect(repository.getCompletion('agent-1')?.unread).toBe(true);
+    await repository.loadConversation('agent-1');
+    expect(repository.getCompletion('agent-1')?.unread).toBe(true);
+    await repository.markCompletionRead('agent-1', receipt.id);
+    expect(repository.getCompletion('agent-1')?.unread).toBe(false);
+  });
+
+  it('persists acknowledgement across duplicate snapshots, reconnects and application restart', async () => {
+    const { repository } = await setup();
+    const id = repository.getCompletion('agent-1')!.id;
+    await repository.loadConversation('agent-1');
+    await repository.markCompletionRead('agent-1', id);
+    await repository.refreshRuntime();
+    await repository.releaseDevice('device-1');
+    await repository.connect('ssh-2', 'device-1');
+    expect(repository.getCompletion('agent-1')).toMatchObject({ id, unread: false });
+    const restored = repositoryWith([fakeTransport(completed())]);
+    await restored.hydrate();
+    await restored.connect('ssh-3', 'device-1');
+    expect(restored.getCompletion('agent-1')).toMatchObject({ id, unread: false });
+  });
+
+  it('leaves a newer completion unread when an earlier read finishes late', async () => {
+    const { repository, transport } = await setup();
+    const old = repository.getCompletion('agent-1')!.id;
+    await repository.loadConversation('agent-1');
+    transport.request.mockResolvedValueOnce(completed('done', 12));
+    await repository.refreshRuntime();
+    const current = repository.getCompletion('agent-1')!.id;
+    expect(current).not.toBe(old);
+    await repository.markCompletionRead('agent-1', old);
+    expect(repository.getCompletion('agent-1')).toMatchObject({ id: current, unread: true });
+  });
+
+  it('does not manufacture a completion when send acknowledgement optimistically marks working', async () => {
+    const { repository } = await setup();
+    const id = repository.getCompletion('agent-1')!.id;
+    await repository.loadConversation('agent-1');
+    await repository.markCompletionRead('agent-1', id);
+    await repository.sendMessage('agent-1', 'Next task');
+    await repository.flushCommands('device-1');
+    expect(repository.getSnapshot().runtime.agents[0].status).toBe('working');
+    await repository.refreshRuntime();
+    expect(repository.getCompletion('agent-1')).toMatchObject({ id, unread: false });
+  });
+
+  it('restores unread state on storage failure and allows a later successful acknowledgement', async () => {
+    const { repository } = await setup();
+    const id = repository.getCompletion('agent-1')!.id;
+    await repository.loadConversation('agent-1');
+    jest.mocked(AsyncStorage.setItem).mockRejectedValueOnce(new Error('storage unavailable'));
+    await expect(repository.markCompletionRead('agent-1', id)).rejects.toThrow('storage unavailable');
+    expect(repository.getCompletion('agent-1')?.unread).toBe(true);
+    await repository.markCompletionRead('agent-1', id);
+    expect(repository.getCompletion('agent-1')?.unread).toBe(false);
+  });
+
+  it('does not roll back a newer completion when saving an older acknowledgement fails', async () => {
+    const { repository, transport } = await setup();
+    const old = repository.getCompletion('agent-1')!.id;
+    await repository.loadConversation('agent-1');
+    let reject!: (reason: Error) => void;
+    let started!: () => void;
+    const began = new Promise<void>((resolve) => { started = resolve; });
+    jest.mocked(AsyncStorage.setItem).mockImplementationOnce(() => {
+      started();
+      return new Promise<void>((_resolve, fail) => { reject = fail; });
+    });
+    const saving = repository.markCompletionRead('agent-1', old);
+    const failure = expect(saving).rejects.toThrow('storage unavailable');
+    await began;
+    transport.emit({ protocol: 1, type: 'event', event: 'runtime.snapshot', data: completed('done', 12) });
+    const newer = repository.getCompletion('agent-1')!.id;
+    reject(new Error('storage unavailable'));
+    await failure;
+    await repository.refreshRuntime();
+    expect(repository.getCompletion('agent-1')).toMatchObject({ id: newer, unread: true });
+    expect(JSON.parse(disk.get(runtimeKey)!)['device-1'].agents[0].completion.unread).toBe(true);
   });
 });
 
@@ -240,6 +380,32 @@ describe('HerdrRepository multi-device runtime', () => {
   });
 
     describe('HerdrRepository provider session rotation', () => {
+      it('requests output activity for the explicit owning device', async () => {
+        const { repository, transport } = await setup();
+        transport.request.mockClear();
+        await repository.refreshRuntime(deviceId, true);
+        expect(transport.request).toHaveBeenCalledWith('runtime.snapshot', { includeActivity: true });
+      });
+
+      it('retains observed output recency across same-session snapshots but not session replacement', async () => {
+        const { repository, transport, rotate } = await setup();
+        const current = sessionRuntime('old-session');
+        transport.request.mockResolvedValueOnce({
+          ...current, agents: current.agents.map((agent) => ({ ...agent, lastOutputAt: 200 })),
+        });
+        await repository.refreshRuntime();
+        await repository.refreshRuntime();
+        expect(repository.getSnapshot().runtime.agents[0].lastOutputAt).toBe(200);
+        transport.request.mockResolvedValueOnce({
+          ...current, agents: current.agents.map((agent) => ({ ...agent, lastOutputAt: 100 })),
+        });
+        await repository.refreshRuntime();
+        expect(repository.getSnapshot().runtime.agents[0].lastOutputAt).toBe(200);
+        rotate('new-session');
+        await repository.refreshRuntime();
+        expect(repository.getSnapshot().runtime.agents[0].lastOutputAt).toBeUndefined();
+      });
+
       it.each(['wrong-agent', 'malformed-json', 'invalid-schema'])('recovers from %s cached data by loading the authoritative transcript', async (kind) => {
         const { repository, transport } = await setup();
         const bad = kind === 'malformed-json' ? '{broken'
