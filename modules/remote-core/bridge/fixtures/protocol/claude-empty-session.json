@@ -1,0 +1,26 @@
+{
+  "frames": [
+    {
+      "session": {"provider": "claude", "paneId": "contract-pane", "providerSessionId": "contract-claude-empty"},
+      "capabilities": {
+        "supportsRetuning": false,
+        "structuredConversation": false,
+        "streamingConversation": false,
+        "structuredQuestions": false,
+        "toolActivity": false,
+        "todos": false,
+        "fallback": true
+      },
+      "events": [],
+      "terminalText": "Synthetic old terminal output.",
+      "conversation": {
+        "agentId": "agent_4933996907bac635c6ea",
+        "provider": "claude",
+        "providerSessionId": "contract-claude-empty",
+        "semantic": true,
+        "items": [],
+        "activeHumanRequest": null
+      }
+    }
+  ]
+}

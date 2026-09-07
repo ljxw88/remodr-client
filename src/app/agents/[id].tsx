@@ -1,5 +1,5 @@
 import { router, Stack, useFocusEffect, useIsFocused, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -7,51 +7,40 @@ import {
   Keyboard,
   Pressable,
   StyleSheet,
-  TextInput,
   View,
 } from 'react-native';
 
-import { MarkdownMessage } from '@/components/markdown/markdown-message';
-import { MessageText } from '@/components/markdown/markdown-theme';
-import { AppIcon, type AppIconName } from '@/components/ui/app-icon';
-import { GlassSurface } from '@/components/ui/glass-surface';
 import { Screen } from '@/components/ui/screen';
-import { ScrollEdgeFrame } from '@/components/ui/scroll-edge-frame';
 import { ThemedText } from '@/components/themed-text';
-import { Colors, Fonts, Radius, ScrollEdgeFade, Spacing } from '@/constants/theme';
+import { Colors, Fonts, Radius, Spacing } from '@/constants/theme';
 import {
   providerLabel,
   statusLabel,
-  type ConversationItem,
-  type HumanRequest,
   type RemoteAgent,
 } from '@/domain/herdr';
-import { modelLabel, supportsRetuning } from '@/domain/agent-catalogue';
-import { agentSession, commandSession, sameAgentSession, type AgentSession } from '@/domain/agent-session';
+import { modelLabel } from '@/domain/agent-catalogue';
+import { supportsRetuning } from '@/domain/agent-capabilities';
+import { agentSession, commandSession, sameAgentSession } from '@/domain/agent-session';
 import { beginAgentSettingsFlow, beginRenameAgentFlow } from '@/features/agents/agent-edit-flow';
 import { ActionMenu } from '@/components/ui/action-menu';
+import { ConversationComposer } from '@/features/agents/conversation-composer';
+import { ConversationMessageList } from '@/features/agents/conversation-message-list';
 import { HumanRequestBar } from '@/features/agents/human-request-bar';
 import { useAgentConversation, useHerdr } from '@/features/agents/use-herdr';
-import { conversationRefreshInterval, startConversationRefresh } from '@/features/agents/conversation-refresh';
+import { useConversationController } from '@/features/agents/use-conversation-controller';
 import { useConversationScroll } from '@/features/agents/use-conversation-scroll';
-import { CommandDelivery, ConnectionStatus } from '@/features/connection/connection-status';
+import { usePersistedDraft } from '@/features/agents/use-persisted-draft';
+import { ConnectionStatus } from '@/features/connection/connection-status';
 import { useConnectionSnapshot, useForeground, usePendingCommands } from '@/features/connection/use-connection';
 import {
   groupToolActivity,
   currentToolActivity,
-  planProgress,
-  toolActivitySummary,
   type ConversationDisplayItem,
-  type PlanItem,
-  type ToolActivityGroup,
 } from '@/features/agents/conversation-display';
 import { useTheme } from '@/hooks/use-theme';
 import { useKeyboardOverlap } from '@/hooks/use-keyboard-overlap';
-import { isBridgeUnavailable } from '@/services/herdr-bridge-transport';
 import { herdrRepository } from '@/services/herdr-repository';
 import { toUserMessage } from '@/utils/user-error';
-
-const HISTORY_ANCHOR = { minIndexForVisible: 0 };
 
 export default function AgentConversationScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -59,9 +48,9 @@ export default function AgentConversationScreen() {
   const agent = Object.values(runtime.devices)
     .flatMap((device) => device.runtime.agents)
     .find((item) => item.id === id);
-  const agentId = agent?.id;
   const agentStatus = agent?.status;
   const conversation = useAgentConversation(id ?? '');
+  const hasOpenRequest = conversation?.activeHumanRequest != null;
   // A cached runtime can name an agent well before its device transport is up,
   // and a conversation fetched in that window throws. Following the owning
   // device's connection gives the fetch a trigger to run again on.
@@ -76,11 +65,22 @@ export default function AgentConversationScreen() {
   const commands = usePendingCommands();
   const ownerConnected = ownerConnection === 'connected' &&
     (!ownerSnapshot || ownerSnapshot.phase === 'connected');
-  const [draft, setDraft] = useState('');
-  const [draftReadyFor, setDraftReadyFor] = useState<string | null>(null);
-  const [conversationError, setConversationError] = useState<string | null>(null);
+  const { error: conversationError, retry: retryConversation } = useConversationController({
+    conversationId: id,
+    agent,
+    hasOpenRequest,
+    connected: ownerConnected,
+    focused,
+    foreground,
+    repository: herdrRepository,
+  });
+  const { draft, error: draftError, changeDraft: updateDraft, captureSend } = usePersistedDraft({
+    agentId: id,
+    repository: herdrRepository,
+    focused,
+    foreground,
+  });
   const [sendError, setSendError] = useState<string | null>(null);
-  const [reloadToken, setReloadToken] = useState(0);
   const [sending, setSending] = useState(false);
   const [composerHeight, setComposerHeight] = useState(0);
   const [closingAgent, setClosingAgent] = useState(false);
@@ -98,8 +98,8 @@ export default function AgentConversationScreen() {
     scrollToLatest,
   });
   const sendingRef = useRef(false);
-  const draftRevision = useRef(0);
-  const refreshRef = useRef<Promise<void> | null>(null);
+  const currentAgentId = useRef(id);
+  useLayoutEffect(() => { currentAgentId.current = id; }, [id]);
   const requestId = conversation?.activeHumanRequest?.id;
   const answerPending = commands.some((command) =>
     command.agentId === id && command.action === 'human_request.answer' &&
@@ -157,8 +157,7 @@ export default function AgentConversationScreen() {
   }
 
   function changeDraft(text: string) {
-    draftRevision.current++;
-    setDraft(text);
+    updateDraft(text);
     setSendError(null);
   }
 
@@ -176,106 +175,11 @@ export default function AgentConversationScreen() {
   const workingLabel = activeTool?.title
     ? `${activeTool.title}…`
     : `${agent ? providerLabel(agent.provider) : 'The agent'} is working`;
-  const hasOpenRequest = conversation?.activeHumanRequest != null;
   const scheduleScroll = scroll.schedule;
 
   useEffect(() => {
     scheduleScroll();
   }, [displayItems, composerHeight, keyboardHeight, scheduleScroll]);
-
-  useEffect(() => {
-    if (!id) return;
-    let cancelled = false;
-    void herdrRepository.restoreConversation(id).catch((error) => {
-      if (!cancelled) setConversationError(toUserMessage(error));
-    });
-    return () => { cancelled = true; };
-  }, [id]);
-
-  useEffect(() => {
-    if (!id) {
-      return;
-    }
-    let cancelled = false;
-    const revision = draftRevision.current;
-    void herdrRepository
-      .loadDraft(id)
-      .then((saved) => {
-        if (!cancelled && draftRevision.current === revision) setDraft(saved);
-        if (!cancelled) setDraftReadyFor(id);
-      })
-      .catch((error) => {
-        console.warn('[CONVERSATION] Could not load draft', error);
-        if (!cancelled) setSendError('Could not restore the saved draft. Existing saved text has not been replaced.');
-      });
-    return () => { cancelled = true; };
-  }, [id]);
-
-  useEffect(() => {
-    if (!agentId || !ownerConnected || !foreground || !focused) {
-      return;
-    }
-    let cancelled = false;
-    let readCompletionId: string | undefined;
-    const stop = startConversationRefresh({
-      interval: conversationRefreshInterval(
-        agentStatus, hasOpenRequest, agent?.capabilities.streamingConversation === true,
-      ),
-      inFlight: refreshRef,
-      refresh: () => {
-        const completion = herdrRepository.getCompletion(agentId);
-        readCompletionId = completion?.unread ? completion.id : undefined;
-        return herdrRepository.loadConversation(agentId);
-      },
-      onSuccess: () => {
-        setConversationError(null);
-        if (readCompletionId) {
-          void herdrRepository.markCompletionRead(agentId, readCompletionId).catch((error) => {
-            console.warn('[COMPLETION] Could not save completion read state', error);
-            if (!cancelled) setConversationError(toUserMessage(error));
-          });
-        }
-      },
-      onError: (error) => {
-        console.warn('[CONVERSATION] Could not load conversation', error);
-        setConversationError(
-          isBridgeUnavailable(error)
-            ? 'Not connected to this agent’s device.'
-            : toUserMessage(error),
-        );
-      },
-    });
-    return () => { cancelled = true; stop(); };
-  }, [
-    agent?.completion?.id,
-    agent?.provider,
-    agent?.providerSessionId,
-    agent?.capabilities.streamingConversation,
-    agentId,
-    agentStatus,
-    hasOpenRequest,
-    ownerConnected,
-    foreground,
-    focused,
-    reloadToken,
-  ]);
-
-  useEffect(() => {
-    if (!id || draftReadyFor !== id) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      void herdrRepository.saveDraft(id, draft).catch((error) => {
-        console.warn('[CONVERSATION] Could not save draft', error);
-      });
-    }, 250);
-    return () => {
-      clearTimeout(timer);
-      void herdrRepository.saveDraft(id, draft).catch((error) => {
-        console.warn('[CONVERSATION] Could not save draft', error);
-      });
-    };
-  }, [draft, draftReadyFor, id]);
 
   if (!agent) {
     return (
@@ -287,8 +191,7 @@ export default function AgentConversationScreen() {
   }
 
   async function send() {
-    const text = draft.trim();
-    if (!text || sendingRef.current || !agent) {
+    if (sendingRef.current || !agent) {
       return;
     }
     if (requestId && herdrRepository.getPendingCommands().some((command) =>
@@ -299,8 +202,13 @@ export default function AgentConversationScreen() {
       setSendError('An answer is already queued. Review its delivery status before answering again.');
       return;
     }
+    const submission = captureSend();
+    if (!submission?.text) {
+      submission?.cancel();
+      return;
+    }
+    const text = submission.text;
     sendingRef.current = true;
-    const revision = draftRevision.current;
     setSending(true);
     setSendError(null);
     scroll.followLatest();
@@ -314,13 +222,17 @@ export default function AgentConversationScreen() {
       } else {
         await herdrRepository.sendMessage(agent.id, text);
       }
-      if (draftRevision.current === revision) setDraft('');
-      scroll.schedule();
+      // Enqueue is already durable. A draft-clear failure is reported separately
+      // by the hook and must not make the user think sending failed.
+      await submission.complete().catch(() => undefined);
+      if (mounted.current && currentAgentId.current === submission.agentId) scroll.schedule();
     } catch (error) {
-      setSendError(toUserMessage(error));
+      if (mounted.current && currentAgentId.current === submission.agentId) setSendError(toUserMessage(error));
+      else console.warn('[CONVERSATION] Could not queue message', error);
     } finally {
+      submission.cancel();
       sendingRef.current = false;
-      setSending(false);
+      if (mounted.current) setSending(false);
     }
   }
 
@@ -357,7 +269,7 @@ export default function AgentConversationScreen() {
                 disabled={closingAgent}
                 items={[
                   { id: 'rename', label: 'Rename Agent', onPress: () => openAgentForm('rename') },
-                  { id: 'settings', label: 'Model Settings', disabled: !supportsRetuning(agent.provider), onPress: () => openAgentForm('settings') },
+                  { id: 'settings', label: 'Model Settings', disabled: !supportsRetuning(agent.provider, agent.capabilities), onPress: () => openAgentForm('settings') },
                   { id: 'diagnostics', label: 'Session diagnostics', onPress: () => router.push({ pathname: '/diagnostics', params: { agentId: agent.id } }) },
                   { id: 'close', label: 'Close agent', destructive: true, disabled: !ownerConnected, onPress: confirmCloseAgent },
                 ]}
@@ -371,107 +283,43 @@ export default function AgentConversationScreen() {
             composer and reconnect overlay outside it. */}
         <View style={styles.flex}>
           <AgentHeader agent={agent} connected={ownerConnected} />
-          <ScrollEdgeFrame
-            inverted
-            onScroll={(event) => scroll.onScroll(event.nativeEvent.contentOffset.y)}
-            // The fade is what stops rows reading through the gaps between the
-            // composer's stacked panels, so it has to reach as far as they do.
-            bottomHeight={Math.max(
-              ScrollEdgeFade.bottomHeight,
-              composerHeight + keyboardHeight,
-            )}>
-            {(edge) => (
-              <FlatList
-                {...edge}
-                key={id}
-                ref={listRef}
-                inverted
-                keyboardShouldPersistTaps="handled"
-                keyboardDismissMode="on-drag"
-                data={displayItems}
-                keyExtractor={(item) => item.id}
-                renderItem={({ item }) => (
-                  <ConversationRow
-                    item={item}
-                    agent={agent}
-                    onEdit={changeDraft}
-                  />
-                )}
-                showsVerticalScrollIndicator={false}
-                initialNumToRender={20}
-                maxToRenderPerBatch={20}
-                windowSize={7}
-                contentContainerStyle={styles.messages}
-                onContentSizeChange={(width, height) => {
-                  edge.onContentSizeChange(width, height);
-                  scroll.schedule();
-                }}
-                onLayout={(event) => {
-                  edge.onLayout(event);
-                  scroll.schedule();
-                }}
-                onScrollBeginDrag={(event) => scroll.onScrollBeginDrag(event.nativeEvent.contentOffset.y)}
-                onScrollEndDrag={(event) => scroll.onScrollEndDrag(event.nativeEvent.contentOffset.y)}
-                onMomentumScrollBegin={scroll.onMomentumScrollBegin}
-                onMomentumScrollEnd={(event) => scroll.onMomentumScrollEnd(event.nativeEvent.contentOffset.y)}
-                // Keep native anchoring stable: toggling it can reuse a stale
-                // anchor on iOS. Explicit follow runs after layout settles.
-                maintainVisibleContentPosition={HISTORY_ANCHOR}
-                // Inverted, so this sits below the newest message. It is
-                // measured rather than guessed because the composer grows: a
-                // pending question, the working row and a wrapped draft all
-                // change its height, and a fixed spacer lets it cover the
-                // newest message.
-                ListHeaderComponent={
-                  <View style={{ height: composerHeight + keyboardHeight }} />
-                }
-                ListEmptyComponent={
-                  <View style={styles.empty}>
-                    {conversationError ? (
-                      <>
-                        <ThemedText type="small" themeColor="textMuted">
-                          {conversationError}
-                        </ThemedText>
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel="Retry loading conversation"
-                          onPress={() => setReloadToken((token) => token + 1)}>
-                          <ThemedText type="smallBold" style={styles.retry}>
-                            Try again
-                          </ThemedText>
-                        </Pressable>
-                      </>
-                    ) : conversation ? (
-                      <ThemedText type="small" themeColor="textMuted">
-                        No conversation yet.
-                      </ThemedText>
-                    ) : ownerConnected ? (
-                      <ActivityIndicator color={Colors.accent} />
-                    ) : (
-                      <ThemedText type="small" themeColor="textMuted">
-                        Conversation will load when this device reconnects.
-                      </ThemedText>
-                    )}
-                  </View>
-                }
-              />
-            )}
-          </ScrollEdgeFrame>
+          <ConversationMessageList
+            conversationId={id}
+            data={displayItems}
+            listRef={listRef}
+            agent={agent}
+            onEdit={changeDraft}
+            connected={ownerConnected}
+            error={conversationError}
+            hasConversation={conversation != null}
+            bottomInset={composerHeight + keyboardHeight}
+            onRetry={retryConversation}
+            scroll={scroll}
+          />
         </View>
-        <Composer
+        <ConversationComposer
           value={draft}
           onChangeText={changeDraft}
           onSend={() => void send()}
           sending={sending}
-          enqueueGuard={sendingRef}
           answerPending={answerPending}
-          error={sendError}
-          agentId={agent.id}
-          session={{ provider: agent.provider, paneId: agent.paneId, providerSessionId: agent.providerSessionId ?? null }}
-          request={conversation?.activeHumanRequest ?? null}
+          error={[sendError, draftError].filter(Boolean).join('\n') || null}
+          hasOpenRequest={hasOpenRequest}
+          requestBar={conversation?.activeHumanRequest ? (
+            // A new question or session starts with a clean selection.
+            <HumanRequestBar
+              key={JSON.stringify([agent.provider, agent.paneId, agent.providerSessionId ?? null, conversation.activeHumanRequest.id])}
+              agentId={agent.id}
+              session={{ provider: agent.provider, paneId: agent.paneId, providerSessionId: agent.providerSessionId ?? null }}
+              request={conversation.activeHumanRequest}
+              enqueueing={sending}
+              enqueueGuard={sendingRef}
+              onAnswer={scroll.followLatest}
+            />
+          ) : null}
           onHeightChange={setComposerHeight}
           modelName={modelLabel(agent.provider, agent.tuning?.model)}
-          tunable={supportsRetuning(agent.provider)}
+          tunable={supportsRetuning(agent.provider, agent.capabilities)}
           onOpenModelSettings={() => openAgentForm('settings')}
           keyboardOffset={keyboardHeight}
           showLatest={!scroll.following}
@@ -547,638 +395,6 @@ function AgentHeader({ agent, connected }: { agent: RemoteAgent; connected: bool
   );
 }
 
-function ConversationRow({
-  item,
-  agent,
-  onEdit,
-}: {
-  item: ConversationDisplayItem;
-  agent: RemoteAgent;
-  onEdit: (text: string) => void;
-}) {
-  const theme = useTheme();
-
-  if (item.kind === 'tool_group') {
-    return <ToolActivityGroupRow group={item} />;
-  }
-
-  if (item.kind === 'user_message') {
-    return (
-      <Pressable
-        onLongPress={() => {
-          if (item.delivery && item.delivery !== 'sent') return;
-          Alert.alert('Message', undefined, [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Edit & resend', onPress: () => onEdit(item.text) },
-          ]);
-        }}
-        style={styles.userWrap}>
-        <View
-          style={[
-            styles.userMessage,
-            { backgroundColor: theme.glassStrong, borderColor: theme.glassBorder },
-          ]}>
-          {/* The same size the agent's replies read at, so one side of the
-              conversation does not look louder than the other. */}
-          <ThemedText selectable style={MessageText}>
-            {item.text}
-          </ThemedText>
-        </View>
-        <CommandDelivery
-          commandId={item.commandId}
-          delivery={item.delivery}
-          deliveryError={item.deliveryError}
-          previousSession={item.previousSession}
-        />
-      </Pressable>
-    );
-  }
-
-  if (item.kind === 'assistant_message') {
-    return (
-      <View style={styles.assistantMessage}>
-        <MarkdownMessage>{item.markdown}</MarkdownMessage>
-      </View>
-    );
-  }
-
-  if (item.kind === 'tool_activity') {
-    return <ToolActivityRow item={item} />;
-  }
-
-  if (item.kind === 'human_request') {
-    // Pinned above the composer while it is open, so the transcript carries
-    // only the record of one already answered — otherwise the same question
-    // would be on screen twice, and the copy that scrolls away is the one
-    // without any buttons.
-    return item.resolved ? <AskedQuestionRow request={item.request} /> : null;
-  }
-
-  if (item.kind === 'todo_update') {
-    return <PlanRow todos={item.todos} />;
-  }
-
-  if (item.kind === 'raw_output') {
-    return <RawOutputRow item={item} />;
-  }
-
-  return (
-    <ThemedText type="caption" themeColor="textMuted">
-      {item.text ?? statusLabel(item.status)}
-    </ThemedText>
-  );
-}
-
-function RawOutputRow({
-  item,
-}: {
-  item: Extract<ConversationItem, { kind: 'raw_output' }>;
-}) {
-  const theme = useTheme();
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <View
-      style={[
-        styles.raw,
-        { backgroundColor: theme.backgroundElement, borderColor: theme.border },
-      ]}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ expanded }}
-        onPress={() => setExpanded((current) => !current)}
-        style={({ pressed }) => [styles.rawSummary, pressed && styles.pressed]}>
-        <AppIcon
-          name={{ ios: 'terminal', android: 'terminal', web: 'terminal' }}
-          size={16}
-          tintColor={theme.textMuted}
-          fallback="›_"
-        />
-        <View style={styles.rawCopy}>
-          <ThemedText type="smallBold">Agent output</ThemedText>
-          <ThemedText type="caption" themeColor="textMuted">
-            Compatibility view
-          </ThemedText>
-        </View>
-        <AppIcon
-          name={{
-            ios: expanded ? 'chevron.up' : 'chevron.right',
-            android: expanded ? 'expand_less' : 'chevron_right',
-            web: expanded ? 'expand_less' : 'chevron_right',
-          }}
-          size={16}
-          tintColor={theme.textMuted}
-          fallback={expanded ? '⌃' : '›'}
-        />
-      </Pressable>
-      {expanded ? (
-        <View style={[styles.rawDetails, { borderTopColor: theme.border }]}>
-          <ThemedText type="code" selectable>
-            {item.text}
-          </ThemedText>
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
-/**
- * One tool call, and deliberately not a thing you can open.
- *
- * The group above it is already a disclosure; making each call inside it
- * another one puts three layers between the reader and a detail — collapsed
- * group, open group, open call — and by the third nobody knows where they are.
- * So the detail is simply here, and the group is the only thing that folds.
- */
-function ToolActivityRow({
-  item,
-}: {
-  item: Extract<ConversationItem, { kind: 'tool_activity' }>;
-}) {
-  const theme = useTheme();
-  const tone = toolStateTone(item.state, theme);
-  const label = toolStateLabel(item.state);
-
-  return (
-    <View style={styles.toolCall}>
-      <View style={styles.toolCallMark}>
-        {item.state === 'running' ? (
-          <ActivityIndicator size="small" color={theme.accent} />
-        ) : (
-          <AppIcon
-            name={toolStateIcon(item.state)}
-            size={14}
-            tintColor={tone}
-            fallback={item.state === 'failed' || item.state === 'cancelled' ? '✕' : '·'}
-          />
-        )}
-      </View>
-      <View style={styles.toolCopy}>
-        <ThemedText type="smallBold">{item.title}</ThemedText>
-        {item.detail ? (
-          <ThemedText type="caption" themeColor="textSecondary">
-            {item.detail}
-          </ThemedText>
-        ) : null}
-      </View>
-      {/* Only when it says something. "Done" on every completed call is a
-          column of the word "Done", which is not a status, it is wallpaper. */}
-      {label ? (
-        <ThemedText type="caption" style={{ color: tone }}>
-          {label}
-        </ThemedText>
-      ) : null}
-    </View>
-  );
-}
-
-function ToolActivityGroupRow({ group }: { group: ToolActivityGroup }) {
-  const theme = useTheme();
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <View
-      style={[
-        styles.toolGroup,
-        { backgroundColor: theme.backgroundElement, borderColor: theme.border },
-      ]}>
-      <ToolGroupToggle
-        group={group}
-        expanded={expanded}
-        onPress={() => setExpanded((current) => !current)}
-      />
-      {expanded ? (
-        <View style={[styles.toolDetails, { borderTopColor: theme.border }]}>
-          {group.items.map((item) => (
-            <ToolActivityRow key={item.id} item={item} />
-          ))}
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
-function ToolGroupToggle({
-  group,
-  expanded = false,
-  onPress,
-}: {
-  group: ToolActivityGroup;
-  expanded?: boolean;
-  onPress: () => void;
-}) {
-  const theme = useTheme();
-  const { label, failed, running } = toolActivitySummary(group);
-  const failedLabel = failed > 0 ? `${failed} failed` : null;
-
-  return (
-    <Pressable
-      accessibilityRole="button"
-      /* The count is in the visible label already; what a screen reader is
-         missing is what the row does and what the colour is saying. */
-      accessibilityLabel={[
-        label,
-        failedLabel,
-        expanded ? 'Collapse tool calls' : 'Expand tool calls',
-      ].filter(Boolean).join('. ')}
-      accessibilityState={{ expanded }}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.toolSummary,
-        pressed && styles.pressed,
-      ]}>
-      <View style={styles.toolCallMark}>
-        {running ? (
-          <ActivityIndicator size="small" color={theme.accent} />
-        ) : (
-          <AppIcon
-            name={{ ios: 'hammer', android: 'build', web: 'build' }}
-            size={16}
-            tintColor={theme.textMuted}
-            fallback="•"
-          />
-        )}
-      </View>
-      <ThemedText type="smallBold" style={styles.toolSummaryLabel}>
-        {label}
-      </ThemedText>
-      {/* A failure inside a folded group is the one thing that must not need
-          opening to be seen. Six calls that worked and one that did not is not
-          "worked for 20m". */}
-      {failedLabel ? (
-        <ThemedText type="caption" style={{ color: theme.danger }}>
-          {failedLabel}
-        </ThemedText>
-      ) : null}
-      <AppIcon
-        name={{
-          ios: expanded ? 'chevron.up' : 'chevron.right',
-          android: expanded ? 'expand_less' : 'chevron_right',
-          web: expanded ? 'expand_less' : 'chevron_right',
-        }}
-        size={16}
-        tintColor={theme.textMuted}
-        fallback={expanded ? '⌃' : '›'}
-      />
-    </Pressable>
-  );
-}
-
-/**
- * The agent's plan, as one live checklist.
- *
- * Every state the bridge can send is drawn differently, which sounds obvious
- * and was not true: `in_progress` and `blocked` used to render exactly like
- * `pending`, so the two things a reader actually wants — where the agent is
- * now, and what is stuck — were the two things the plan would not tell them.
- *
- * Finished steps are dimmed rather than hidden. They are worth keeping as a
- * record of where the work has been, and worth taking the eye off, so what is
- * left carries the weight.
- */
-function PlanRow({ todos }: { todos: PlanItem[] }) {
-  const theme = useTheme();
-  const { done, total } = planProgress(todos);
-
-  return (
-    <View
-      style={[styles.plan, { backgroundColor: theme.glass, borderColor: theme.glassBorder }]}>
-      <View style={styles.planHeader}>
-        <ThemedText type="smallBold">Plan</ThemedText>
-        <ThemedText type="caption" themeColor="textMuted">
-          {done} of {total}
-        </ThemedText>
-      </View>
-      {todos.map((todo, index) => (
-        <PlanStep key={todo.id ?? `${index}:${todo.text}`} todo={todo} />
-      ))}
-    </View>
-  );
-}
-
-function PlanStep({ todo }: { todo: PlanItem }) {
-  const theme = useTheme();
-  const active = todo.state === 'in_progress';
-  const finished = todo.state === 'done';
-  const blocked = todo.state === 'blocked';
-
-  return (
-    <View
-      accessible
-      accessibilityLabel={`${todo.text}, ${todo.state.replace('_', ' ')}`}
-      style={styles.planStep}>
-      <View style={styles.planStepMark}>
-        {active ? (
-          <ActivityIndicator size="small" color={theme.accent} />
-        ) : (
-          <AppIcon
-            name={planStateIcon(todo.state)}
-            size={14}
-            tintColor={
-              finished ? theme.textMuted : blocked ? theme.warning : theme.textMuted
-            }
-            fallback={finished ? '✓' : blocked ? '!' : '○'}
-          />
-        )}
-      </View>
-      <ThemedText
-        type="caption"
-        style={[
-          styles.planStepText,
-          {
-            color: active
-              ? theme.accent
-              : blocked
-                ? theme.warning
-                : finished
-                  ? theme.textMuted
-                  : theme.textSecondary,
-          },
-        ]}>
-        {todo.text}
-      </ThemedText>
-    </View>
-  );
-}
-
-function planStateIcon(state: PlanItem['state']): AppIconName {
-  if (state === 'done') {
-    return { ios: 'checkmark', android: 'check', web: 'check' };
-  }
-  if (state === 'blocked') {
-    return { ios: 'exclamationmark.circle.fill', android: 'error', web: 'error' };
-  }
-  return { ios: 'circle', android: 'radio_button_unchecked', web: 'radio_button_unchecked' };
-}
-
-function toolStateIcon(
-  state: Extract<ConversationItem, { kind: 'tool_activity' }>['state'],
-): AppIconName {
-  if (state === 'completed') {
-    return { ios: 'checkmark', android: 'check', web: 'check' };
-  }
-  if (state === 'failed' || state === 'cancelled') {
-    return { ios: 'xmark', android: 'close', web: 'close' };
-  }
-  return { ios: 'circle', android: 'radio_button_unchecked', web: 'radio_button_unchecked' };
-}
-
-/**
- * A completed call is dimmed rather than green. Six green ticks in a row say
- * nothing a reader did not already assume, and they leave nothing for the one
- * red cross among them to stand out against.
- */
-function toolStateTone(
-  state: Extract<ConversationItem, { kind: 'tool_activity' }>['state'],
-  theme: typeof Colors,
-): string {
-  if (state === 'failed') return theme.danger;
-  if (state === 'running') return theme.accent;
-  return theme.textMuted;
-}
-
-function toolStateLabel(
-  state: Extract<ConversationItem, { kind: 'tool_activity' }>['state'],
-) {
-  switch (state) {
-    case 'running':
-      return 'Running';
-    case 'failed':
-      return 'Failed';
-    case 'cancelled':
-      return 'Cancelled';
-    default:
-      return '';
-  }
-}
-
-/**
- * A question the agent asked, as a record in the transcript.
- *
- * The answering happens in the bar above the composer, so this carries no
- * controls: two sets of buttons for one question invite the user to tap the
- * pair that has scrolled out of sight. The answer follows as the next user
- * message, which leaves the exchange readable in order.
- */
-function AskedQuestionRow({ request }: { request: HumanRequest }) {
-  const theme = useTheme();
-
-  return (
-    <View
-      style={[
-        styles.request,
-        { backgroundColor: theme.glassStrong, borderColor: theme.glassBorder },
-      ]}>
-      <ThemedText type="label" themeColor="textMuted">
-        ASKED YOU
-      </ThemedText>
-      {/* The weight and size a message reads at. The card and its label
-          already mark this out, so the question needs no emphasis of its own. */}
-      <ThemedText type="small">{request.question}</ThemedText>
-    </View>
-  );
-}
-
-function ModelSettingsButton({
-  label,
-  onPress,
-  disabled = false,
-}: {
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-}) {
-  const theme = useTheme();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`Model Settings: ${label}`}
-      accessibilityState={{ disabled }}
-      disabled={disabled}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.pill,
-        {
-          backgroundColor: pressed
-            ? 'rgba(255, 255, 255, 0.12)'
-            : 'rgba(255, 255, 255, 0.06)',
-          borderColor: theme.glassBorder,
-          opacity: disabled ? 0.5 : 1,
-        },
-      ]}>
-      <ThemedText
-        type="smallBold"
-        numberOfLines={1}
-        ellipsizeMode="tail"
-        style={{ color: theme.text, fontSize: 13, flexShrink: 1 }}>
-        {label}
-      </ThemedText>
-      {disabled ? null : (
-        <AppIcon
-          name={{ ios: 'chevron.down', android: 'expand_more', web: 'expand_more' }}
-          size={14}
-          tintColor={theme.textSecondary}
-          fallback="⌄"
-        />
-      )}
-    </Pressable>
-  );
-}
-
-const MIN_INPUT_HEIGHT = 38;
-const MAX_INPUT_HEIGHT = 120;
-
-function Composer({
-  value,
-  onChangeText,
-  onSend,
-  sending,
-  enqueueGuard,
-  answerPending,
-  error,
-  agentId,
-  session,
-  request,
-  onHeightChange,
-  modelName,
-  tunable,
-  onOpenModelSettings,
-  keyboardOffset = 0,
-  showLatest,
-  onFollowLatest,
-}: {
-  value: string;
-  onChangeText: (text: string) => void;
-  onSend: () => void;
-  sending: boolean;
-  enqueueGuard: { current: boolean };
-  answerPending: boolean;
-  error: string | null;
-  agentId: string;
-  session: AgentSession;
-  request: HumanRequest | null;
-  onHeightChange: (height: number) => void;
-  modelName: string;
-  tunable: boolean;
-  onOpenModelSettings: () => void;
-  keyboardOffset?: number;
-  showLatest: boolean;
-  onFollowLatest: () => void;
-}) {
-  const theme = useTheme();
-
-  return (
-    <View
-      style={[styles.composer, { bottom: keyboardOffset }]}
-      onLayout={(event) => onHeightChange(event.nativeEvent.layout.height)}>
-      {request ? (
-        // Last before the card, because it tucks itself underneath it — any
-        // sibling in between would be dragged under there too.
-        //
-        // Keyed so a new question starts with a clean slate rather than
-        // inheriting the last one's half-made selection.
-        <HumanRequestBar
-          key={JSON.stringify([session.provider, session.paneId, session.providerSessionId, request.id])}
-          agentId={agentId}
-          session={session}
-          request={request}
-          enqueueing={sending}
-          enqueueGuard={enqueueGuard}
-          onAnswer={onFollowLatest}
-        />
-      ) : null}
-      <View style={styles.cardWrapper}>
-        <GlassSurface
-          tone="chrome"
-          strength="strong"
-          highlight
-          style={styles.cardSurface}>
-          <View style={styles.cardContent}>
-            <View style={styles.cardTop}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Add context"
-                onPress={() => {
-                  onChangeText(value ? (value.endsWith(' ') ? `${value}@` : `${value} @`) : '@');
-                }}
-                style={({ pressed }) => [
-                  styles.atButton,
-                  {
-                    backgroundColor: pressed ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.06)',
-                    borderColor: theme.glassBorder,
-                  },
-                ]}>
-                <ThemedText style={styles.atText}>@</ThemedText>
-              </Pressable>
-              {showLatest ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Scroll to latest message"
-                  accessibilityHint="Resume following new messages"
-                  hitSlop={8}
-                  onPress={onFollowLatest}
-                  style={({ pressed }) => [
-                    styles.latest,
-                    { backgroundColor: theme.accentSoft, opacity: pressed ? 0.72 : 1 },
-                  ]}>
-                  <AppIcon
-                    name={{ ios: 'arrow.down', android: 'arrow_downward', web: 'arrow_downward' }}
-                    size={14}
-                    tintColor={theme.text}
-                    fallback="↓"
-                  />
-                  <ThemedText type="caption">Latest</ThemedText>
-                </Pressable>
-              ) : null}
-            </View>
-
-            <TextInput
-              accessibilityLabel={request ? 'Write an answer' : 'Build anything'}
-              multiline
-              blurOnSubmit={false}
-              textAlignVertical="top"
-              maxLength={20_000}
-              value={value}
-              onChangeText={onChangeText}
-              placeholder={answerPending ? 'Answer queued…' : request ? 'Write another answer…' : 'Build anything…'}
-              placeholderTextColor={theme.placeholder}
-              style={[styles.input, { color: theme.text }]}
-            />
-            {error ? (
-              <ThemedText type="caption" themeColor="danger" accessibilityLiveRegion="polite">
-                {error}
-              </ThemedText>
-            ) : null}
-
-            <View style={styles.cardBottom}>
-              <ModelSettingsButton label={modelName} onPress={onOpenModelSettings} disabled={!tunable} />
-
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Send"
-                accessibilityState={{ disabled: !value.trim() || sending || answerPending }}
-                disabled={!value.trim() || sending || answerPending}
-                onPress={onSend}
-                style={({ pressed }) => [
-                  styles.send,
-                  {
-                    backgroundColor: value.trim() && !sending && !answerPending ? theme.accent : 'rgba(255, 255, 255, 0.08)',
-                    opacity: pressed ? 0.75 : 1,
-                  },
-                ]}>
-                <AppIcon
-                  name={{ ios: 'arrow.up', android: 'arrow_upward', web: 'arrow_upward' }}
-                  size={18}
-                  tintColor={value.trim() && !sending && !answerPending ? theme.onAccent : theme.textMuted}
-                  fallback="↑"
-                />
-              </Pressable>
-            </View>
-          </View>
-        </GlassSurface>
-      </View>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   screen: {
     paddingHorizontal: 0,
@@ -1236,240 +452,11 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.semibold,
     fontWeight: 600,
   },
-  messages: {
-    flexGrow: 1,
-    gap: Spacing.three,
-    paddingHorizontal: Spacing.two,
-    paddingTop: Spacing.two,
-    paddingBottom: Spacing.two,
-  },
-  userWrap: {
-    alignSelf: 'flex-end',
-    maxWidth: '88%',
-    alignItems: 'flex-end',
-  },
-  userMessage: {
-    paddingHorizontal: Spacing.two,
-    paddingVertical: 10,
-    borderWidth: 0,
-    borderRadius: Radius.glass,
-  },
-  assistantMessage: {
-    gap: Spacing.one,
-  },
-  tool: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
-    minHeight: 46,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderRadius: Radius.control,
-  },
-  toolGroup: {
-    borderWidth: 1,
-    borderRadius: Radius.control,
-    overflow: 'hidden',
-  },
-  toolSummary: {
-    minHeight: 46,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
-    paddingHorizontal: 14,
-  },
-  toolSummaryLabel: {
-    flex: 1,
-  },
-  toolDetails: {
-    gap: Spacing.one,
-    padding: Spacing.one,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  toolCopy: {
-    flex: 1,
-    gap: 3,
-  },
-  /** One call inside an opened group. */
-  toolCall: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Spacing.one,
-    paddingHorizontal: Spacing.one,
-    paddingVertical: Spacing.half + 2,
-  },
-  /**
-   * A fixed column for the state mark, so a spinner and a glyph of different
-   * sizes leave the titles beside them on one line.
-   */
-  toolCallMark: {
-    width: 18,
-    minHeight: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  request: {
-    // The label is a caption for the question, so it sits against it rather
-    // than a whole step away.
-    gap: Spacing.half,
-    padding: Spacing.one + Spacing.half,
-    borderWidth: 1,
-    // The radius the other transcript cards use. This one was the odd one out,
-    // and a wide corner on a card this size crowds its own text.
-    borderRadius: Radius.control,
-  },
-  plan: {
-    gap: Spacing.half,
-    padding: Spacing.one + Spacing.half,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderRadius: Radius.control,
-  },
-  planHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.one,
-    paddingBottom: Spacing.half,
-  },
-  planStep: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Spacing.one,
-  },
-  planStepMark: {
-    width: 18,
-    minHeight: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  planStepText: {
-    flex: 1,
-  },
-  raw: {
-    borderWidth: 1,
-    borderRadius: Radius.control,
-    overflow: 'hidden',
-  },
-  rawSummary: {
-    minHeight: 52,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
-    paddingHorizontal: 14,
-  },
-  rawCopy: {
-    flex: 1,
-    gap: 2,
-  },
-  rawDetails: {
-    padding: Spacing.two,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
     marginRight: Spacing.one,
-  },
-  composer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingHorizontal: Spacing.two,
-    paddingTop: Spacing.two,
-    paddingBottom: Spacing.two,
-    gap: Spacing.one,
-  },
-  cardWrapper: {
-    borderRadius: Radius.glass,
-    overflow: 'hidden',
-  },
-  cardSurface: {
-    borderRadius: Radius.glass,
-    overflow: 'hidden',
-    padding: 0,
-  },
-  cardContent: {
-    paddingHorizontal: Spacing.two,
-    paddingTop: Spacing.one + Spacing.half,
-    paddingBottom: Spacing.one + Spacing.half,
-  },
-  cardTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  atButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  latest: {
-    marginLeft: 'auto',
-    minHeight: 28,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.half,
-    paddingHorizontal: Spacing.one,
-    borderRadius: Radius.pill,
-  },
-  atText: {
-    fontSize: 14,
-    fontFamily: Fonts.medium,
-    fontWeight: '500',
-    color: Colors.textSecondary,
-    marginTop: -1,
-  },
-  input: {
-    paddingHorizontal: 0,
-    paddingTop: 4,
-    paddingBottom: 4,
-    minHeight: MIN_INPUT_HEIGHT,
-    maxHeight: MAX_INPUT_HEIGHT,
-    fontFamily: Fonts.regular,
-    fontSize: 16,
-    textAlignVertical: 'top',
-    includeFontPadding: false,
-  },
-  cardBottom: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.two,
-    marginTop: Spacing.one,
-    minHeight: 36,
-  },
-  pill: {
-    flexShrink: 1,
-    minWidth: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: Radius.pill,
-    borderWidth: 1,
-  },
-  send: {
-    flexShrink: 0,
-    width: 36,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 18,
-    overflow: 'hidden',
-  },
-  retry: {
-    color: Colors.accent,
-  },
-  empty: {
-    alignItems: 'center',
-    paddingVertical: Spacing.four,
   },
   pressed: {
     opacity: 0.6,

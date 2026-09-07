@@ -72,6 +72,42 @@ coverage, plus the corresponding mobile provider/model-catalogue support.
 Keep shared session isolation and durable command preconditions in the runtime
 rather than duplicating them in provider adapters.
 
+## Cross-language protocol fixtures
+
+`fixtures/protocol/*.json` contains synthetic, checked-in wire contracts shared
+by `test_protocol_contract.py` and `src/domain/protocol-contract.test.ts`.
+The conversation fixtures include source events, terminal text, session
+bindings, runtime agent capabilities, and canonical output. Python writes the source events to isolated
+session files under the bridge directory, then uses production bridge dispatch,
+runtime normalization, and provider readers. It compares entire conversations
+and the runtime agent's session fields and capabilities with the fixtures. No real sessions,
+credentials, Herdr server, or provider CLI are used.
+
+Coverage includes empty Copilot/Claude/Codex semantic sessions, Copilot session
+replacement on the same pane, structured questions and tool activity, explicit
+null session identity in terminal fallback, and durable accepted/uncertain
+responses. Durable fixtures exercise the real SQLite ledger and verify replay
+from a new bridge instance without repeating delivery.
+
+Jest reads those same JSON files through the production conversation/response
+schemas and session/capability helpers. Strict parsed equality catches fields silently
+stripped or defaulted by a schema; separate tests specify legacy omitted
+identity and question-default behavior. The capability contract includes the
+bridge's existing `supportsRetuning` field, so it cannot silently disappear in
+mobile schema parsing. Jest does not invoke Python.
+
+Run both suites from the repository root:
+
+```sh
+python3 -m unittest discover -s modules/remote-core/bridge -p 'test_protocol_contract.py' -v
+npm test -- --runInBand src/domain/protocol-contract.test.ts
+```
+
+To change a contract intentionally, edit the synthetic source and canonical
+JSON together, review the wire-format diff, and run both suites. There is no
+snapshot-update or automatic fixture-rewrite mode: a failing comparison must
+not silently bless changed bridge output.
+
 ## Providers and model settings
 
 The bridge supports **GitHub Copilot, Claude Code, Codex, and Cursor Agent**.

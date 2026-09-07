@@ -98,12 +98,33 @@ the agent step does not delete the space.
 Folder selection uses only a successfully loaded path. Editing the address disables
 selection until Go opens it, so a stale listing cannot select the wrong folder.
 
+The picker and file manager share
+[`useRemoteDirectory`](../src/features/files/use-remote-directory.ts). Entries,
+loading and errors belong to one host/session/path request. Navigation and retry
+invalidate the previous request immediately; blur/unmount discards late results,
+and refocus/reconnection starts a fresh read. Both successful and failed responses
+recheck the live native session before affecting the visible listing. A detected
+session mismatch refreshes native session observers and surfaces a connection
+error rather than leaving a permanent loading state.
+
+Create/delete remain file-manager actions. Their captured request tokens prevent
+late completions from refreshing a different directory, and stale delete or
+folder-selection confirmations cannot act on a replacement view/session.
+Creating a folder does not clear a newer name typed while it was in flight.
+The file manager distinguishes loading, read failure with retry, and a genuinely
+empty directory; a failed post-mutation listing is not reported as a failed
+mutation.
+
 Model selection only changes the draft. Model/effort/context compatibility comes
 from the [per-provider JSON catalogues](model-catalogues.md), through
 `agent-catalogue.ts`. Model selection at creation is available for Copilot,
-Codex, Claude Code, and Cursor Agent. Live Model Settings remain Copilot-only:
-applying reasoning or context changes retains the existing restart warning
-and explicit confirmation action.
+Codex, Claude Code, and Cursor Agent. Live Model Settings require a client
+implementation (currently Copilot only) and the agent's reported retuning
+capability. An explicit `false` disables entry and Apply; an omitted field keeps
+legacy Copilot behavior. Availability is read from the current runtime, not
+captured in the form draft, and is checked again when submitting. Draft edits
+survive a capability or connection change. Applying reasoning or context changes
+retains the existing restart warning and explicit confirmation action.
 
 ## Mobile keyboards
 

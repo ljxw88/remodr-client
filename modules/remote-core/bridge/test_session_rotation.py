@@ -17,6 +17,9 @@ class SessionRotationTest(unittest.TestCase):
         home = patch.object(Path, "home", return_value=self.home)
         home.start()
         self.addCleanup(home.stop)
+        environment = patch.dict("os.environ", {"CODEX_HOME": str(self.home / ".codex")})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.bridge = Bridge()
         self.bridge.agent_catalog = [{"provider": "copilot", "available": True}]
         self.bridge._ensure_pane_subscriptions = Mock()

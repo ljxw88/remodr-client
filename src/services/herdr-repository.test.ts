@@ -102,6 +102,88 @@ function repositoryWith(transports: FakeTransport[]) {
   }));
 }
 
+describe('HerdrRepository live retuning capabilities', () => {
+  function snapshot(supportsRetuning?: boolean, provider: 'copilot' | 'codex' = 'copilot'): HerdrRuntimeState {
+    return {
+      ...runtime,
+      agents: [{
+        ...runtime.agents[0], provider,
+        capabilities: {
+          ...runtime.agents[0].capabilities,
+          ...(supportsRetuning === undefined ? {} : { supportsRetuning }),
+        },
+      }],
+    };
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.mocked(AsyncStorage.getItem).mockReset().mockResolvedValue(null);
+    jest.mocked(AsyncStorage.setItem).mockReset().mockResolvedValue(undefined);
+    jest.mocked(AsyncStorage.removeItem).mockReset().mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  });
+
+  it.each([true, undefined])('permits supported and legacy Copilot retuning (%s)', async (support) => {
+    const current = snapshot(support);
+    const transport = fakeTransport(current);
+    const repository = repositoryWith([transport]);
+    await repository.connect('ssh-1', 'device-1');
+    expect(repository.getSnapshot().devices['device-1'].runtime.agents[0].capabilities.supportsRetuning).toBe(support);
+    transport.request.mockResolvedValueOnce({ agentId: 'agent-1', runtime: current });
+    await repository.retuneAgent({ agentId: 'agent-1', model: 'new-model' });
+    expect(transport.request).toHaveBeenCalledWith('agent.retune', { agentId: 'agent-1', model: 'new-model' });
+  });
+
+  it('rejects direct retuning when the latest runtime explicitly disables it', async () => {
+    const transport = fakeTransport(snapshot(true));
+    const repository = repositoryWith([transport]);
+    await repository.connect('ssh-1', 'device-1');
+    transport.request.mockResolvedValueOnce(snapshot(false));
+    await repository.refreshRuntime('device-1');
+    expect(repository.getSnapshot().devices['device-1'].runtime.agents[0].capabilities.supportsRetuning).toBe(false);
+    await expect(repository.retuneAgent({ agentId: 'agent-1', model: 'new-model' }))
+      .rejects.toThrow('does not support live model settings');
+    expect(transport.request.mock.calls.some(([action]) => action === 'agent.retune')).toBe(false);
+  });
+
+  it('does not trust remote support for a provider the client cannot retune', async () => {
+    const transport = fakeTransport(snapshot(true, 'codex'));
+    const repository = repositoryWith([transport]);
+    await repository.connect('ssh-1', 'device-1');
+    await expect(repository.retuneAgent({ agentId: 'agent-1', model: 'new-model' }))
+      .rejects.toThrow('This app does not support');
+    expect(transport.request.mock.calls.some(([action]) => action === 'agent.retune')).toBe(false);
+  });
+
+  it('requires a connected owning device rather than relying on cached support', async () => {
+    const transport = fakeTransport(snapshot(true));
+    const repository = repositoryWith([transport]);
+    await repository.connect('ssh-1', 'device-1');
+    await repository.releaseDevice('device-1');
+    await expect(repository.retuneAgent({ agentId: 'agent-1', model: 'new-model' }))
+      .rejects.toMatchObject({ code: 'BRIDGE_NOT_STARTED' });
+    expect(transport.request.mock.calls.some(([action]) => action === 'agent.retune')).toBe(false);
+  });
+
+  it('preserves an explicit refusal across runtime cache persistence and hydration', async () => {
+    const transport = fakeTransport(snapshot(false));
+    const repository = repositoryWith([transport]);
+    await repository.connect('ssh-1', 'device-1');
+    const cached = jest.mocked(AsyncStorage.setItem).mock.calls.find(([key]) =>
+      key === 'remote-workspace.herdr.runtimes.v2')?.[1];
+    expect(cached).toBeDefined();
+    jest.mocked(AsyncStorage.getItem).mockResolvedValueOnce(cached!);
+    const restored = repositoryWith([fakeTransport(snapshot(false))]);
+    await restored.hydrate();
+    expect(restored.getSnapshot().devices['device-1'].runtime.agents[0].capabilities.supportsRetuning).toBe(false);
+  });
+});
+
 describe('Herdr runtime reducer', () => {
   it.each([
     ['working'],
@@ -447,7 +529,7 @@ describe('HerdrRepository multi-device runtime', () => {
         }
       });
 
-      it('surfaces cache-removal failures and recovers when storage works again', async () => {
+      it('warns on cache-removal failures without blocking the authoritative transcript', async () => {
         const { repository, transport } = await setup();
         const bad = JSON.stringify({ ...transcript('old-session'), agentId: 'another-agent' });
         jest.mocked(AsyncStorage.getItem).mockResolvedValue(bad);
@@ -455,9 +537,11 @@ describe('HerdrRepository multi-device runtime', () => {
         transport.request.mockClear();
         const warning = jest.spyOn(console, 'warn').mockImplementation(() => {});
         try {
-          await expect(repository.loadConversation(agentId)).rejects.toThrow('storage unavailable');
-          expect(transport.request).not.toHaveBeenCalled();
           await expect(repository.loadConversation(agentId)).resolves.toMatchObject({ agentId });
+          expect(transport.request).toHaveBeenCalledWith('agent.conversation', { agentId });
+          expect(warning).toHaveBeenCalledWith(
+            '[CONVERSATION_CACHE] Could not persist cached transcript', agentId, expect.any(Error),
+          );
         } finally {
           warning.mockRestore();
         }
@@ -467,9 +551,17 @@ describe('HerdrRepository multi-device runtime', () => {
         const { repository, transport } = await setup();
         jest.mocked(AsyncStorage.getItem).mockRejectedValueOnce(new Error('storage read failed'));
         transport.request.mockClear();
-        await expect(repository.loadConversation(agentId)).rejects.toThrow('storage read failed');
-        expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
-        expect(transport.request).not.toHaveBeenCalled();
+        const warning = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+          await expect(repository.loadConversation(agentId)).resolves.toMatchObject({ agentId });
+          expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
+          expect(transport.request).toHaveBeenCalledWith('agent.conversation', { agentId });
+          expect(warning).toHaveBeenCalledWith(
+            '[CONVERSATION_CACHE] Could not read cached transcript', agentId, expect.any(Error),
+          );
+        } finally {
+          warning.mockRestore();
+        }
       });
 
       const agentId = 'agent-1';
@@ -586,6 +678,26 @@ describe('HerdrRepository multi-device runtime', () => {
         expect(repository.getConversation(agentId)?.providerSessionId).toBe('new-session');
       });
 
+      it('keeps session invalidation effective even when cache eviction fails', async () => {
+        const { repository, rotate } = await setup();
+        await repository.loadConversation(agentId);
+        jest.mocked(AsyncStorage.removeItem).mockRejectedValueOnce(new Error('disk unavailable'));
+        const warning = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+          rotate('new-session');
+          await repository.refreshRuntime();
+          expect(repository.getConversation(agentId)).toBeNull();
+          await expect(repository.loadConversation(agentId)).resolves.toMatchObject({
+            providerSessionId: 'new-session',
+          });
+          expect(warning).toHaveBeenCalledWith(
+            '[CONVERSATION_CACHE] Could not persist cached transcript', agentId, expect.any(Error),
+          );
+        } finally {
+          warning.mockRestore();
+        }
+      });
+
       it('serializes cache removal after a previously started write, before the replacement write', async () => {
         const { repository, rotate } = await setup();
         const writing = deferred<void>();
@@ -602,11 +714,14 @@ describe('HerdrRepository multi-device runtime', () => {
         });
         const loading = repository.loadConversation(agentId);
         await began.promise;
+        await loading;
+        expect(repository.getConversation(agentId)?.providerSessionId).toBe('old-session');
         rotate('new-session');
         const refreshing = repository.refreshRuntime();
-        await Promise.resolve();
+        await expect(repository.loadConversation(agentId)).resolves.toMatchObject({ providerSessionId: 'new-session' });
         writing.resolve();
-        await Promise.all([loading, refreshing]);
+        await refreshing;
+        await Promise.resolve();
         expect(operations).toEqual(['write:old-session', 'remove', 'write:new-session']);
         expect(repository.getConversation(agentId)?.providerSessionId).toBe('new-session');
       });
@@ -904,6 +1019,41 @@ describe('HerdrRepository multi-device runtime', () => {
     expect(first.request).toHaveBeenCalledTimes(1);
   });
 
+  it('still rejects enqueue when durable outbox storage fails', async () => {
+    const transport = fakeTransport(runtime);
+    const disk = { getItem: jest.fn(async () => null), setItem: jest.fn(async () => undefined) };
+    const repository = new HerdrRepository(() => transport, new CommandOutbox(disk));
+    await repository.connect('ssh-1', 'device-1');
+    disk.setItem.mockRejectedValueOnce(new Error('outbox unavailable'));
+    await expect(repository.sendMessage('agent-1', 'Keep my draft')).rejects.toThrow('outbox unavailable');
+    expect(repository.getPendingCommands()).toHaveLength(0);
+    expect(transport.request.mock.calls.some(([action]) => action === 'agent.send_message')).toBe(false);
+  });
+
+  it('publishes remote output but never confirms failed durable reconciliation', async () => {
+    const transport = fakeTransport(runtime);
+    const disk = { getItem: jest.fn(async () => null), setItem: jest.fn(async () => undefined) };
+    const repository = new HerdrRepository(() => transport, new CommandOutbox(disk));
+    await repository.connect('ssh-1', 'device-1');
+    await repository.sendMessage('agent-1', 'Hello');
+    await repository.flushCommands('device-1');
+    // Join the post-ACK refresh before returning the matching remote message.
+    await repository.loadConversation('agent-1');
+    const command = repository.getPendingCommands()[0];
+    expect(command.state).toBe('sent');
+    const reply = {
+      agentId: 'agent-1', provider: 'copilot', semantic: true,
+      items: [{ id: 'remote-message', kind: 'user_message', text: 'Hello', commandId: command.id }],
+    };
+    transport.request.mockResolvedValue(reply);
+    disk.setItem.mockRejectedValueOnce(new Error('outbox unavailable'));
+    await expect(repository.loadConversation('agent-1')).rejects.toThrow('outbox unavailable');
+    expect(repository.getConversation('agent-1')?.items[0]).toMatchObject({ id: 'remote-message' });
+    expect(repository.getPendingCommands()).toEqual([command]);
+    await repository.loadConversation('agent-1');
+    expect(repository.getPendingCommands()).toHaveLength(0);
+  });
+
   it('does not rewrite or republish an unchanged polled transcript', async () => {
     const { repository } = await connectTwoDevices();
     await repository.loadConversation('agent-a1');
@@ -926,8 +1076,23 @@ describe('HerdrRepository multi-device runtime', () => {
       items: [{ kind: 'assistant_message', id: 'reply', markdown: 'Latest output' }],
     });
     jest.mocked(AsyncStorage.setItem).mockRejectedValueOnce(new Error('storage unavailable'));
-    await expect(repository.loadConversation('agent-a1')).rejects.toThrow('storage unavailable');
-    await repository.loadConversation('agent-a1');
+    const warning = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(repository.loadConversation('agent-a1')).resolves.toMatchObject({
+        items: [expect.objectContaining({ markdown: 'Latest output' })],
+      });
+      expect(repository.getConversation('agent-a1')?.items[0]).toMatchObject({ markdown: 'Latest output' });
+      expect(warning).toHaveBeenCalledWith(
+        '[CONVERSATION_CACHE] Could not persist cached transcript', 'agent-a1', expect.any(Error),
+      );
+      jest.mocked(AsyncStorage.setItem).mockClear();
+      await repository.loadConversation('agent-a1');
+      expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+        'remote-workspace.herdr.conversation.agent-a1', expect.stringContaining('Latest output'),
+      );
+    } finally {
+      warning.mockRestore();
+    }
     expect(repository.getConversation('agent-a1')?.items[0]).toMatchObject({ markdown: 'Latest output' });
   });
 

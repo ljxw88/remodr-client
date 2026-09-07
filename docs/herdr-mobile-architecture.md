@@ -31,8 +31,28 @@ bundled [per-provider JSON catalogues](../src/domain/model-catalogues/), loaded
 by [`agent-catalogue.ts`](../src/domain/agent-catalogue.ts). Run the
 [model refresh script](model-catalogues.md) on a maintenance machine and ship
 the resulting JSON with the app. This is separate from the server's
-provider-installation catalog. Live retuning remains Copilot-only; launch
-configuration uses each provider's own flags.
+provider-installation catalog. Launch configuration uses each provider's own
+flags; catalogue entries do not grant permission to retune a running agent.
+
+Live retuning is resolved by
+[`agent-capabilities.ts`](../src/domain/agent-capabilities.ts), independently of
+the model catalogues. This client currently implements Copilot retuning only.
+For that provider, the runtime agent's `capabilities.supportsRetuning` controls
+availability:
+
+| Reported value | Client behavior |
+| --- | --- |
+| `true` | Enable the client-supported settings UI |
+| `false` | Disable entry and reject submission |
+| Omitted by an older bridge | Preserve the previous Copilot-only behavior |
+
+The schema deliberately preserves an omitted field instead of defaulting it to
+`false`; a malformed reported value is not treated as a legacy omission. A
+remote `true` cannot enable a provider the client does not implement. The
+composer, action menu, settings-flow validation, and repository submission
+boundary share this decision. Open drafts remain editable if support changes,
+but applying requires the current owning device to be connected and supported.
+The bridge remains authoritative if its state changes after the last snapshot.
 
 ## Transport and deployment
 

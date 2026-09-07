@@ -5,7 +5,7 @@ import { View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { AppButton } from '@/components/ui/app-button';
 import { FormError, FormPage, MissingFlow } from '@/components/ui/form-page';
-import { supportsRetuning } from '@/domain/agent-catalogue';
+import { supportsRetuning } from '@/domain/agent-capabilities';
 import { agentEditError, tuningChanges } from '@/features/agents/agent-edit-flow';
 import { TuningFields } from '@/features/agents/tuning-fields';
 import { useHerdr } from '@/features/agents/use-herdr';
@@ -60,7 +60,7 @@ export default function AgentSettingsPage() {
       busy={busy}
       footer={
         <>
-          <FormError message={error ?? availabilityError} />
+          <FormError message={availabilityError ?? error} />
           <AppButton
             label={busy ? 'Applying…' : restarts ? 'Apply and restart' : 'Apply'}
             disabled={busy || !changed || !!availabilityError}

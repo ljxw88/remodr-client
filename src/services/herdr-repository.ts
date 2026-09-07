@@ -3,7 +3,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   closeSpaceInputSchema,
   closeSpaceResultSchema,
-  conversationSchema,
   agentMutationResultSchema,
   createAgentInputSchema,
   createAgentResultSchema,
@@ -32,15 +31,16 @@ import {
   type RemoteAgent,
 } from '@/domain/herdr';
 import { agentSession, commandSession, conversationMatchesAgent, sameAgentSession, type AgentSession } from '@/domain/agent-session';
+import { retuningUnavailableReason } from '@/domain/agent-capabilities';
 import { HerdrBridgeTransport } from '@/services/herdr-bridge-transport';
 import { classifyConnectionError, connectionErrorCode, ConnectionError } from '@/domain/connection-error';
 import { CommandOutbox, type PendingCommand } from '@/services/command-outbox';
+import { DraftStore } from '@/services/draft-store';
+import { ConversationStore, type ConversationRequest } from '@/services/conversation-store';
 import { completionForSnapshot } from '@/domain/agent-completion';
 import { createId } from '@/utils/create-id';
 
 const RUNTIME_CACHE_KEY = 'remote-workspace.herdr.runtimes.v2';
-const DRAFT_PREFIX = 'remote-workspace.herdr.draft.';
-const CONVERSATION_PREFIX = 'remote-workspace.herdr.conversation.';
 
 /** Everything the app knows about one device's Herdr runtime. */
 export type DeviceRuntimeState = {
@@ -119,20 +119,22 @@ export class HerdrRepository {
   private hydrated = false;
   private connectionObserver: ((deviceId: string, error: unknown) => void) | null = null;
   private reconnectHandler: ((deviceId: string) => Promise<boolean>) | null = null;
-  private rawConversations = new Map<string, AgentConversation>();
-  private refreshing = new Map<string, Promise<AgentConversation>>();
-  private restoring = new Map<string, Promise<void>>();
-  private conversationEpochs = new Map<string, number>();
-  private conversationWrites = new Map<string, Promise<void>>();
+  private readonly transcripts: ConversationStore;
   private draining = new Map<string, Promise<void>>();
   private outboxTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private writingRuntimes: Promise<void> = Promise.resolve();
+  private readonly drafts = new DraftStore(AsyncStorage);
 
   constructor(
     private readonly createTransport: () => HerdrBridgeTransport = () =>
       new HerdrBridgeTransport(),
     private readonly outbox = new CommandOutbox(),
   ) {
+    this.transcripts = new ConversationStore({
+      getAgent: (agentId) => this.currentAgent(agentId),
+      open: (agentId) => this.openConversationRequest(agentId),
+    }, AsyncStorage, (conversation) => this.reconcileCommands(conversation));
+    this.transcripts.subscribe(() => this.publishConversations());
     outbox.subscribe(() => this.publishConversations());
   }
 
@@ -167,7 +169,7 @@ export class HerdrRepository {
 
   async markCompletionRead(agentId: string, expectedId: string): Promise<void> {
     const agent = this.currentAgent(agentId);
-    const conversation = this.rawConversations.get(agentId);
+    const conversation = this.transcripts.get(agentId);
     if (!agent || !conversation || !conversationMatchesAgent(conversation, agent)) return;
     if (!this.setCompletionUnread(agentId, expectedId, false)) return;
     try {
@@ -340,9 +342,7 @@ export class HerdrRepository {
     if (!device) return;
     device.generation++;
     device.sessionId = null;
-    for (const agentId of this.refreshing.keys()) {
-      if (this.deviceIdForAgent(agentId) === deviceId) this.refreshing.delete(agentId);
-    }
+    this.transcripts.detach(device.state.runtime.agents.map((agent) => agent.id));
     clearTimeout(this.outboxTimers.get(deviceId));
     this.outboxTimers.delete(deviceId);
     this.setDeviceState(deviceId, { connection: 'disconnected' });
@@ -405,6 +405,15 @@ export class HerdrRepository {
 
   async retuneAgent(input: RetuneAgentInput): Promise<AgentMutationResult> {
     const request = retuneAgentInputSchema.parse(input);
+    const deviceId = this.deviceIdForAgent(request.agentId);
+    const device = deviceId ? this.devices.get(deviceId) : undefined;
+    const agent = this.currentAgent(request.agentId);
+    if (!device || !agent) throw new Error('That agent is not available on a connected device.');
+    if (device.state.connection !== 'connected') {
+      throw new ConnectionError('BRIDGE_NOT_STARTED', 'Reconnect this agent\u2019s device before changing model settings.');
+    }
+    const unavailable = retuningUnavailableReason(agent.provider, agent.capabilities);
+    if (unavailable) throw new Error(unavailable);
     return this.mutateAgent(input.agentId, 'agent.retune', request);
   }
 
@@ -482,125 +491,32 @@ export class HerdrRepository {
   }
 
   async loadConversation(agentId: string): Promise<AgentConversation> {
-    const existing = this.refreshing.get(agentId);
-    if (existing) return existing;
-    const attempt = this.loadConversationOnce(agentId).catch((error: unknown) => {
-      // A rotation can be discovered by the very request reading the transcript.
-      if (connectionErrorCode(error) === 'CONVERSATION_SESSION_CHANGED') return this.loadConversationOnce(agentId);
-      throw error;
-    }).finally(() => {
-      if (this.refreshing.get(agentId) === attempt) this.refreshing.delete(agentId);
-    });
-    this.refreshing.set(agentId, attempt);
-    return attempt;
+    const conversation = await this.transcripts.load(agentId);
+    return this.getConversation(agentId) ?? conversation;
   }
 
   restoreConversation(agentId: string): Promise<void> {
-    if (this.rawConversations.has(agentId)) return Promise.resolve();
-    const active = this.restoring.get(agentId);
-    if (active) return active;
-    const epoch = this.conversationEpoch(agentId);
-    const attempt = (async () => {
-      const cached = await AsyncStorage.getItem(CONVERSATION_PREFIX + agentId);
-      if (cached && epoch === this.conversationEpoch(agentId) && !this.rawConversations.has(agentId)) {
-        let value: unknown;
-        try {
-          value = JSON.parse(cached);
-        } catch (error) {
-          if (!(error instanceof SyntaxError)) throw error;
-          console.warn('[CONVERSATION_CACHE] Discarding malformed cached transcript', agentId);
-          await this.persistConversation(agentId, null, epoch);
-          return;
-        }
-        const parsed = conversationSchema.safeParse(value);
-        if (!parsed.success || parsed.data.agentId !== agentId) {
-          console.warn('[CONVERSATION_CACHE] Discarding invalid or mismatched cached transcript', agentId);
-          await this.persistConversation(agentId, null, epoch);
-          return;
-        }
-        const conversation = parsed.data;
-        const agent = this.currentAgent(agentId);
-        if (agent && !conversationMatchesAgent(conversation, agent)) {
-          await this.persistConversation(agentId, null, epoch);
-          return;
-        }
-        this.rawConversations.set(agentId, conversation);
-        this.publishConversations();
-      }
-    })().finally(() => {
-      if (this.restoring.get(agentId) === attempt) this.restoring.delete(agentId);
-    });
-    this.restoring.set(agentId, attempt);
-    return attempt;
+    return this.transcripts.restore(agentId);
   }
 
-  private async loadConversationOnce(agentId: string): Promise<AgentConversation> {
-    await this.restoreConversation(agentId);
+  private openConversationRequest(agentId: string): ConversationRequest {
     const deviceId = this.deviceIdForAgent(agentId);
     const device = deviceId ? this.devices.get(deviceId) : undefined;
     if (!device || !deviceId) throw new Error('That agent is not available on a connected device.');
     if (device.state.connection !== 'connected') throw new ConnectionError('BRIDGE_NOT_STARTED', 'Reconnecting to the device.');
     const generation = device.generation;
-    const requestedAgent = this.currentAgent(agentId);
-    if (!requestedAgent) throw new Error('That agent is no longer available.');
-    const epoch = this.conversationEpoch(agentId);
-    const assertCurrent = () => {
-      if (device.generation !== generation) throw new ConnectionError('ERR_BRIDGE_CLOSED', 'Stale conversation response.');
-      if (epoch !== this.conversationEpoch(agentId)
-        || !sameAgentSession(agentSession(requestedAgent), agentSession(this.currentAgent(agentId)))) {
-        throw new ConnectionError('CONVERSATION_SESSION_CHANGED', 'The agent session changed. Refreshing its conversation.');
-      }
+    return {
+      read: () => this.requestForAgent(agentId, 'agent.conversation', { agentId }),
+      assertAttached: () => {
+        if (device.generation !== generation) throw new ConnectionError('ERR_BRIDGE_CLOSED', 'Stale conversation response.');
+      },
+      refreshIdentity: () => this.refreshDeviceRuntime(deviceId),
     };
-    const raw = await this.requestForAgent(agentId, 'agent.conversation', { agentId });
-    assertCurrent();
-    const parsed = conversationSchema.parse(raw);
-    if (parsed.agentId !== agentId || parsed.provider !== requestedAgent.provider) {
-      throw new ConnectionError('INVALID_RESPONSE', 'Conversation belongs to a different agent.');
-    }
-    const conversation = {
-      ...parsed,
-      providerSessionId: parsed.providerSessionId === undefined
-        ? requestedAgent.providerSessionId ?? null : parsed.providerSessionId,
-    };
-    if (!conversationMatchesAgent(conversation, requestedAgent)) {
-      await this.refreshDeviceRuntime(deviceId);
-      throw new ConnectionError('CONVERSATION_SESSION_CHANGED', 'The bridge read a different session. Refreshing its identity.');
-    }
-    const serialized = JSON.stringify(conversation);
-    const changed = serialized !== JSON.stringify(this.rawConversations.get(agentId));
-    if (changed) {
-      await this.persistConversation(agentId, conversation, epoch);
-      assertCurrent();
-      this.rawConversations.set(agentId, conversation);
-    }
-    await this.reconcileCommands(conversation);
-    assertCurrent();
-    if (changed) this.publishConversations();
-    return this.getConversation(agentId) ?? conversation;
   }
 
   private currentAgent(agentId: string): RemoteAgent | undefined {
     const deviceId = this.deviceIdForAgent(agentId);
     return deviceId ? this.devices.get(deviceId)?.state.runtime.agents.find((agent) => agent.id === agentId) : undefined;
-  }
-
-  private conversationEpoch(agentId: string): number {
-    return this.conversationEpochs.get(agentId) ?? 0;
-  }
-
-  private persistConversation(agentId: string, conversation: AgentConversation | null, epoch: number): Promise<void> {
-    const operation = (this.conversationWrites.get(agentId) ?? Promise.resolve()).then(async () => {
-      if (epoch !== this.conversationEpoch(agentId)) return;
-      if (conversation) await AsyncStorage.setItem(CONVERSATION_PREFIX + agentId, JSON.stringify(conversation));
-      else await AsyncStorage.removeItem(CONVERSATION_PREFIX + agentId);
-    });
-    // Serialize removals with writes so an older response cannot undo invalidation.
-    const settled = operation.then(() => undefined, () => undefined);
-    this.conversationWrites.set(agentId, settled);
-    void settled.then(() => {
-      if (this.conversationWrites.get(agentId) === settled) this.conversationWrites.delete(agentId);
-    });
-    return operation;
   }
 
   async sendMessage(agentId: string, text: string): Promise<void> {
@@ -609,7 +525,8 @@ export class HerdrRepository {
   }
 
   private async queueCommand(
-    agentId: string, action: PendingCommand['action'], payload: Record<string, unknown>, text: string,
+    agentId: string, action: Exclude<PendingCommand['action'], 'agent.interrupt'>,
+    payload: Record<string, unknown>, text: string,
     expectedSession: AgentSession | undefined = agentSession(this.currentAgent(agentId)),
   ): Promise<void> {
     await this.hydrate();
@@ -629,20 +546,13 @@ export class HerdrRepository {
       }
       throw new Error('Waiting for the agent session identity. Reconnect or refresh before sending.');
     }
-    const generation = device.generation;
-    const command = await this.outbox.enqueue({
+    await this.outbox.enqueue({
       agentId, deviceId: device.deviceId, action, text,
       payload: { ...payload, precondition: {
         provider: agent.provider, paneId: agent.paneId, providerSessionId: agent.providerSessionId,
       } },
-      baselineIds: (this.rawConversations.get(agentId)?.items ?? []).map((item) => item.id),
+      baselineIds: (this.transcripts.get(agentId)?.items ?? []).map((item) => item.id),
     });
-    if (action === 'agent.interrupt' && generation !== device.generation) {
-      await this.outbox.update(command.id, {
-        state: 'failed', invalidated: true, error: 'Connection changed before the interrupt could be sent.',
-      });
-      return;
-    }
     if (this.isDeviceConnected(device.deviceId)) this.scheduleDrain(device.deviceId);
     else if (this.reconnectHandler) {
       // Queueing is not evidence of a failed connection. Join an existing
@@ -658,7 +568,7 @@ export class HerdrRepository {
     requestId: string,
     answer: { selectedOptionIds?: string[]; customText?: string | null },
   ): Promise<void> {
-    const conversation = this.rawConversations.get(agentId);
+    const conversation = this.transcripts.get(agentId);
     const agent = this.currentAgent(agentId);
     if (!conversation || !agent || !conversationMatchesAgent(conversation, agent)
       || conversation.activeHumanRequest?.id !== requestId) {
@@ -761,7 +671,7 @@ export class HerdrRepository {
             continue;
           }
           await this.outbox.setBaseline(command.id,
-            (this.rawConversations.get(command.agentId)?.items ?? []).map((item) => item.id));
+            (this.transcripts.get(command.agentId)?.items ?? []).map((item) => item.id));
         }
         if (device.generation !== generation || device.state.connection !== 'connected') return;
         const claimed = await this.outbox.claim(command.id);
@@ -859,7 +769,7 @@ export class HerdrRepository {
   }
 
   private publishConversations() {
-    const merged = new Map(this.rawConversations);
+    const merged = new Map(this.transcripts.getSnapshot());
     for (const command of this.outbox.getSnapshot()) {
       const device = this.devices.get(command.deviceId);
       const agent = device?.state.runtime.agents.find((entry) => entry.id === command.agentId);
@@ -884,15 +794,11 @@ export class HerdrRepository {
   }
 
   async loadDraft(agentId: string): Promise<string> {
-    return (await AsyncStorage.getItem(DRAFT_PREFIX + agentId)) ?? '';
+    return this.drafts.loadDraft(agentId);
   }
 
   async saveDraft(agentId: string, text: string): Promise<void> {
-    if (text) {
-      await AsyncStorage.setItem(DRAFT_PREFIX + agentId, text);
-    } else {
-      await AsyncStorage.removeItem(DRAFT_PREFIX + agentId);
-    }
+    return this.drafts.saveDraft(agentId, text);
   }
 
   diagnostics() {
@@ -994,29 +900,12 @@ export class HerdrRepository {
       return tracked;
     });
     if (agents.some((agent, index) => agent !== runtime.agents[index])) runtime = { ...runtime, agents };
-    const currentAgents = new Map(runtime.agents.map((agent) => [agent.id, agent]));
-    const invalidated = new Set<string>();
-    for (const [id, previous] of previousAgents) {
-      if (!sameAgentSession(agentSession(previous), agentSession(currentAgents.get(id)))) invalidated.add(id);
-    }
-    for (const agent of runtime.agents) {
-      const cached = this.rawConversations.get(agent.id);
-      if (cached && !conversationMatchesAgent(cached, agent)) invalidated.add(agent.id);
-    }
-    const removals: Promise<void>[] = [];
-    for (const id of invalidated) {
-      const epoch = this.conversationEpoch(id) + 1;
-      this.conversationEpochs.set(id, epoch);
-      this.rawConversations.delete(id);
-      this.restoring.delete(id);
-      removals.push(this.persistConversation(id, null, epoch));
-    }
     device.state = { ...device.state, runtime };
     device.runtimeGeneration = device.generation;
     this.reindexAgents();
-    if (invalidated.size) this.publishConversations();
+    const removals = this.transcripts.reconcileAgents(previousRuntime.agents, runtime.agents);
     this.publish();
-    await Promise.all(removals);
+    await removals;
     if (JSON.stringify(durableRuntime(previousRuntime)) !== JSON.stringify(durableRuntime(runtime))) {
       await this.persistRuntimes();
     }

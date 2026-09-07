@@ -5,6 +5,7 @@ import {
   type Tuning,
 } from '@/domain/agent-catalogue';
 import type { AgentProvider, RemoteAgent } from '@/domain/herdr';
+import { retuningUnavailableReason } from '@/domain/agent-capabilities';
 import {
   flowDrafts,
   type AgentSettingsDraft,
@@ -19,6 +20,8 @@ function deviceFor(agent: RemoteAgent): string {
 }
 
 export function beginAgentSettingsFlow(agent: RemoteAgent): string {
+  const unavailable = retuningUnavailableReason(agent.provider, agent.capabilities);
+  if (unavailable) throw new Error(unavailable);
   const initialTuning = Object.freeze({
     model: agent.tuning?.model ?? null,
     effort: agent.tuning?.effort ?? null,
@@ -63,6 +66,9 @@ export function agentEditError(
   }
   if (draft.providerSessionId != null && agent.providerSessionId !== draft.providerSessionId) {
     return 'This agent’s session has changed. Go back and open a new form.';
+  }
+  if (draft.kind === 'agent-settings') {
+    return retuningUnavailableReason(agent.provider, agent.capabilities);
   }
   return null;
 }

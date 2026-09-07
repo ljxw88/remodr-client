@@ -16,6 +16,7 @@ export const CONTEXT_TIERS = contextTierSchema.options;
 export type ContextTier = (typeof CONTEXT_TIERS)[number];
 export type ContextOption = ModelSpec['contexts'][number];
 export type { ModelSpec } from '@/domain/model-catalogue-schema';
+export { supportsRetuning } from '@/domain/agent-capabilities';
 
 const CATALOGUES = { copilot, codex, claude, cursor };
 const UNAVAILABLE: Partial<Record<AgentProvider, string>> = {};
@@ -45,11 +46,6 @@ export function modelsFor(provider: AgentProvider): ModelSpec[] {
 
 export function supportsTuning(provider: AgentProvider): boolean {
   return Object.hasOwn(CATALOGUES, provider);
-}
-
-/** Live retuning requires the bridge's provider-specific session/resume adapter. */
-export function supportsRetuning(provider: AgentProvider): boolean {
-  return provider === 'copilot';
 }
 
 export function findModel(

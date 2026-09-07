@@ -163,6 +163,31 @@ describe('agent settings and model pages', () => {
     expect(router.back).toHaveBeenCalledTimes(1);
   });
 
+  it('blocks an already-open form when remote support changes, including a stale Apply callback', async () => {
+    TestRenderer.act(() => { renderer = TestRenderer.create(createElement(AgentSettingsPage)); });
+    TestRenderer.act(() => renderer.root.findByType(TuningFields).props.onChange({
+      model: 'private-draft', effort: 'max', context: 'long_context',
+    }));
+    const apply = renderer.root.findByType(AppButton).props.onPress;
+    expect(renderer.root.findByType(AppButton).props.disabled).toBe(false);
+    const device = herdrRepository.getSnapshot().devices['device-a'];
+    device.runtime.agents[0].capabilities.supportsRetuning = false;
+    await TestRenderer.act(async () => { apply(); });
+    expect(herdrRepository.retuneAgent).not.toHaveBeenCalled();
+    expect(renderer.root.findByType(AppButton).props.disabled).toBe(true);
+    expect(renderer.root.findByType(FormError).props.message).toContain('does not support live model settings');
+    expect(flowDrafts.get(flowId)).toMatchObject({ tuning: { model: 'private-draft' } });
+    expect(renderer.root.findAllByType(TuningFields)).toHaveLength(1);
+    device.runtime.agents[0].capabilities.supportsRetuning = true;
+    jest.mocked(herdrRepository.retuneAgent).mockResolvedValueOnce({ agentId: 'agent-a', runtime: device.runtime });
+    TestRenderer.act(() => renderer.update(createElement(AgentSettingsPage)));
+    expect(renderer.root.findByType(AppButton).props.disabled).toBe(false);
+    await TestRenderer.act(async () => renderer.root.findByType(AppButton).props.onPress());
+    expect(herdrRepository.retuneAgent).toHaveBeenCalledWith({
+      agentId: 'agent-a', model: 'private-draft', effort: 'max', context: 'long_context',
+    });
+  });
+
   it('allows new-agent drafts to use the same model route, including Auto', () => {
     flowDrafts.discard(flowId);
     flowId = flowDrafts.create({

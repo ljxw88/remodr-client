@@ -25,6 +25,9 @@ received Markdown string
 | [`diff.ts`](../src/components/markdown/diff.ts) | Added/removed/hunk/meta/context line classification |
 | [`markdown-theme.ts`](../src/components/markdown/markdown-theme.ts) | Message typography, block spacing, syntax and diff colors |
 | [`conversation-refresh.ts`](../src/features/agents/conversation-refresh.ts) | Visible-chat polling cadence and shared in-flight gate |
+| [`use-conversation-controller.ts`](../src/features/agents/use-conversation-controller.ts) | Restore, refresh lifecycle, retry/error state and completion receipts |
+| [`conversation-message-list.tsx`](../src/features/agents/conversation-message-list.tsx) | Inverted transcript list, message/tool/plan rows and empty states |
+| [`conversation-composer.tsx`](../src/features/agents/conversation-composer.tsx) | Input, send/model controls, question-bar slot and measured overlay layout |
 
 The chat calls `MarkdownMessage` directly for assistant rows. There is no
 client-side typewriter timer or prefix slicing.
@@ -42,7 +45,7 @@ when idle/done, including while a question is already visible. This catches
 final file writes that follow a done-status event. Reads are serialized across
 effect restarts and stop when the chat loses focus, backgrounds, or disconnects.
 
-The repository skips unchanged transcript writes/publications. Component
+`ConversationStore` skips unchanged transcript writes/publications. Component
 memoization avoids reparsing unchanged Markdown. Changed text is still parsed
 as a full string on the JavaScript thread; this is not incremental parsing.
 
@@ -111,6 +114,7 @@ displayed by `MarkdownMessage`.
 ```bash
 npm test -- --runInBand src/components/markdown \
   src/features/agents/conversation-refresh.test.ts \
+  src/features/agents/use-conversation-controller.test.ts \
   src/features/agents/conversation-display.test.ts \
   src/services/herdr-repository.test.ts
 ```

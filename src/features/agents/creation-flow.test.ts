@@ -441,6 +441,41 @@ describe('creation pages and folder lifetime', () => {
     expect(button('Use this folder').props.disabled).toBe(false);
   });
 
+  it('does not select an old displayed folder through a stale confirmation callback', async () => {
+    flowId = beginNewSpaceFlow(owner.deviceId);
+    jest.mocked(remoteClient.sftpList).mockResolvedValue([]);
+    render(FoldersPage);
+    await TestRenderer.act(async () => {});
+    const oldSelection = button('Use this folder').props.onPress;
+    TestRenderer.act(() => field('Folder path').props.onChangeText('/projects'));
+    await TestRenderer.act(async () => control('Open path').props.onPress());
+    TestRenderer.act(() => oldSelection());
+    expect(router.back).not.toHaveBeenCalled();
+    expect(flowDrafts.get(flowId)).toMatchObject({ cwd: '~/' });
+    TestRenderer.act(() => button('Use this folder').props.onPress());
+    expect(router.back).toHaveBeenCalledTimes(1);
+    expect(flowDrafts.get(flowId)).toMatchObject({ cwd: '/projects' });
+  });
+
+  it('surfaces a native session change instead of showing an obsolete listing error', async () => {
+    flowId = beginNewSpaceFlow(owner.deviceId);
+    const pending = deferred<RemoteFile[]>();
+    jest.mocked(remoteClient.sftpList).mockReturnValueOnce(pending.promise).mockResolvedValue([]);
+    render(FoldersPage);
+    const replacement = { ...session, sessionId: 'session-b' };
+    jest.mocked(remoteClient.getSession).mockReturnValue(replacement);
+    await TestRenderer.act(async () => { pending.reject(new Error('Obsolete permission error')); });
+    expect(button('Use this folder').props.disabled).toBe(true);
+    const errors = renderer!.root.findAllByType(FormError).map((node) => node.props.message);
+    expect(errors).toContain('This device disconnected. Reconnect and try again.');
+    expect(errors).not.toContain('Obsolete permission error');
+    session = replacement;
+    updateConnection();
+    await TestRenderer.act(async () => {});
+    expect(button('Use this folder').props.disabled).toBe(false);
+    expect(remoteClient.sftpList).toHaveBeenLastCalledWith('session-b', '.');
+  });
+
   it('uses the same address handler for keyboard Go and the accessory, and navigates Up from the opened path', async () => {
     flowId = beginNewSpaceFlow(owner.deviceId);
     jest.mocked(remoteClient.sftpList).mockResolvedValue([]);

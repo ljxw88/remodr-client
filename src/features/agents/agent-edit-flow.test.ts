@@ -1,6 +1,6 @@
 import { tuningForModel } from '@/domain/agent-catalogue';
 import { EMPTY_RUNTIME, remoteAgentSchema } from '@/domain/herdr';
-import { flowDrafts, type AgentSettingsDraft } from '@/features/forms/flow-drafts';
+import { flowDrafts, type AgentSettingsDraft, type RenameAgentDraft } from '@/features/forms/flow-drafts';
 import { herdrRepository, type DeviceRuntimeState } from '@/services/herdr-repository';
 import {
   agentEditError,
@@ -95,6 +95,35 @@ describe('agent edit drafts', () => {
     expect(renameError(' Agent ', 'Agent')).toContain('different name');
     expect(renameError('a'.repeat(61), 'Agent')).toContain('60 characters');
     expect(renameError(' New name ', 'Agent')).toBeNull();
+  });
+
+  it('rechecks live retuning support without freezing it in the draft or disabling rename', () => {
+    const live = agent();
+    const id = beginAgentSettingsFlow(live);
+    const draft = flowDrafts.get(id) as AgentSettingsDraft;
+    const device: DeviceRuntimeState = {
+      deviceId: 'device-a', connection: 'connected', hello: null, lastError: null,
+      runtime: { ...EMPTY_RUNTIME, agents: [live] },
+    };
+    live.capabilities.supportsRetuning = false;
+    expect(agentEditError({ 'device-a': device }, draft)).toContain('does not support live model settings');
+    expect(() => beginAgentSettingsFlow(live)).toThrow('does not support live model settings');
+    const renameId = beginRenameAgentFlow(live);
+    expect(agentEditError({ 'device-a': device }, flowDrafts.get(renameId) as RenameAgentDraft)).toBeNull();
+    live.capabilities.supportsRetuning = true;
+    expect(agentEditError({ 'device-a': device }, draft)).toBeNull();
+    delete live.capabilities.supportsRetuning;
+    expect(agentEditError({ 'device-a': device }, draft)).toBeNull();
+    expect(draft).not.toHaveProperty('capabilities');
+    flowDrafts.discard(id);
+    flowDrafts.discard(renameId);
+  });
+
+  it('rejects settings entry for an unimplemented provider even with remote support', () => {
+    const live = agent();
+    expect(() => beginAgentSettingsFlow({
+      ...live, provider: 'codex', capabilities: { ...live.capabilities, supportsRetuning: true },
+    })).toThrow('This app does not support');
   });
 });
 

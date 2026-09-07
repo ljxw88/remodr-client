@@ -21,6 +21,7 @@ their own retry timers.
 | [`use-connection-lifecycle.ts`](../src/features/connection/use-connection-lifecycle.ts) | Network/foreground signals and confirmed service activity |
 | [`command-outbox.ts`](../src/services/command-outbox.ts) | Serialized local command persistence |
 | [`herdr-repository.ts`](../src/services/herdr-repository.ts) | Snapshots, pending overlays, dispatch and reconciliation |
+| [`conversation-store.ts`](../src/services/conversation-store.ts) | Conversation reads/restores, session fencing, cache writes and invalidation |
 | [`connection-status.tsx`](../src/features/connection/connection-status.tsx) | Non-modal connection and message-delivery status |
 
 Only explicit selection changes the selected device. Retrying one host cannot
@@ -119,11 +120,40 @@ Answers carry the question identity; sends carry pane/provider-session
 preconditions. Interrupts require a live connection and are not automatically
 replayed into a later run.
 
+### Draft lifecycle
+
+`usePersistedDraft` debounces input changes for 250 ms, then saves through the
+repository's `DraftStore`. Losing focus, entering the background, or unmounting
+flushes the latest text without waiting for the debounce. A pending send retains
+its agent and draft revision across navigation: durable enqueue clears only the
+submitted revision, never text typed afterward, including on a newly mounted
+screen for the same agent.
+
+Draft writes and clears are serialized per agent. A failed restore does not
+replace unread saved text with an empty draft; a failed save keeps edits in
+memory, shows a composer error, and retries on edits, exit, or remount. A failed
+clear after durable enqueue is a draft-storage error, not a failed send.
+Background flushing is best effort before OS suspension, not a guarantee against
+process termination before storage finishes.
+
 ## Snapshot reconciliation
 
-The repository retains its last transcript while detached and persists fetched
-conversations. Only one conversation fetch per agent runs at a time.
-Generation checks reject responses from a replaced attachment.
+The repository delegates authoritative transcripts to `ConversationStore`, which
+retains history while detached and persists fetched conversations. Concurrent
+reads for an agent share both the remote request and its durable reconciliation.
+The repository supplies attachment-generation assertions; the store owns session
+epochs and rejects obsolete responses before publication and after reconciliation.
+
+Conversation disk state is a rebuildable cache, not a delivery receipt. Valid
+remote output is published before cache writes finish; cache read, write, and
+eviction failures emit `CONVERSATION_CACHE` warnings without failing online
+reads. A failed write is retried on the next refresh even when the transcript
+has not changed. Writes and evictions remain ordered per agent.
+
+This degradation policy does not apply to the outbox: enqueue, acknowledgement,
+and reconciliation still require durable storage before confirming their state.
+If reconciliation fails, the remote transcript remains visible and the pending
+entry remains intact for a later attempt.
 
 ### Clearing or replacing a provider session
 
@@ -139,7 +169,7 @@ also detects `/new` before the hook reference changes. No cwd/newest-file
 heuristic is used, and an unverifiable identity blocks dispatch. See
 [Codex startup](herdr-mobile-architecture.md#codex-startup-and-thread-identity).
 
-Conversation responses carry `providerSessionId`. The repository fences reads
+Conversation responses carry `providerSessionId`. `ConversationStore` fences reads
 and disk restores with an agent-session epoch, clears the previous transcript
 and question on a changed provider/session, and serializes cache removals with
 in-flight writes. A session change discovered during a read triggers one bounded
@@ -153,7 +183,7 @@ when a runtime already identifies the active session. Offline history can still
 be restored before runtime discovery, then revalidated against that runtime.
 Malformed, obsolete-schema, or wrong-agent cache entries are discarded
 individually with a diagnostic, allowing a fresh read to proceed. They are not
-permanent connection errors. Cache I/O failures still surface; recovery never
+permanent connection errors. Cache I/O failures surface as diagnostics; recovery never
 clears drafts, credentials, other conversations, or the durable command queue.
 
 Queued commands retain their original provider/session/pane preconditions and

@@ -8,18 +8,40 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: read
+
+# Serialize publication, including manual runs and reruns. Do not cancel a run
+# halfway through replacing release assets; stale queued builds fail freshness checks.
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  validate:
+    uses: ./.github/workflows/validate.yml
+    with:
+      release-tag: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+
   build-android:
+    needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
       contents: write
 
     env:
-      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
       EAS_SKIP_AUTO_FINGERPRINT: "1"
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify release source before building
+        run: node scripts/check-release-source.cjs
+
       - name: Free disk space on runner
         run: |
           echo "Disk space before cleanup:"
@@ -34,11 +56,6 @@ jobs:
           sudo docker system prune --all --volumes -f || true
           echo "Disk space after cleanup:"
           df -h
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -66,33 +83,35 @@ jobs:
         id: app_version
         run: |
           RAW_VERSION=$(node -p "require('./package.json').version")
-          if [ "${{ github.ref_type }}" = "tag" ]; then
-            TAG="${{ github.ref_name }}"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            TAG="$GITHUB_REF_NAME"
+            node scripts/sync-version.cjs --check --tag "$TAG"
             CLEAN_VERSION="${TAG#v}"
             APK_BASENAME="remodr-${TAG}"
             IS_PRERELEASE=false
             RELEASE_TITLE="Remodr ${TAG}"
-            # Ensure app.json matches the tagged version
-            node scripts/sync-version.cjs --no-increment
           else
             TAG="preview"
             CLEAN_VERSION="${RAW_VERSION}"
-            APK_BASENAME="remodr-${RAW_VERSION}-preview-${{ github.run_number }}"
+            APK_BASENAME="remodr-${RAW_VERSION}-preview-${GITHUB_RUN_NUMBER}"
             IS_PRERELEASE=true
-            RELEASE_TITLE="Remodr v${RAW_VERSION} Preview (${{ github.run_number }})"
+            RELEASE_TITLE="Remodr v${RAW_VERSION} Preview (${GITHUB_RUN_NUMBER})"
           fi
 
-          echo "version=${CLEAN_VERSION}" >> $GITHUB_OUTPUT
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "apk_basename=${APK_BASENAME}" >> $GITHUB_OUTPUT
-          echo "is_prerelease=${IS_PRERELEASE}" >> $GITHUB_OUTPUT
-          echo "title=${RELEASE_TITLE}" >> $GITHUB_OUTPUT
+          echo "version=${CLEAN_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "apk_basename=${APK_BASENAME}" >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=${IS_PRERELEASE}" >> "$GITHUB_OUTPUT"
+          echo "title=${RELEASE_TITLE}" >> "$GITHUB_OUTPUT"
 
       - name: Build Android APK locally
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          APK_BASENAME: ${{ steps.app_version.outputs.apk_basename }}
         run: |
           mkdir -p build
-          TARGET_APK="build/${{ steps.app_version.outputs.apk_basename }}.apk"
-          npx --yes eas-cli build \
+          TARGET_APK="build/${APK_BASENAME}.apk"
+          npx --yes eas-cli@23.2.0 build \
             --platform android \
             --profile preview \
             --local \
@@ -100,6 +119,11 @@ jobs:
             --output "$TARGET_APK"
           # Create a stable unversioned copy for permanent download links
           cp "$TARGET_APK" build/remodr-preview.apk
+
+      - name: Verify the built APK version before uploading
+        env:
+          APK_BASENAME: ${{ steps.app_version.outputs.apk_basename }}
+        run: node scripts/sync-version.cjs --check --apk "build/${APK_BASENAME}.apk"
 
       - name: Upload APK to Artifacts
         uses: actions/upload-artifact@v4
@@ -112,26 +136,31 @@ jobs:
       - name: Publish APK to GitHub Releases
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.app_version.outputs.tag }}
+          TITLE: ${{ steps.app_version.outputs.title }}
+          IS_PRERELEASE: ${{ steps.app_version.outputs.is_prerelease }}
+          APK_BASENAME: ${{ steps.app_version.outputs.apk_basename }}
+          APP_VERSION: ${{ steps.app_version.outputs.version }}
         run: |
-          TAG="${{ steps.app_version.outputs.tag }}"
-          TITLE="${{ steps.app_version.outputs.title }}"
-          IS_PRERELEASE="${{ steps.app_version.outputs.is_prerelease }}"
-          PRIMARY_APK="build/${{ steps.app_version.outputs.apk_basename }}.apk"
+          # Recheck after the long build, immediately before any release writes.
+          node scripts/check-release-source.cjs
+
+          PRIMARY_APK="build/${APK_BASENAME}.apk"
           STABLE_APK="build/remodr-preview.apk"
 
           if [ "$IS_PRERELEASE" = "true" ]; then
-            RECENT_CHANGES=$(git log -n 15 --no-merges --pretty=format:"* %s ([%h](${{ github.server_url }}/${{ github.repository }}/commit/%H))" 2>/dev/null || echo "* Automated preview update")
+            RECENT_CHANGES=$(git log -n 15 --no-merges --pretty=format:"* %s ([%h](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/%H))" 2>/dev/null || echo "* Automated preview update")
 
             NOTES=$(printf "%s\n" \
               "### Remodr Preview Build (Alpha)" \
-              "- **Version:** \`${{ steps.app_version.outputs.version }}\`" \
-              "- **Build:** \`#${{ github.run_number }}\`" \
-              "- **Commit:** [\`${{ github.sha }}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})" \
+              "- **Version:** \`${APP_VERSION}\`" \
+              "- **Build:** \`#${GITHUB_RUN_NUMBER}\`" \
+              "- **Commit:** [\`${GITHUB_SHA}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})" \
               "- **Built at:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" \
               "" \
               "#### 📦 Download APK:" \
-              "- [\`${{ steps.app_version.outputs.apk_basename }}.apk\`](${{ github.server_url }}/${{ github.repository }}/releases/download/preview/${{ steps.app_version.outputs.apk_basename }}.apk)" \
-              "- [\`remodr-preview.apk\` (latest)](${{ github.server_url }}/${{ github.repository }}/releases/download/preview/remodr-preview.apk)" \
+              "- [\`${APK_BASENAME}.apk\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/preview/${APK_BASENAME}.apk)" \
+              "- [\`remodr-preview.apk\` (latest)](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/preview/remodr-preview.apk)" \
               "" \
               "---" \
               "" \
@@ -145,6 +174,7 @@ jobs:
             else
               echo "Creating new release $TAG..."
               gh release create "$TAG" "$PRIMARY_APK" "$STABLE_APK" \
+                --target "$GITHUB_SHA" \
                 --title "$TITLE" \
                 --prerelease \
                 --notes "$NOTES"
@@ -157,6 +187,7 @@ jobs:
             else
               echo "Creating official release $TAG..."
               gh release create "$TAG" "$PRIMARY_APK" \
+                --verify-tag \
                 --title "$TITLE" \
                 --generate-notes
             fi
