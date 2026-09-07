@@ -15,6 +15,7 @@ import {
   runtimeStateSchema,
   totalDeviceAgentCount,
   type AgentConversation,
+  type AgentCompletion,
   type AgentStatus,
   type BridgeEvent,
   type BridgeHello,
@@ -34,6 +35,8 @@ import { agentSession, commandSession, conversationMatchesAgent, sameAgentSessio
 import { HerdrBridgeTransport } from '@/services/herdr-bridge-transport';
 import { classifyConnectionError, connectionErrorCode, ConnectionError } from '@/domain/connection-error';
 import { CommandOutbox, type PendingCommand } from '@/services/command-outbox';
+import { completionForSnapshot } from '@/domain/agent-completion';
+import { createId } from '@/utils/create-id';
 
 const RUNTIME_CACHE_KEY = 'remote-workspace.herdr.runtimes.v2';
 const DRAFT_PREFIX = 'remote-workspace.herdr.draft.';
@@ -70,6 +73,7 @@ type DeviceConnection = {
   unsubscribe: () => void;
   state: DeviceRuntimeState;
   generation: number;
+  runtimeGeneration: number;
 };
 
 const EMPTY_CONVERSATIONS = new Map<string, AgentConversation>();
@@ -81,6 +85,14 @@ function emptyDeviceState(deviceId: string): DeviceRuntimeState {
     runtime: EMPTY_RUNTIME,
     hello: null,
     lastError: null,
+  };
+}
+
+function durableRuntime(runtime: HerdrRuntimeState): Omit<HerdrRuntimeState, 'runtimeRevision'> {
+  const { runtimeRevision: _runtimeRevision, agents, ...rest } = runtime;
+  return {
+    ...rest,
+    agents: agents.map(({ lastOutputAt: _lastOutputAt, ...agent }) => agent),
   };
 }
 
@@ -114,6 +126,7 @@ export class HerdrRepository {
   private conversationWrites = new Map<string, Promise<void>>();
   private draining = new Map<string, Promise<void>>();
   private outboxTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private writingRuntimes: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly createTransport: () => HerdrBridgeTransport = () =>
@@ -148,6 +161,37 @@ export class HerdrRepository {
 
   getConversation = (agentId: string): AgentConversation | null =>
     this.conversations.get(agentId) ?? null;
+
+  getCompletion = (agentId: string): AgentCompletion | undefined =>
+    this.currentAgent(agentId)?.completion;
+
+  async markCompletionRead(agentId: string, expectedId: string): Promise<void> {
+    const agent = this.currentAgent(agentId);
+    const conversation = this.rawConversations.get(agentId);
+    if (!agent || !conversation || !conversationMatchesAgent(conversation, agent)) return;
+    if (!this.setCompletionUnread(agentId, expectedId, false)) return;
+    try {
+      await this.persistRuntimes();
+    } catch (error) {
+      // A failed old acknowledgement must not overwrite a newer completion.
+      this.setCompletionUnread(agentId, expectedId, true);
+      throw error;
+    }
+  }
+
+  private setCompletionUnread(agentId: string, expectedId: string, unread: boolean): boolean {
+    const deviceId = this.deviceIdForAgent(agentId);
+    const device = deviceId ? this.devices.get(deviceId) : undefined;
+    if (!device) return false;
+    let changed = false;
+    const agents = device.state.runtime.agents.map((agent) => {
+      if (agent.id !== agentId || agent.completion?.id !== expectedId || agent.completion.unread === unread) return agent;
+      changed = true;
+      return { ...agent, completion: { ...agent.completion, unread } };
+    });
+    if (changed) this.setDeviceState(device.deviceId, { runtime: { ...device.state.runtime, agents } });
+    return changed;
+  }
 
   /**
    * The device that owns an agent, or null when nothing has claimed it yet.
@@ -223,6 +267,7 @@ export class HerdrRepository {
       unsubscribe: () => undefined,
       state: emptyDeviceState(deviceId),
       generation: 0,
+      runtimeGeneration: -1,
     };
     connection.unsubscribe = transport.subscribe((event) => {
       void this.handleEvent(deviceId, event).catch((error) => {
@@ -403,15 +448,15 @@ export class HerdrRepository {
     return result;
   }
 
-  async refreshRuntime(): Promise<void> {
-    await this.refreshDeviceRuntime(this.requireSelectedDeviceId());
+  async refreshRuntime(deviceId?: string, includeActivity = false): Promise<void> {
+    await this.refreshDeviceRuntime(deviceId ?? this.requireSelectedDeviceId(), includeActivity);
   }
 
-  private async refreshDeviceRuntime(deviceId: string): Promise<void> {
+  private async refreshDeviceRuntime(deviceId: string, includeActivity = false): Promise<void> {
     const device = this.deviceConnection(deviceId);
     const generation = device.generation;
     const runtime = runtimeStateSchema.parse(
-      await device.transport.request('runtime.snapshot', {}),
+      await device.transport.request('runtime.snapshot', includeActivity ? { includeActivity: true } : {}),
     );
     if (generation !== device.generation) throw new ConnectionError('ERR_BRIDGE_CLOSED', 'Stale runtime response.');
     await this.installRuntime(deviceId, runtime);
@@ -925,7 +970,30 @@ export class HerdrRepository {
     }
     const deviceId = fallbackDeviceId;
     const device = this.deviceConnection(deviceId);
+    const previousRuntime = device.state.runtime;
+    if (device.runtimeGeneration === device.generation
+      && runtime.runtimeRevision != null && device.state.runtime.runtimeRevision != null
+      && runtime.runtimeRevision < device.state.runtime.runtimeRevision) {
+      console.warn('[HERDR_RUNTIME] Ignored a stale runtime snapshot', deviceId);
+      return;
+    }
     const previousAgents = new Map(device.state.runtime.agents.map((agent) => [agent.id, agent]));
+    const agents = runtime.agents.map((agent) => {
+      const previous = previousAgents.get(agent.id);
+      const tracked = {
+        ...agent,
+        observedStatus: agent.status,
+        completion: completionForSnapshot(previous, agent, createId),
+      };
+      const lastOutputAt = previous?.lastOutputAt;
+      if (agent.providerSessionId && lastOutputAt != null
+        && sameAgentSession(agentSession(previous), agentSession(agent))
+        && lastOutputAt > (agent.lastOutputAt ?? -1)) {
+        return { ...tracked, lastOutputAt };
+      }
+      return tracked;
+    });
+    if (agents.some((agent, index) => agent !== runtime.agents[index])) runtime = { ...runtime, agents };
     const currentAgents = new Map(runtime.agents.map((agent) => [agent.id, agent]));
     const invalidated = new Set<string>();
     for (const [id, previous] of previousAgents) {
@@ -944,11 +1012,14 @@ export class HerdrRepository {
       removals.push(this.persistConversation(id, null, epoch));
     }
     device.state = { ...device.state, runtime };
+    device.runtimeGeneration = device.generation;
     this.reindexAgents();
     if (invalidated.size) this.publishConversations();
     this.publish();
     await Promise.all(removals);
-    await this.persistRuntimes();
+    if (JSON.stringify(durableRuntime(previousRuntime)) !== JSON.stringify(durableRuntime(runtime))) {
+      await this.persistRuntimes();
+    }
   }
 
   private reindexAgents() {
@@ -960,14 +1031,17 @@ export class HerdrRepository {
     }
   }
 
-  private async persistRuntimes(): Promise<void> {
-    const cache: Record<string, HerdrRuntimeState> = {};
-    for (const [deviceId, device] of this.devices) {
-      if (device.state.runtime !== EMPTY_RUNTIME) {
-        cache[deviceId] = device.state.runtime;
+  private persistRuntimes(): Promise<void> {
+    const operation = this.writingRuntimes.then(async () => {
+      const cache: Record<string, HerdrRuntimeState> = {};
+      for (const [deviceId, device] of this.devices) {
+        if (device.state.runtime !== EMPTY_RUNTIME) cache[deviceId] = device.state.runtime;
       }
-    }
-    await AsyncStorage.setItem(RUNTIME_CACHE_KEY, JSON.stringify(cache));
+      await AsyncStorage.setItem(RUNTIME_CACHE_KEY, JSON.stringify(cache));
+    });
+    // Serialize metadata writes while returning storage errors to their callers.
+    this.writingRuntimes = operation.then(() => undefined, () => undefined);
+    return operation;
   }
 
   private updateAgentStatus(agentId: string, status: AgentStatus) {

@@ -3,22 +3,21 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { AppIcon } from '@/components/ui/app-icon';
+import { FinishDot } from '@/components/ui/finish-dot';
 import { GlassSurface } from '@/components/ui/glass-surface';
 import { MarqueeText } from '@/components/ui/marquee-text';
 import { Fonts, Spacing } from '@/constants/theme';
+import { unreadCompletionCount } from '@/domain/agent-completion';
 import {
   providerLabel,
   statusLabel,
-  type AgentWorkspace,
   type RemoteAgent,
 } from '@/domain/herdr';
 import { AgentProviderIcon } from '@/features/agents/agent-provider-icon';
 import { useTheme } from '@/hooks/use-theme';
+import type { AgentWorkspaceSection } from './agent-ordering';
 
-export type AgentWorkspaceSection = {
-  space: AgentWorkspace;
-  agents: RemoteAgent[];
-};
+export { compareAgents, type AgentWorkspaceSection } from './agent-ordering';
 
 export function AgentWorkspaceList({
   sections,
@@ -36,29 +35,27 @@ export function AgentWorkspaceList({
   );
 }
 
-export function compareAgents(left: RemoteAgent, right: RemoteAgent) {
-  const priority: Record<RemoteAgent['status'], number> = {
-    blocked: 0,
-    done: 1,
-    working: 2,
-    idle: 3,
-    unknown: 4,
-  };
-  return priority[left.status] - priority[right.status] || left.title.localeCompare(right.title);
-}
-
 function WorkspaceGroup({
   space,
   agents,
 }: Readonly<AgentWorkspaceSection>) {
   const theme = useTheme();
+  const unread = unreadCompletionCount(agents);
   return (
     <View style={styles.workspace}>
       <View style={styles.workspaceHeader}>
         <View style={styles.workspaceTitle}>
-          <ThemedText type="label" themeColor="textMuted" style={styles.sectionTitle}>
-            {space.name.toUpperCase()}
-          </ThemedText>
+          <View style={styles.workspaceTitleRow}>
+            <ThemedText type="label" themeColor="textMuted" style={styles.sectionTitle} numberOfLines={1}>
+              {space.name.toUpperCase()}
+            </ThemedText>
+            {unread > 0 ? (
+              <FinishDot
+                count={unread}
+                label={`${unread} unread finished ${unread === 1 ? 'agent' : 'agents'} in ${space.name}`}
+              />
+            ) : null}
+          </View>
           {space.cwd ? (
             <ThemedText type="caption" themeColor="textMuted" numberOfLines={1}>
               {space.cwd}
@@ -88,7 +85,9 @@ function AgentRow({ agent }: Readonly<{ agent: RemoteAgent }>) {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${providerLabel(agent.provider)}, ${statusLabel(agent.status)}`}
+      accessibilityLabel={`${providerLabel(agent.provider)}, ${statusLabel(agent.status)}${
+        agent.completion?.unread ? ', unread finished work' : ''
+      }`}
       onPress={() => router.push({ pathname: '/agents/[id]', params: { id: agent.id } })}
       style={({ pressed }) => [
         styles.agent,
@@ -108,6 +107,9 @@ function AgentRow({ agent }: Readonly<{ agent: RemoteAgent }>) {
             containerStyle={styles.providerName}>
             {agent.title}
           </MarqueeText>
+          {agent.completion?.unread ? (
+            <FinishDot label="Unread finished work" />
+          ) : null}
           <StatusBadge status={agent.status} />
         </View>
         <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1}>
@@ -165,8 +167,14 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 2,
   },
+  workspaceTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.half,
+  },
   sectionTitle: {
     letterSpacing: 0.7,
+    flexShrink: 1,
   },
   workspaceCard: {},
   agent: {

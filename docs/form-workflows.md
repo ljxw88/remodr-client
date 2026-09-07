@@ -6,6 +6,47 @@ Creation and editing use ordinary routes under `src/app/flows/`, not bottom
 sheets. Short agent actions use an anchored menu; destructive operations still
 ask for confirmation.
 
+## Agent list ordering
+
+The selected device's agents are ordered by newest observed output, within their
+workspace groups. In **All spaces**, the workspace containing the newest output
+moves to the top as well. Device/space selections and the order of filter chips
+are unchanged, and refreshes do not force the scroll position back to the top.
+
+While the agent list is focused, foregrounded and connected, it refreshes output
+activity immediately and then two seconds after each completed request, without
+overlapping polls. Transcript-backed providers use the current session's file
+last-write time; raw-terminal providers are promoted when their observed output
+text changes. Existing status/title order is the fallback for unknown or equal
+activity. Known-session recency survives reconnect snapshots, but is not carried
+into a replacement provider session.
+
+## Unread finish indicators
+
+A blue dot marks a completed agent whose finish has not been viewed in this app.
+Workspace headers and filter chips aggregate their agents; device chips on the
+Agents page aggregate their device. The Servers page shows connection status
+only. **All spaces** and the collapsed-filter
+control make unread work discoverable outside the current space/device filter.
+Aggregates show a count when more than one agent has unread finished work.
+These dots are separate from running/done and SSH connection status.
+
+Completed sessions receive a marker on first discovery. Read state is persisted
+with the session and does not reset on ordinary snapshots, reconnects, or app
+restarts. Native status revisions distinguish subsequent finishes in the same
+session, including work that starts and ends between snapshots. Older bridges
+without revisions use observed status transitions instead.
+
+Selecting a device or space does not acknowledge anything. A successful
+conversation refresh while that conversation is focused and foregrounded clears
+only the finish captured at the start of the read. A newer finish arriving during
+that read stays unread until its own refresh. Background prefetches, failed reads,
+and cached/offline views do not clear the marker. Read-state storage failures
+restore the dot and surface an error.
+
+This is an in-app notification, not an operating-system push notification, and
+does not add notification permissions or a background service.
+
 ## Routes and ownership
 
 | Route | Purpose |

@@ -60,6 +60,13 @@ class CopilotAdapter(ProviderAdapter):
     def load_conversation(self, agent: dict[str, Any]) -> dict[str, Any] | None:
         return transcript.load_conversation(self.host, agent)
 
+    def output_path(self, agent: dict[str, Any]) -> Path | None:
+        session_id = agent.get("providerSessionId")
+        if not isinstance(session_id, str) or not session_id:
+            return None
+        path = Path.home() / ".copilot" / "session-state" / session_id / "events.jsonl"
+        return path if path.is_file() else None
+
     def session_tuning(self, session_id: Any) -> dict[str, Any]:
         return self.tuning.session_tuning(session_id)
 

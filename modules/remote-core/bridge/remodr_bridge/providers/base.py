@@ -8,6 +8,7 @@ must not treat an event/display hint as durable-command authority.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, ContextManager, Protocol
 
 from ..constants import CONTEXT_TIERS, ORDERED_TUNING
@@ -128,6 +129,10 @@ class ProviderAdapter:
         self.host.started_sessions.pop(pane_id, None)
 
     def load_conversation(self, agent: dict[str, Any]) -> dict[str, Any] | None:
+        return None
+
+    def output_path(self, agent: dict[str, Any]) -> Path | None:
+        """Current session's transcript source, or terminal observation if absent."""
         return None
 
     def session_tuning(self, session_id: Any) -> dict[str, Any]:

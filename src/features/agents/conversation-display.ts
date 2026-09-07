@@ -32,6 +32,19 @@ export function groupToolActivity(
     if (turn.length === 0) {
       return;
     }
+    /**
+     * A plan is state, not an event. The agent rewrites it as it goes, and
+     * every rewrite arrives as its own item, so a turn that revised a plan
+     * eight times used to stack eight copies of it down the transcript — the
+     * first seven of them wrong. Only the last one is the plan.
+     *
+     * Per turn rather than per conversation, so a finished turn keeps the plan
+     * it finished on instead of inheriting a later one.
+     */
+    const lastPlanIndex = turn.findLastIndex((item) => item.kind === 'todo_update');
+    if (lastPlanIndex >= 0) {
+      turn = turn.filter((item, index) => item.kind !== 'todo_update' || index === lastPlanIndex);
+    }
     const tools = turn.filter(
       (item): item is ToolActivityItem => item.kind === 'tool_activity',
     );
@@ -69,11 +82,45 @@ export function groupToolActivity(
   return result;
 }
 
-export function toolActivitySummary(group: ToolActivityGroup): string {
+export type PlanItem = Extract<ConversationItem, { kind: 'todo_update' }>['todos'][number];
+
+/** How much of a plan is behind the agent, for the line that introduces it. */
+export function planProgress(todos: PlanItem[]): { done: number; total: number } {
+  return { done: todos.filter((todo) => todo.state === 'done').length, total: todos.length };
+}
+
+export type ToolActivitySummary = {
+  /**
+   * The whole collapsed line, minus any failures. Reads as the present tense
+   * while the agent is still inside the group, because "worked for 20m" on
+   * work that has not stopped is a claim about the past that is not true yet —
+   * and because what the agent is doing now and what it has already done are
+   * the two things a reader most needs told apart.
+   */
+  label: string;
+  /** How many calls failed, so the row can say so in colour rather than hide it. */
+  failed: number;
+  /** Whether the agent is still inside these calls. */
+  running: boolean;
+};
+
+export function toolActivitySummary(group: ToolActivityGroup): ToolActivitySummary {
   const count = group.items.length;
-  const duration = toolActivityDuration(group.items);
   const countLabel = `${count} tool ${count === 1 ? 'call' : 'calls'}`;
-  return duration ? `Worked for ${duration} (${countLabel})` : `Worked (${countLabel})`;
+  const failed = group.items.filter((item) => item.state === 'failed').length;
+  const running = group.items.some(
+    (item) => item.state === 'running' || item.state === 'pending',
+  );
+
+  if (running) {
+    return { label: `Working (${countLabel})`, failed, running };
+  }
+  const duration = toolActivityDuration(group.items);
+  return {
+    label: duration ? `Worked for ${duration} (${countLabel})` : `Worked (${countLabel})`,
+    failed,
+    running,
+  };
 }
 
 function toolActivityDuration(items: ToolActivityItem[]): string | null {
