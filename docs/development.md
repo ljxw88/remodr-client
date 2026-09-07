@@ -133,6 +133,9 @@ to `main`: typecheck, lint, JavaScript tests, release-script regressions, Python
 bridge tests, and a read-only version check. The Android release workflow calls
 the same workflow and cannot build or publish unless it passes. Validation has
 read-only repository permissions and needs no Expo secrets.
+`src/types/expo.d.ts` loads Expo's static declarations (including CSS imports)
+in a clean checkout, without depending on the ignored CLI-generated
+`expo-env.d.ts` file or starting Metro first.
 To prevent merging failing pull requests, configure the validation job as a
 required status check in the repository's branch protection or ruleset; adding
 the workflow alone does not change those repository settings.
