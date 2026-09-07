@@ -1,0 +1,89 @@
+{
+  "frames": [
+    {
+      "session": {
+        "provider": "copilot",
+        "paneId": "contract-pane",
+        "providerSessionId": "contract-before-clear"
+      },
+      "capabilities": {
+        "supportsRetuning": true,
+        "structuredConversation": true,
+        "streamingConversation": true,
+        "structuredQuestions": true,
+        "toolActivity": true,
+        "todos": true,
+        "fallback": true
+      },
+      "events": [
+        {"id": "session-start", "type": "session.start", "data": {}},
+        {"id": "user-1", "type": "user.message", "timestamp": "2026-01-01T00:00:00Z", "data": {"content": "Inspect the synthetic example."}},
+        {"id": "assistant-1", "type": "assistant.message", "data": {"content": "I will inspect **example.txt**."}},
+        {"id": "tool-start", "type": "tool.execution_start", "data": {"toolName": "view", "toolCallId": "read-1", "arguments": {"path": "example.txt"}}},
+        {"id": "tool-end", "type": "tool.execution_complete", "data": {"toolCallId": "read-1", "success": true}},
+        {"id": "tool-running", "type": "tool.execution_start", "timestamp": 1767225600000, "data": {"toolName": "bash", "toolCallId": "check-1", "arguments": {}}},
+        {"id": "question-start", "type": "tool.execution_start", "data": {"toolName": "ask_user", "toolCallId": "question-1", "arguments": {"question": "Continue with the example?", "choices": ["Yes", "No"]}}}
+      ],
+      "terminalText": "Synthetic old terminal scrollback must not become semantic history.",
+      "conversation": {
+        "agentId": "agent_4933996907bac635c6ea",
+        "provider": "copilot",
+        "providerSessionId": "contract-before-clear",
+        "semantic": true,
+        "items": [
+          {"id": "user-1", "kind": "user_message", "text": "Inspect the synthetic example.", "timestamp": "2026-01-01T00:00:00Z"},
+          {"id": "assistant-1", "kind": "assistant_message", "markdown": "I will inspect **example.txt**.", "timestamp": null},
+          {"id": "tool:read-1", "kind": "tool_activity", "tool": "view", "title": "Reading", "detail": "example.txt", "state": "completed", "timestamp": null},
+          {"id": "tool:check-1", "kind": "tool_activity", "tool": "bash", "title": "Running", "detail": null, "state": "running", "timestamp": 1767225600000},
+          {
+            "id": "human:question-1",
+            "kind": "human_request",
+            "request": {
+              "id": "question-1",
+              "kind": "choice",
+              "question": "Continue with the example?",
+              "options": [{"id": "Yes", "label": "Yes"}, {"id": "No", "label": "No"}],
+              "allowCustomAnswer": true,
+              "multiSelect": false
+            },
+            "timestamp": null
+          }
+        ],
+        "activeHumanRequest": {
+          "id": "question-1",
+          "kind": "choice",
+          "question": "Continue with the example?",
+          "options": [{"id": "Yes", "label": "Yes"}, {"id": "No", "label": "No"}],
+          "allowCustomAnswer": true,
+          "multiSelect": false
+        }
+      }
+    },
+    {
+      "session": {
+        "provider": "copilot",
+        "paneId": "contract-pane",
+        "providerSessionId": "contract-after-clear"
+      },
+      "capabilities": {
+        "supportsRetuning": true,
+        "structuredConversation": true,
+        "streamingConversation": true,
+        "structuredQuestions": true,
+        "toolActivity": true,
+        "todos": true,
+        "fallback": true
+      },
+      "events": [{"id": "new-session-start", "type": "session.start", "data": {}}],
+      "terminalText": "Synthetic old terminal scrollback must not become semantic history.",
+      "conversation": {
+        "agentId": "agent_4933996907bac635c6ea",
+        "provider": "copilot",
+        "providerSessionId": "contract-after-clear",
+        "semantic": true,
+        "items": [],
+        "activeHumanRequest": null
+      }
+    }
+  ]
+}

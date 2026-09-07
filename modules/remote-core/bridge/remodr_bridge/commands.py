@@ -135,7 +135,7 @@ def prepare_command(host: Bridge, action: str, payload: dict[str, Any]) -> None:
         )
     host._refresh_runtime()
     agent = host._require_agent(payload)
-    identity_error = host.session_identity_errors.get(agent.get("paneId"))
+    identity_error = host.sessions.identity_error(agent.get("paneId"))
     if identity_error:
         raise BridgeError("COMMAND_PRECONDITION_FAILED", identity_error)
     checked_fields = (*fields, "provider") if "provider" in expected else fields
@@ -160,7 +160,7 @@ def herdr_mutation(host: Bridge, method: str, params: dict[str, Any]) -> dict[st
         if agent is None or params.get("target") != agent.get("paneId"):
             raise BridgeError("COMMAND_PRECONDITION_FAILED", "Command target is not bound.")
         host._require_agent({"agentId": agent["id"]})
-        identity_error = host.session_identity_errors.get(agent.get("paneId"))
+        identity_error = host.sessions.identity_error(agent.get("paneId"))
         if identity_error:
             raise BridgeError("COMMAND_PRECONDITION_FAILED", identity_error)
         host.command_context.side_effect = True

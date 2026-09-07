@@ -126,6 +126,43 @@ For a cloud build, omit `--local`. EAS needs an authenticated Expo account with
 access to the linked project. Local builds also need the Android toolchain.
 There is no requirement that only EAS can build this app.
 
+### GitHub validation and releases
+
+[`Validate`](../.github/workflows/validate.yml) runs on pull requests and pushes
+to `main`: typecheck, lint, JavaScript tests, release-script regressions, Python
+bridge tests, and a read-only version check. The Android release workflow calls
+the same workflow and cannot build or publish unless it passes. Validation has
+read-only repository permissions and needs no Expo secrets.
+`src/types/expo.d.ts` loads Expo's static declarations (including CSS imports)
+in a clean checkout, without depending on the ignored CLI-generated
+`expo-env.d.ts` file or starting Metro first.
+To prevent merging failing pull requests, configure the validation job as a
+required status check in the repository's branch protection or ruleset; adding
+the workflow alone does not change those repository settings.
+
+Main-branch pushes publish the rolling `preview` release; `v*` tags publish
+versioned releases. Manual runs must select `main` or a version tag. A version
+tag must exactly equal `v` plus the version in both `package.json` and `app.json`;
+CI rejects mismatches instead of fixing or bumping versions. Use the existing
+`npm version` hook to synchronize versions before tagging, or
+`npm run version:bump` to synchronize and increment native build numbers.
+`npm run version:check -- --tag v0.1.0` checks a tag without modifying files.
+Before uploading, CI also reads the built APK's manifest with the Android SDK's
+`apkanalyzer` and requires its version name to match the checked app version.
+This catches native build/configuration drift that matching source files alone
+cannot detect. Locally, with the Android command-line tools on `PATH`, use
+`npm run version:check -- --apk path/to/app.apk`.
+EAS remote versioning and the profiles' automatic build-number increments are
+unchanged.
+
+Release runs are serialized per Git ref, including manual runs and reruns,
+without canceling in-progress asset uploads. Preview publication checks the
+remote `main` SHA both before building and immediately before release writes;
+a superseded commit fails rather than replacing newer preview assets. Android
+CI pins EAS CLI to `23.2.0`, the minimum configured in `eas.json`. Publishing
+requires `EXPO_TOKEN`; repository write permission is confined to the Android
+build/publish job.
+
 `./gradlew :app:assembleRelease` is another local build path after native
 generation. Review its signing and bundling configuration before distributing
 the output; an existing debug keystore is not a production signing setup.
@@ -154,6 +191,8 @@ Run the smallest existing command covering the change:
 npm run typecheck
 npm run lint
 npm test -- --runInBand
+npm test -- --runInBand --testMatch '<rootDir>/scripts/*.test.cjs'
+npm run version:check
 python3 -m unittest discover -s modules/remote-core/bridge -p 'test_*.py'
 ```
 

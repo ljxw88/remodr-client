@@ -151,7 +151,7 @@ class CodexTest(unittest.TestCase):
         self.assertEqual(self.prompts, [])
         self.footer = SESSION
         self.refresh()
-        self.assertNotIn("p1", self.bridge.session_identity_errors)
+        self.assertIsNone(self.bridge.sessions.identity_error("p1"))
 
     def test_unknown_initial_identity_does_not_fall_back_to_an_arbitrary_log(self):
         self.bridge = Bridge()
@@ -184,7 +184,15 @@ class CodexTest(unittest.TestCase):
             {"id": "codex:UserMessage:user-1", "kind": "user_message", "text": "hello"},
             {"id": "codex:AgentMessage:assistant-1", "kind": "assistant_message", "markdown": "Hello!"},
         ])
-        self.assertIs(self.bridge.providers["codex"].load_conversation(self.agent()), result)
+        with patch.object(Path, "open", side_effect=AssertionError("Unchanged transcript was reread")):
+            cached = self.bridge.providers["codex"].load_conversation(self.agent())
+            self.assertEqual(cached, result)
+            self.assertIsNot(cached, result)
+            result["items"][1]["markdown"] = "Changed by the first caller"
+            cached["items"].clear()
+            unchanged = self.bridge.providers["codex"].load_conversation(self.agent())
+        self.assertEqual(len(unchanged["items"]), 2)
+        self.assertEqual(unchanged["items"][1]["markdown"], "Hello!")
 
     def test_legacy_messages_have_stable_ids_and_append_without_retyping_history(self):
         path = self.rollout([

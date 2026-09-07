@@ -36,24 +36,27 @@ def effective_session(
             status = "unresolved"
         reason = str(error)
 
+    process_bound = False
+    observed = False
+    identity_error = None
     if status == "verified":
-        host.process_bound_panes.add(pane_id)
-        host.session_identity_errors.pop(pane_id, None)
+        process_bound = True
         diagnostic = (
             "Using the foreground Copilot session database; native session reference differs."
             if session_id != native_session_id else ""
         )
-    elif status == "unresolved" or pane_id in host.process_bound_panes:
-        host.process_bound_panes.add(pane_id)
-        host.observed_session_panes.add(pane_id)
-        host.session_identity_errors[pane_id] = reason
+    elif status == "unresolved" or host.sessions.is_process_bound(pane_id):
+        process_bound = True
+        observed = True
+        identity_error = reason
         diagnostic = f"Session identity unresolved: {reason}; not using a possibly stale native ID."
     else:
-        host.session_identity_errors.pop(pane_id, None)
         session_id = native_session_id
         diagnostic = f"Process-bound session inspection unavailable: {reason}; using unverified native identity."
-    if host.session_identity_diagnostics.get(pane_id) != diagnostic:
-        if diagnostic:
-            host._diagnostic("COPILOT_SESSION_IDENTITY", f"{pane_id}: {diagnostic}")
-        host.session_identity_diagnostics[pane_id] = diagnostic
+    changed = host.sessions.record_identity(
+        pane_id, error=identity_error, diagnostic=diagnostic,
+        process_bound=process_bound, observed=observed,
+    )
+    if changed and diagnostic:
+        host._diagnostic("COPILOT_SESSION_IDENTITY", f"{pane_id}: {diagnostic}")
     return session_id

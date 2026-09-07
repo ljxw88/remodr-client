@@ -3,7 +3,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   closeSpaceInputSchema,
   closeSpaceResultSchema,
-  conversationSchema,
   agentMutationResultSchema,
   createAgentInputSchema,
   createAgentResultSchema,
@@ -32,15 +31,17 @@ import {
   type RemoteAgent,
 } from '@/domain/herdr';
 import { agentSession, commandSession, conversationMatchesAgent, sameAgentSession, type AgentSession } from '@/domain/agent-session';
+import { retuningUnavailableReason } from '@/domain/agent-capabilities';
 import { HerdrBridgeTransport } from '@/services/herdr-bridge-transport';
-import { classifyConnectionError, connectionErrorCode, ConnectionError } from '@/domain/connection-error';
+import { classifyConnectionError, ConnectionError } from '@/domain/connection-error';
 import { CommandOutbox, type PendingCommand } from '@/services/command-outbox';
+import { CommandDispatcher, type CommandAttachment } from '@/services/command-dispatcher';
+import { DraftStore } from '@/services/draft-store';
+import { ConversationStore, type ConversationRequest } from '@/services/conversation-store';
 import { completionForSnapshot } from '@/domain/agent-completion';
 import { createId } from '@/utils/create-id';
 
 const RUNTIME_CACHE_KEY = 'remote-workspace.herdr.runtimes.v2';
-const DRAFT_PREFIX = 'remote-workspace.herdr.draft.';
-const CONVERSATION_PREFIX = 'remote-workspace.herdr.conversation.';
 
 /** Everything the app knows about one device's Herdr runtime. */
 export type DeviceRuntimeState = {
@@ -119,21 +120,37 @@ export class HerdrRepository {
   private hydrated = false;
   private connectionObserver: ((deviceId: string, error: unknown) => void) | null = null;
   private reconnectHandler: ((deviceId: string) => Promise<boolean>) | null = null;
-  private rawConversations = new Map<string, AgentConversation>();
-  private refreshing = new Map<string, Promise<AgentConversation>>();
-  private restoring = new Map<string, Promise<void>>();
-  private conversationEpochs = new Map<string, number>();
-  private conversationWrites = new Map<string, Promise<void>>();
-  private draining = new Map<string, Promise<void>>();
-  private outboxTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly transcripts: ConversationStore;
+  private readonly dispatcher: CommandDispatcher;
   private writingRuntimes: Promise<void> = Promise.resolve();
+  private readonly drafts = new DraftStore(AsyncStorage);
 
   constructor(
     private readonly createTransport: () => HerdrBridgeTransport = () =>
       new HerdrBridgeTransport(),
-    private readonly outbox = new CommandOutbox(),
+    outbox = new CommandOutbox(),
   ) {
-    outbox.subscribe(() => this.publishConversations());
+    this.transcripts = new ConversationStore({
+      getAgent: (agentId) => this.currentAgent(agentId),
+      open: (agentId) => this.openConversationRequest(agentId),
+    }, AsyncStorage, (conversation) => this.dispatcher.reconcile(conversation));
+    this.dispatcher = new CommandDispatcher(outbox, {
+      open: (deviceId) => this.openCommandAttachment(deviceId),
+      isConnected: (deviceId) => this.isDeviceConnected(deviceId),
+      getAgent: (agentId) => this.currentAgent(agentId),
+      getConversation: (agentId) => this.transcripts.get(agentId),
+      readConversation: (agentId) => this.loadConversation(agentId),
+      reconnect: (deviceId) => this.reconnectHandler?.(deviceId),
+      onSent: (agentId) => this.updateAgentStatus(agentId, 'working'),
+      onConnectionError: (deviceId, error) => this.connectionObserver?.(deviceId, error),
+      onQueueError: (deviceId) => {
+        if (this.devices.has(deviceId)) {
+          this.setDeviceState(deviceId, { lastError: 'Could not update the saved send queue.' });
+        }
+      },
+    });
+    this.transcripts.subscribe(() => this.publishConversations());
+    this.dispatcher.subscribe(() => this.publishConversations());
   }
 
   setReconnectHandler(handler: (deviceId: string) => Promise<boolean>) {
@@ -144,8 +161,8 @@ export class HerdrRepository {
     this.connectionObserver = handler;
   }
 
-  getPendingCommands = () => this.outbox.getSnapshot();
-  subscribeCommands = (listener: () => void) => this.outbox.subscribe(listener);
+  getPendingCommands = () => this.dispatcher.getSnapshot();
+  subscribeCommands = (listener: () => void) => this.dispatcher.subscribe(listener);
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -167,7 +184,7 @@ export class HerdrRepository {
 
   async markCompletionRead(agentId: string, expectedId: string): Promise<void> {
     const agent = this.currentAgent(agentId);
-    const conversation = this.rawConversations.get(agentId);
+    const conversation = this.transcripts.get(agentId);
     if (!agent || !conversation || !conversationMatchesAgent(conversation, agent)) return;
     if (!this.setCompletionUnread(agentId, expectedId, false)) return;
     try {
@@ -221,7 +238,7 @@ export class HerdrRepository {
     if (this.hydrateAttempt) {
       return this.hydrateAttempt;
     }
-    const attempt = Promise.all([this.hydrateFromStorage(), this.outbox.hydrate()]).then(() => {
+    const attempt = Promise.all([this.hydrateFromStorage(), this.dispatcher.hydrate()]).then(() => {
       this.hydrated = true;
       this.publishConversations();
     }).finally(() => {
@@ -340,23 +357,10 @@ export class HerdrRepository {
     if (!device) return;
     device.generation++;
     device.sessionId = null;
-    for (const agentId of this.refreshing.keys()) {
-      if (this.deviceIdForAgent(agentId) === deviceId) this.refreshing.delete(agentId);
-    }
-    clearTimeout(this.outboxTimers.get(deviceId));
-    this.outboxTimers.delete(deviceId);
+    this.transcripts.detach(device.state.runtime.agents.map((agent) => agent.id));
     this.setDeviceState(deviceId, { connection: 'disconnected' });
     try {
-      await this.outbox.hydrate();
-      for (const command of this.outbox.getSnapshot()) {
-        if (command.deviceId === deviceId && command.action === 'agent.interrupt' &&
-          ['queued', 'sending'].includes(command.state)) {
-          await this.outbox.update(command.id, {
-            state: command.attempted ? 'uncertain' : 'failed', invalidated: true,
-            error: 'The connection changed. This interrupt will not be sent to a later run.',
-          });
-        }
-      }
+      await this.dispatcher.detach(deviceId);
     } finally {
       await device.transport.stop();
     }
@@ -405,6 +409,15 @@ export class HerdrRepository {
 
   async retuneAgent(input: RetuneAgentInput): Promise<AgentMutationResult> {
     const request = retuneAgentInputSchema.parse(input);
+    const deviceId = this.deviceIdForAgent(request.agentId);
+    const device = deviceId ? this.devices.get(deviceId) : undefined;
+    const agent = this.currentAgent(request.agentId);
+    if (!device || !agent) throw new Error('That agent is not available on a connected device.');
+    if (device.state.connection !== 'connected') {
+      throw new ConnectionError('BRIDGE_NOT_STARTED', 'Reconnect this agent\u2019s device before changing model settings.');
+    }
+    const unavailable = retuningUnavailableReason(agent.provider, agent.capabilities);
+    if (unavailable) throw new Error(unavailable);
     return this.mutateAgent(input.agentId, 'agent.retune', request);
   }
 
@@ -482,101 +495,27 @@ export class HerdrRepository {
   }
 
   async loadConversation(agentId: string): Promise<AgentConversation> {
-    const existing = this.refreshing.get(agentId);
-    if (existing) return existing;
-    const attempt = this.loadConversationOnce(agentId).catch((error: unknown) => {
-      // A rotation can be discovered by the very request reading the transcript.
-      if (connectionErrorCode(error) === 'CONVERSATION_SESSION_CHANGED') return this.loadConversationOnce(agentId);
-      throw error;
-    }).finally(() => {
-      if (this.refreshing.get(agentId) === attempt) this.refreshing.delete(agentId);
-    });
-    this.refreshing.set(agentId, attempt);
-    return attempt;
+    const conversation = await this.transcripts.load(agentId);
+    return this.getConversation(agentId) ?? conversation;
   }
 
   restoreConversation(agentId: string): Promise<void> {
-    if (this.rawConversations.has(agentId)) return Promise.resolve();
-    const active = this.restoring.get(agentId);
-    if (active) return active;
-    const epoch = this.conversationEpoch(agentId);
-    const attempt = (async () => {
-      const cached = await AsyncStorage.getItem(CONVERSATION_PREFIX + agentId);
-      if (cached && epoch === this.conversationEpoch(agentId) && !this.rawConversations.has(agentId)) {
-        let value: unknown;
-        try {
-          value = JSON.parse(cached);
-        } catch (error) {
-          if (!(error instanceof SyntaxError)) throw error;
-          console.warn('[CONVERSATION_CACHE] Discarding malformed cached transcript', agentId);
-          await this.persistConversation(agentId, null, epoch);
-          return;
-        }
-        const parsed = conversationSchema.safeParse(value);
-        if (!parsed.success || parsed.data.agentId !== agentId) {
-          console.warn('[CONVERSATION_CACHE] Discarding invalid or mismatched cached transcript', agentId);
-          await this.persistConversation(agentId, null, epoch);
-          return;
-        }
-        const conversation = parsed.data;
-        const agent = this.currentAgent(agentId);
-        if (agent && !conversationMatchesAgent(conversation, agent)) {
-          await this.persistConversation(agentId, null, epoch);
-          return;
-        }
-        this.rawConversations.set(agentId, conversation);
-        this.publishConversations();
-      }
-    })().finally(() => {
-      if (this.restoring.get(agentId) === attempt) this.restoring.delete(agentId);
-    });
-    this.restoring.set(agentId, attempt);
-    return attempt;
+    return this.transcripts.restore(agentId);
   }
 
-  private async loadConversationOnce(agentId: string): Promise<AgentConversation> {
-    await this.restoreConversation(agentId);
+  private openConversationRequest(agentId: string): ConversationRequest {
     const deviceId = this.deviceIdForAgent(agentId);
     const device = deviceId ? this.devices.get(deviceId) : undefined;
     if (!device || !deviceId) throw new Error('That agent is not available on a connected device.');
     if (device.state.connection !== 'connected') throw new ConnectionError('BRIDGE_NOT_STARTED', 'Reconnecting to the device.');
     const generation = device.generation;
-    const requestedAgent = this.currentAgent(agentId);
-    if (!requestedAgent) throw new Error('That agent is no longer available.');
-    const epoch = this.conversationEpoch(agentId);
-    const assertCurrent = () => {
-      if (device.generation !== generation) throw new ConnectionError('ERR_BRIDGE_CLOSED', 'Stale conversation response.');
-      if (epoch !== this.conversationEpoch(agentId)
-        || !sameAgentSession(agentSession(requestedAgent), agentSession(this.currentAgent(agentId)))) {
-        throw new ConnectionError('CONVERSATION_SESSION_CHANGED', 'The agent session changed. Refreshing its conversation.');
-      }
+    return {
+      read: () => this.requestForAgent(agentId, 'agent.conversation', { agentId }),
+      assertAttached: () => {
+        if (device.generation !== generation) throw new ConnectionError('ERR_BRIDGE_CLOSED', 'Stale conversation response.');
+      },
+      refreshIdentity: () => this.refreshDeviceRuntime(deviceId),
     };
-    const raw = await this.requestForAgent(agentId, 'agent.conversation', { agentId });
-    assertCurrent();
-    const parsed = conversationSchema.parse(raw);
-    if (parsed.agentId !== agentId || parsed.provider !== requestedAgent.provider) {
-      throw new ConnectionError('INVALID_RESPONSE', 'Conversation belongs to a different agent.');
-    }
-    const conversation = {
-      ...parsed,
-      providerSessionId: parsed.providerSessionId === undefined
-        ? requestedAgent.providerSessionId ?? null : parsed.providerSessionId,
-    };
-    if (!conversationMatchesAgent(conversation, requestedAgent)) {
-      await this.refreshDeviceRuntime(deviceId);
-      throw new ConnectionError('CONVERSATION_SESSION_CHANGED', 'The bridge read a different session. Refreshing its identity.');
-    }
-    const serialized = JSON.stringify(conversation);
-    const changed = serialized !== JSON.stringify(this.rawConversations.get(agentId));
-    if (changed) {
-      await this.persistConversation(agentId, conversation, epoch);
-      assertCurrent();
-      this.rawConversations.set(agentId, conversation);
-    }
-    await this.reconcileCommands(conversation);
-    assertCurrent();
-    if (changed) this.publishConversations();
-    return this.getConversation(agentId) ?? conversation;
   }
 
   private currentAgent(agentId: string): RemoteAgent | undefined {
@@ -584,23 +523,15 @@ export class HerdrRepository {
     return deviceId ? this.devices.get(deviceId)?.state.runtime.agents.find((agent) => agent.id === agentId) : undefined;
   }
 
-  private conversationEpoch(agentId: string): number {
-    return this.conversationEpochs.get(agentId) ?? 0;
-  }
-
-  private persistConversation(agentId: string, conversation: AgentConversation | null, epoch: number): Promise<void> {
-    const operation = (this.conversationWrites.get(agentId) ?? Promise.resolve()).then(async () => {
-      if (epoch !== this.conversationEpoch(agentId)) return;
-      if (conversation) await AsyncStorage.setItem(CONVERSATION_PREFIX + agentId, JSON.stringify(conversation));
-      else await AsyncStorage.removeItem(CONVERSATION_PREFIX + agentId);
-    });
-    // Serialize removals with writes so an older response cannot undo invalidation.
-    const settled = operation.then(() => undefined, () => undefined);
-    this.conversationWrites.set(agentId, settled);
-    void settled.then(() => {
-      if (this.conversationWrites.get(agentId) === settled) this.conversationWrites.delete(agentId);
-    });
-    return operation;
+  private openCommandAttachment(deviceId: string): CommandAttachment | null {
+    const device = this.devices.get(deviceId);
+    if (!device || device.state.connection !== 'connected') return null;
+    const generation = device.generation;
+    return {
+      isCurrent: () => device.generation === generation,
+      supportsDurableCommands: () => device.state.hello?.capabilities.durableCommands === true,
+      send: (command) => device.transport.request(command.action, command.payload, command.id),
+    };
   }
 
   async sendMessage(agentId: string, text: string): Promise<void> {
@@ -609,7 +540,8 @@ export class HerdrRepository {
   }
 
   private async queueCommand(
-    agentId: string, action: PendingCommand['action'], payload: Record<string, unknown>, text: string,
+    agentId: string, action: Exclude<PendingCommand['action'], 'agent.interrupt'>,
+    payload: Record<string, unknown>, text: string,
     expectedSession: AgentSession | undefined = agentSession(this.currentAgent(agentId)),
   ): Promise<void> {
     await this.hydrate();
@@ -629,28 +561,13 @@ export class HerdrRepository {
       }
       throw new Error('Waiting for the agent session identity. Reconnect or refresh before sending.');
     }
-    const generation = device.generation;
-    const command = await this.outbox.enqueue({
+    await this.dispatcher.enqueue({
       agentId, deviceId: device.deviceId, action, text,
       payload: { ...payload, precondition: {
         provider: agent.provider, paneId: agent.paneId, providerSessionId: agent.providerSessionId,
       } },
-      baselineIds: (this.rawConversations.get(agentId)?.items ?? []).map((item) => item.id),
+      baselineIds: (this.transcripts.get(agentId)?.items ?? []).map((item) => item.id),
     });
-    if (action === 'agent.interrupt' && generation !== device.generation) {
-      await this.outbox.update(command.id, {
-        state: 'failed', invalidated: true, error: 'Connection changed before the interrupt could be sent.',
-      });
-      return;
-    }
-    if (this.isDeviceConnected(device.deviceId)) this.scheduleDrain(device.deviceId);
-    else if (this.reconnectHandler) {
-      // Queueing is not evidence of a failed connection. Join an existing
-      // attempt rather than invalidating the attachment that is being opened.
-      void this.reconnectHandler(device.deviceId).catch((error) => {
-        console.warn('[CONNECTION] Queued message is waiting for recovery', error);
-      });
-    }
   }
 
   async answerHumanRequest(
@@ -658,7 +575,7 @@ export class HerdrRepository {
     requestId: string,
     answer: { selectedOptionIds?: string[]; customText?: string | null },
   ): Promise<void> {
-    const conversation = this.rawConversations.get(agentId);
+    const conversation = this.transcripts.get(agentId);
     const agent = this.currentAgent(agentId);
     if (!conversation || !agent || !conversationMatchesAgent(conversation, agent)
       || conversation.activeHumanRequest?.id !== requestId) {
@@ -685,182 +602,24 @@ export class HerdrRepository {
   }
 
   flushCommands(deviceId: string): Promise<void> {
-    clearTimeout(this.outboxTimers.get(deviceId));
-    this.outboxTimers.delete(deviceId);
-    const active = this.draining.get(deviceId);
-    if (active) return active;
-    const attempt = (async () => {
-      await this.outbox.hydrate();
-      // A previous flush may have received its ACK but failed to persist it.
-      // Reuse the durable ID; never mint another ID for that outcome.
-      for (const command of this.outbox.getSnapshot()) {
-        if (command.deviceId === deviceId && command.state === 'sending') {
-          await this.outbox.update(command.id, {
-            state: command.action === 'agent.interrupt' ? 'uncertain' : 'queued',
-          });
-        }
-      }
-      await this.drainCommands(deviceId);
-    })().finally(() => {
-      if (this.draining.get(deviceId) === attempt) this.draining.delete(deviceId);
-      if (this.isDeviceConnected(deviceId) && this.outbox.getSnapshot().some((command) =>
-        command.deviceId === deviceId && (command.state === 'queued' || command.state === 'sending'),
-      )) this.scheduleDrain(deviceId, 5000);
-    });
-    this.draining.set(deviceId, attempt);
-    return attempt;
-  }
-
-  private scheduleDrain(deviceId: string, delay = 0) {
-    if (this.outboxTimers.has(deviceId)) return;
-    this.outboxTimers.set(deviceId, setTimeout(() => {
-      this.outboxTimers.delete(deviceId);
-      void this.flushCommands(deviceId).catch((error) => {
-        console.warn('[OUTBOX] Could not process persisted commands', error);
-        this.setDeviceState(deviceId, { lastError: 'Could not update the saved send queue.' });
-      });
-    }, delay));
-  }
-
-  private async drainCommands(deviceId: string): Promise<void> {
-    await this.outbox.hydrate();
-    const device = this.devices.get(deviceId);
-    if (!device || device.state.connection !== 'connected') return;
-    const generation = device.generation;
-    while (device.generation === generation && device.state.connection === 'connected') {
-      const commands = this.outbox.getSnapshot().filter((entry) => entry.deviceId === deviceId);
-      const uncertain = commands.filter((entry) => entry.state === 'uncertain');
-      const command = commands.find((entry) => entry.state === 'queued' && !entry.invalidated
-        && !uncertain.some((blocked) => blocked.agentId === entry.agentId
-          && sameAgentSession(commandSession(blocked.payload), commandSession(entry.payload))));
-      if (!command) return;
-      if (device.state.hello?.capabilities.durableCommands !== true) {
-        await this.outbox.update(command.id, { state: 'failed', error: 'Reconnect to update the device bridge.' });
-        continue;
-      }
-      if (Date.now() - command.createdAt > 24 * 60 * 60 * 1000) {
-        await this.outbox.update(command.id, {
-          state: command.attempted ? 'uncertain' : 'failed', error: 'This queued command has expired. Review the conversation.',
-        });
-        continue;
-      }
-      if (command.action === 'agent.interrupt' && command.attempted) {
-        await this.outbox.update(command.id, { state: 'uncertain', error: 'Interrupt delivery could not be confirmed.' });
-        continue;
-      }
-      try {
-        if (!command.attempted) {
-          // Capture an authoritative baseline before a first send. A cached
-          // transcript may contain an older message with exactly the same text.
-          await this.loadConversation(command.agentId);
-          if (!sameAgentSession(commandSession(command.payload), agentSession(this.currentAgent(command.agentId)))) {
-            await this.outbox.update(command.id, {
-              state: 'failed', invalidated: true,
-              error: 'The agent session changed. This message was not sent to the new session.',
-            });
-            continue;
-          }
-          await this.outbox.setBaseline(command.id,
-            (this.rawConversations.get(command.agentId)?.items ?? []).map((item) => item.id));
-        }
-        if (device.generation !== generation || device.state.connection !== 'connected') return;
-        const claimed = await this.outbox.claim(command.id);
-        if (!claimed) continue;
-        if (device.generation !== generation || device.state.connection !== 'connected') {
-          await this.outbox.update(command.id, {
-            state: command.action === 'agent.interrupt' ? 'failed' : 'queued',
-            invalidated: command.action === 'agent.interrupt',
-          });
-          return;
-        }
-        if (!command.attempted
-          && !sameAgentSession(commandSession(claimed.payload), agentSession(this.currentAgent(command.agentId)))) {
-          await this.outbox.update(command.id, {
-            state: 'failed', invalidated: true,
-            error: 'The agent session changed before dispatch. This message was not sent to the new session.',
-          });
-          continue;
-        }
-        await device.transport.request(claimed.action, claimed.payload, claimed.id);
-        await this.outbox.update(command.id, { state: 'sent', error: null });
-        if (command.action !== 'agent.interrupt') this.updateAgentStatus(command.agentId, 'working');
-        if (command.action === 'agent.interrupt') await this.outbox.remove(command.id);
-        // ACK is already durable; a refresh failure must never put the command back in the queue.
-        void this.loadConversation(command.agentId).catch((error) => {
-          console.warn('[CONVERSATION] Will refresh acknowledged command after reconnect', error);
-        });
-      } catch (error) {
-        const code = connectionErrorCode(error);
-        if (classifyConnectionError(error).retryable || code === 'COMMAND_IN_PROGRESS') {
-          await this.outbox.update(command.id, {
-            state: command.action === 'agent.interrupt' ? 'uncertain' : 'queued',
-            error: command.action === 'agent.interrupt' ? 'Interrupt delivery could not be confirmed.' : null,
-          });
-          if (code === 'COMMAND_IN_PROGRESS') this.scheduleDrain(deviceId, 2000);
-          else if (device.generation === generation) this.connectionObserver?.(deviceId, error);
-          return;
-        }
-        await this.outbox.update(command.id, {
-          state: code === 'COMMAND_UNCERTAIN' ? 'uncertain' : 'failed',
-          error: error instanceof Error ? error.message : 'The command could not be delivered.',
-        });
-      }
-    }
+    return this.dispatcher.flush(deviceId);
   }
 
   async retryCommand(id: string): Promise<void> {
-    const command = this.outbox.getSnapshot().find((entry) => entry.id === id);
-    if (!command) throw new Error('This command is no longer queued.');
-    if (!sameAgentSession(commandSession(command.payload), agentSession(this.currentAgent(command.agentId)))) {
-      throw new Error('This message belongs to a previous session. Compose a new message for the current session.');
-    }
-    if (command.invalidated) throw new Error('The device configuration changed. Review and compose a new message.');
-    if (command.state === 'sending' || command.state === 'sent') return;
-    if (command.state === 'uncertain') {
-      throw new Error('Delivery is uncertain. Review the conversation before sending another message.');
-    }
-    await this.outbox.update(id, { state: 'queued', error: null });
-    if (this.isDeviceConnected(command.deviceId)) this.scheduleDrain(command.deviceId);
-    else await this.reconnectHandler?.(command.deviceId);
+    return this.dispatcher.retry(id);
   }
 
   async discardCommand(id: string): Promise<void> {
-    await this.outbox.discard(id);
+    return this.dispatcher.discard(id);
   }
 
   async cancelDeviceCommands(deviceId: string): Promise<void> {
-    await this.outbox.hydrate();
-    for (const command of this.outbox.getSnapshot()) {
-      if (command.deviceId !== deviceId || command.state === 'sent') continue;
-      await this.outbox.update(command.id, {
-        state: command.attempted ? 'uncertain' : 'failed', invalidated: true,
-        error: 'Device settings changed. This command will not be sent to the new endpoint.',
-      });
-    }
-  }
-
-  private async reconcileCommands(conversation: AgentConversation) {
-    const claimed = new Set<string>();
-    for (const command of this.outbox.getSnapshot()) {
-      if (command.agentId !== conversation.agentId || command.state !== 'sent') continue;
-      const agent = this.currentAgent(conversation.agentId);
-      if (!agent || !conversationMatchesAgent(conversation, agent)
-        || !sameAgentSession(commandSession(command.payload), agentSession(agent))) continue;
-      const match = conversation.items.find((item) => item.kind === 'user_message' &&
-        item.text === command.text && !command.baselineIds.includes(item.id) && !claimed.has(item.id));
-      if (match) {
-        claimed.add(match.id);
-        await this.outbox.reconcile(command.id, match.id);
-      } else if (command.action === 'human_request.answer' &&
-        conversation.activeHumanRequest?.id !== command.payload.requestId) {
-        await this.outbox.remove(command.id);
-      }
-    }
+    return this.dispatcher.cancelDevice(deviceId);
   }
 
   private publishConversations() {
-    const merged = new Map(this.rawConversations);
-    for (const command of this.outbox.getSnapshot()) {
+    const merged = new Map(this.transcripts.getSnapshot());
+    for (const command of this.dispatcher.getSnapshot()) {
       const device = this.devices.get(command.deviceId);
       const agent = device?.state.runtime.agents.find((entry) => entry.id === command.agentId);
       const previousSession = !!agent && !sameAgentSession(commandSession(command.payload), agentSession(agent));
@@ -884,15 +643,11 @@ export class HerdrRepository {
   }
 
   async loadDraft(agentId: string): Promise<string> {
-    return (await AsyncStorage.getItem(DRAFT_PREFIX + agentId)) ?? '';
+    return this.drafts.loadDraft(agentId);
   }
 
   async saveDraft(agentId: string, text: string): Promise<void> {
-    if (text) {
-      await AsyncStorage.setItem(DRAFT_PREFIX + agentId, text);
-    } else {
-      await AsyncStorage.removeItem(DRAFT_PREFIX + agentId);
-    }
+    return this.drafts.saveDraft(agentId, text);
   }
 
   diagnostics() {
@@ -994,29 +749,12 @@ export class HerdrRepository {
       return tracked;
     });
     if (agents.some((agent, index) => agent !== runtime.agents[index])) runtime = { ...runtime, agents };
-    const currentAgents = new Map(runtime.agents.map((agent) => [agent.id, agent]));
-    const invalidated = new Set<string>();
-    for (const [id, previous] of previousAgents) {
-      if (!sameAgentSession(agentSession(previous), agentSession(currentAgents.get(id)))) invalidated.add(id);
-    }
-    for (const agent of runtime.agents) {
-      const cached = this.rawConversations.get(agent.id);
-      if (cached && !conversationMatchesAgent(cached, agent)) invalidated.add(agent.id);
-    }
-    const removals: Promise<void>[] = [];
-    for (const id of invalidated) {
-      const epoch = this.conversationEpoch(id) + 1;
-      this.conversationEpochs.set(id, epoch);
-      this.rawConversations.delete(id);
-      this.restoring.delete(id);
-      removals.push(this.persistConversation(id, null, epoch));
-    }
     device.state = { ...device.state, runtime };
     device.runtimeGeneration = device.generation;
     this.reindexAgents();
-    if (invalidated.size) this.publishConversations();
+    const removals = this.transcripts.reconcileAgents(previousRuntime.agents, runtime.agents);
     this.publish();
-    await Promise.all(removals);
+    await removals;
     if (JSON.stringify(durableRuntime(previousRuntime)) !== JSON.stringify(durableRuntime(runtime))) {
       await this.persistRuntimes();
     }

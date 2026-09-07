@@ -123,12 +123,13 @@ def close_workspace(host: Bridge, payload: dict[str, Any]) -> dict[str, Any]:
 def remove_workspace_from_runtime(host: Bridge, workspace_id: str) -> None:
     with host.refresh_lock:
         with host.state_lock:
-            removed_agent_ids = {
-                agent.get("id")
+            removed_agents = [
+                agent
                 for agent in host.runtime.get("agents", [])
                 if isinstance(agent, dict)
                 and agent.get("workspaceId") == workspace_id
-            }
+            ]
+            removed_agent_ids = {agent.get("id") for agent in removed_agents}
             host.runtime = {
                 **host.runtime,
                 "workspaces": [
@@ -155,6 +156,14 @@ def remove_workspace_from_runtime(host: Bridge, workspace_id: str) -> None:
                 for pane_id, agent in host.pending_agents.items()
                 if agent.get("workspaceId") != workspace_id
             }
+        for agent in removed_agents:
+            agent_id = agent.get("id")
+            if isinstance(agent_id, str):
+                host.sessions.remove_agent(agent_id)
+                host.output_activity.invalidate(agent_id)
+            pane_id = agent.get("paneId")
+            if isinstance(pane_id, str):
+                host.sessions.forget_pane(pane_id)
 
 
 def create_agent(host: Bridge, payload: dict[str, Any]) -> dict[str, Any]:
@@ -230,12 +239,10 @@ def create_agent(host: Bridge, payload: dict[str, Any]) -> dict[str, Any]:
             name = f"{provider}-{uuid.uuid4().hex[:4]}"
             host._start_agent(name, provider, pane_id, args)
         agent_id = host._stable_agent_id(pane_id)
-        if session_id:
-            with host.state_lock:
-                host.started_sessions[pane_id] = session_id
-        with host.state_lock:
-            host.agent_tuning[pane_id] = host._tuning_of(payload)
-            host.agent_bypass[pane_id] = bypass_permissions
+        with host.refresh_lock:
+            host.sessions.record_launch(
+                pane_id, session_id, host._tuning_of(payload), bypass_permissions,
+            )
         for _ in range(20):
             if adapter.spec.wait_for_session:
                 host._refresh_runtime(inspect_copilot=False)
@@ -308,11 +315,11 @@ def close_agent(host: Bridge, payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(pane_id, str) or not pane_id:
         raise BridgeError("AGENT_NOT_FOUND", "This agent has no pane to close.")
     host._herdr_request("pane.close", {"pane_id": pane_id})
-    with host.state_lock:
-        host.pending_agents.pop(pane_id, None)
-        host.started_sessions.pop(pane_id, None)
-        host.agent_tuning.pop(pane_id, None)
-        host.agent_bypass.pop(pane_id, None)
+    with host.refresh_lock:
+        with host.state_lock:
+            host.pending_agents.pop(pane_id, None)
+        host.sessions.forget_pane(pane_id)
+        host.output_activity.invalidate(agent_id)
     try:
         host._refresh_runtime()
     except Exception as error:
@@ -324,6 +331,7 @@ def close_agent(host: Bridge, payload: dict[str, Any]) -> dict[str, Any]:
 def remove_agent_from_runtime(host: Bridge, agent_id: str) -> None:
     with host.refresh_lock:
         with host.state_lock:
+            removed = host.raw_agents.get(agent_id)
             host.runtime = {
                 **host.runtime,
                 "agents": [
@@ -334,6 +342,14 @@ def remove_agent_from_runtime(host: Bridge, agent_id: str) -> None:
                 "lastRuntimeEvent": time.time(),
             }
             host.raw_agents.pop(agent_id, None)
+        binding = host.sessions.binding(agent_id)
+        pane_id = str(removed.get("paneId") or "") if removed else None
+        if pane_id is None and binding is not None:
+            pane_id = binding.pane_id
+        host.sessions.remove_agent(agent_id)
+        if pane_id is not None:
+            host.sessions.forget_pane(pane_id)
+        host.output_activity.invalidate(agent_id)
 
 
 def install_pending_agent(

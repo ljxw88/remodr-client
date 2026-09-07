@@ -4,6 +4,7 @@ from __future__ import annotations
 import time
 from typing import Any, TYPE_CHECKING
 from .providers import SUPPORTED_PROVIDERS, provider_label
+from .session_registry import SessionBinding, SessionKey
 
 if TYPE_CHECKING:
     from .bridge import Bridge
@@ -54,24 +55,9 @@ def normalize_snapshot(
         )
         provider_session_id = adapter.session_hint(pane_id, reported_session_id)
         agent_id = host._stable_agent_id(pane_id)
-        previous = host.raw_agents.get(agent_id)
-        remembered = host.started_sessions.get(pane_id)
-        previous_session_id = previous.get("providerSessionId") if previous else None
-        observed = pane_id in host.observed_session_panes
-        if previous_session_id is None and not observed:
-            previous_session_id = remembered
-        # First identification is not a rotation away from launch settings.
-        had_session_identity = observed or previous_session_id is not None
-        if (
-            (previous is not None or remembered is not None)
-            and (
-                (had_session_identity and previous_session_id != provider_session_id)
-                or (previous and previous.get("provider") != provider)
-            )
-        ):
-            host._invalidate_agent_session(agent_id, pane_id, previous_session_id)
-        if reported_session_id:
-            host.observed_session_panes.add(pane_id)
+        binding = SessionBinding(SessionKey(agent_id, provider, provider_session_id), pane_id)
+        if host.sessions.bind(binding, reported=bool(reported_session_id)):
+            host.output_activity.invalidate(agent_id)
         adapter.remember_session(pane_id, reported_session_id)
         workspace_id = str(raw.get("workspace_id") or "")
         capabilities = host._agent_capabilities(provider, provider_session_id)
@@ -119,31 +105,6 @@ def normalize_snapshot(
         for pane in (panes if isinstance(panes, list) else [])
         if isinstance(pane, dict) and pane.get("pane_id")
     }
-    host.started_sessions = {
-        pane: session
-        for pane, session in host.started_sessions.items()
-        if pane in live_pane_ids
-    }
-    host.observed_session_panes.intersection_update(live_pane_ids)
-    host.process_bound_panes.intersection_update(live_pane_ids)
-    host.session_identity_errors = {
-        pane: error for pane, error in host.session_identity_errors.items()
-        if pane in live_pane_ids
-    }
-    host.session_identity_diagnostics = {
-        pane: message for pane, message in host.session_identity_diagnostics.items()
-        if pane in live_pane_ids
-    }
-    host.agent_tuning = {
-        pane: tuning
-        for pane, tuning in host.agent_tuning.items()
-        if pane in live_pane_ids
-    }
-    host.agent_bypass = {
-        pane: bypass
-        for pane, bypass in host.agent_bypass.items()
-        if pane in live_pane_ids
-    }
     # Sessions are keyed by id rather than pane, so they need pruning
     # against the panes still holding them or the cache grows for as long
     # as the bridge runs.
@@ -151,11 +112,6 @@ def normalize_snapshot(
         str(agent.get("providerSessionId"))
         for agent in normalized_agents
         if agent.get("providerSessionId")
-    }
-    host.session_tuning_cache = {
-        session: entry
-        for session, entry in host.session_tuning_cache.items()
-        if session in live_sessions
     }
     for pane_id, pending in list(host.pending_agents.items()):
         if pane_id in detected_pane_ids or pane_id not in live_pane_ids:
@@ -168,12 +124,7 @@ def normalize_snapshot(
             **pending,
         }
 
-    for agent_id, previous in host.raw_agents.items():
-        if agent_id not in raw_agents:
-            host._invalidate_agent_session(
-                agent_id, str(previous.get("paneId") or ""),
-                previous.get("providerSessionId"),
-            )
+    host.sessions.prune(live_pane_ids, live_sessions, set(raw_agents))
     host.output_activity.prune(set(raw_agents))
     with host.state_lock:
         host.raw_agents = raw_agents

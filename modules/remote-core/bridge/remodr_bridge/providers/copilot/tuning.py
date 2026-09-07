@@ -25,7 +25,7 @@ class CopilotTuning:
         """
         host = self.host
         agent = host._require_agent(payload)
-        if agent.get("paneId") in host.session_identity_errors:
+        if host.sessions.identity_error(agent.get("paneId")) is not None:
             raise BridgeError("SESSION_IDENTITY_UNRESOLVED", "The active provider session cannot be verified.")
         provider = agent.get("provider")
         pane_id = agent.get("paneId")
@@ -64,8 +64,7 @@ class CopilotTuning:
                 },
             )
 
-        with host.state_lock:
-            host.agent_tuning[pane_id] = wanted
+        host.sessions.set_tuning(pane_id, wanted)
         host._refresh_runtime()
         return {"agentId": agent["id"], "runtime": host.runtime}
 
@@ -78,12 +77,9 @@ class CopilotTuning:
     ) -> None:
         host = self.host
         provider = str(agent.get("provider"))
-        with host.state_lock:
-            # Whatever it was started with. Handing back all its tools because
-            # it was restarted is not a change anyone asked for, and the
-            # opposite would leave it stopping for permission it used to have.
-            bypass = host.agent_bypass.get(pane_id, True)
-            previous = dict(host.agent_tuning.get(pane_id) or {})
+        # Preserve launch permissions and settings through a same-session restart.
+        bypass = host.sessions.bypass(pane_id)
+        previous = host.sessions.tuning(pane_id)
 
         host._herdr_request("agent.prompt", {"target": pane_id, "text": "/exit"})
         deadline = time.monotonic() + SHELL_READY_TIMEOUT
@@ -110,8 +106,7 @@ class CopilotTuning:
                 "The agent would not start with those settings, so it has been "
                 "put back as it was.",
             )
-        with host.state_lock:
-            host.started_sessions[pane_id] = session_id
+        host.sessions.remember_launch_session(pane_id, session_id)
 
     def launch_tuned(
         self,
@@ -166,9 +161,7 @@ class CopilotTuning:
         except OSError:
             return dict(empty)
 
-        offset, tuning = host.session_tuning_cache.get(
-            provider_session_id, (0, dict(empty))
-        )
+        offset, tuning = host.sessions.cached_tuning(provider_session_id) or (0, dict(empty))
         if size < offset:
             # Truncated or replaced, so nothing read before can be trusted.
             offset, tuning = 0, dict(empty)
@@ -214,8 +207,9 @@ class CopilotTuning:
                 if data.get("contextTier"):
                     tuning["context"] = data["contextTier"]
 
-        host.session_tuning_cache[provider_session_id] = (
+        host.sessions.cache_tuning(
+            provider_session_id,
             offset + consumed,
-            dict(tuning),
+            tuning,
         )
         return dict(tuning)

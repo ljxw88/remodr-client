@@ -1,0 +1,44 @@
+{
+  "cases": [
+    {
+      "name": "accepted",
+      "request": {
+        "protocol": 1,
+        "type": "request",
+        "id": "contract-accepted",
+        "commandId": "22222222-2222-4222-8222-222222222222",
+        "action": "agent.send_message",
+        "payload": {
+          "agentId": "agent_4933996907bac635c6ea",
+          "text": "Synthetic command.",
+          "precondition": {"provider": "copilot", "paneId": "contract-pane", "providerSessionId": "contract-before-clear"}
+        }
+      },
+      "response": {"protocol": 1, "type": "response", "id": "contract-accepted", "ok": true, "payload": {"accepted": true}},
+      "state": "succeeded"
+    },
+    {
+      "name": "uncertain",
+      "request": {
+        "protocol": 1,
+        "type": "request",
+        "id": "contract-uncertain",
+        "commandId": "33333333-3333-4333-8333-333333333333",
+        "action": "agent.send_message",
+        "payload": {
+          "agentId": "agent_4933996907bac635c6ea",
+          "text": "Synthetic command.",
+          "precondition": {"provider": "copilot", "paneId": "contract-pane", "providerSessionId": "contract-before-clear"}
+        }
+      },
+      "response": {
+        "protocol": 1,
+        "type": "response",
+        "id": "contract-uncertain",
+        "ok": false,
+        "error": {"code": "COMMAND_UNCERTAIN", "message": "Command may have been delivered; do not resend."}
+      },
+      "state": "uncertain"
+    }
+  ]
+}

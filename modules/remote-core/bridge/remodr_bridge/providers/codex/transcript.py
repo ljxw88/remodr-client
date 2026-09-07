@@ -11,6 +11,7 @@ from .sessions import session_uuid
 from ..base import ProviderHost
 from ...errors import BridgeError
 from ...formatting import content_text
+from ...session_registry import SessionKey
 
 def load_conversation(host: ProviderHost, agent: dict[str, Any]) -> dict[str, Any] | None:
     session_id = session_uuid(agent.get("providerSessionId"))
@@ -21,10 +22,10 @@ def load_conversation(host: ProviderHost, agent: dict[str, Any]) -> dict[str, An
         return None
     info = path.stat()
     version = (info.st_size, info.st_mtime_ns, info.st_ino, info.st_ctime_ns)
-    key = (agent["id"], "codex", session_id)
-    cached = host.conversation_cache.get(key)
-    if cached and cached[0] == version:
-        return cached[1]
+    key = SessionKey(agent["id"], "codex", session_id)
+    cached = host.sessions.conversation(key, version)
+    if cached is not None:
+        return cached
 
     completed: list[dict[str, Any]] = []
     legacy: list[dict[str, Any]] = []
@@ -99,7 +100,7 @@ def load_conversation(host: ProviderHost, agent: dict[str, Any]) -> dict[str, An
         "items": completed if paginated or completed else legacy,
         "activeHumanRequest": None,
     }
-    host.conversation_cache[key] = (version, conversation)
+    host.sessions.cache_conversation(key, version, conversation)
     return conversation
 
 

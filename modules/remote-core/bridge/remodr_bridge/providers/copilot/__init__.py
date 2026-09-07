@@ -35,7 +35,7 @@ class CopilotAdapter(ProviderAdapter):
         pane_id = str(raw.get("pane_id") or "")
         if inspect:
             return sessions.effective_session(self.host, self.processes, pane_id, native_session_id)
-        if pane_id in self.host.process_bound_panes:
+        if self.host.sessions.is_process_bound(pane_id):
             # Event hints neither rescan processes nor restore stale native IDs.
             previous = self.host.raw_agents.get(self.host._stable_agent_id(pane_id))
             return (
@@ -47,15 +47,15 @@ class CopilotAdapter(ProviderAdapter):
         return native_session_id
 
     def session_hint(self, pane_id: str, reported_session_id: str | None) -> str | None:
-        if not reported_session_id and pane_id not in self.host.observed_session_panes:
-            return self.host.started_sessions.get(pane_id)
+        if not reported_session_id and not self.host.sessions.was_observed(pane_id):
+            return self.host.sessions.launched_session(pane_id)
         return reported_session_id
 
     def remember_session(self, pane_id: str, reported_session_id: str | None) -> None:
-        if reported_session_id and self.host.started_sessions.get(pane_id) is not None:
-            self.host.started_sessions[pane_id] = reported_session_id
-        elif not reported_session_id and pane_id in self.host.observed_session_panes:
-            self.host.started_sessions.pop(pane_id, None)
+        if reported_session_id and self.host.sessions.launched_session(pane_id) is not None:
+            self.host.sessions.remember_launch_session(pane_id, reported_session_id)
+        elif not reported_session_id and self.host.sessions.was_observed(pane_id):
+            self.host.sessions.forget_launch_session(pane_id)
 
     def load_conversation(self, agent: dict[str, Any]) -> dict[str, Any] | None:
         return transcript.load_conversation(self.host, agent)

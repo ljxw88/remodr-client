@@ -12,6 +12,7 @@ from .constants import BRIDGE_VERSION, PROTOCOL, ORDERED_TUNING
 from .errors import BridgeError
 from .activity import OutputActivity
 from .ledger import CommandLedger
+from .session_registry import SessionKey, SessionRegistry
 from .providers.base import ProviderAdapter
 from .providers import SUPPORTED_PROVIDERS, create_registry, provider_type, normalize_provider, provider_label
 
@@ -25,18 +26,7 @@ class Bridge:
         # How long the agent's question dialog is given to redraw between
         # keystroke batches. An attribute so tests can drive it at zero.
         self.dialog_settle_seconds = 0.25
-        # Pane id -> the Copilot session id this app asked that pane to open.
-        self.started_sessions: dict[str, str] = {}
-        self.observed_session_panes: set[str] = set()
-        self.process_bound_panes: set[str] = set()
-        self.session_identity_errors: dict[str, str] = {}
-        self.session_identity_diagnostics: dict[str, str] = {}
-        # Pane id -> the model, effort and context it was last started with.
-        self.agent_tuning: dict[str, dict[str, Any]] = {}
-        # Pane id -> whether it was started with its permissions bypassed.
-        self.agent_bypass: dict[str, bool] = {}
-        # Session id -> (bytes of the log already read, settings found in them).
-        self.session_tuning_cache: dict[str, tuple[int, dict[str, Any]]] = {}
+        self.sessions = SessionRegistry()
         self.output_lock = threading.Lock()
         self.state_lock = threading.Lock()
         self.refresh_lock = threading.RLock()
@@ -55,12 +45,7 @@ class Bridge:
         self.runtime_revision = 0
         self.agent_catalog: list[dict[str, Any]] | None = None
         self.raw_agents: dict[str, dict[str, Any]] = {}
-        self.pending_human_requests: dict[str, dict[str, Any]] = {}
-        self.human_request_scopes: dict[str, tuple[str, Any, Any]] = {}
         self.pending_agents: dict[str, dict[str, Any]] = {}
-        self.conversation_cache: dict[
-            tuple[str, str, str], tuple[tuple[int, int, int, int], dict[str, Any]]
-        ] = {}
         self.command_context = threading.local()
         self.command_store_error: BridgeError | None = None
         self.providers = create_registry(self)
@@ -243,10 +228,7 @@ class Bridge:
     def _remember_human_request(
         self, request: dict[str, Any], agent: dict[str, Any]
     ) -> None:
-        self.pending_human_requests[request["id"]] = request
-        self.human_request_scopes[request["id"]] = (
-            agent["id"], agent.get("provider"), agent.get("providerSessionId")
-        )
+        self.sessions.remember_question(SessionKey.from_agent(agent), request)
 
     def _require_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
         agent_id = payload.get("agentId")
@@ -302,16 +284,7 @@ class Bridge:
         self, agent_id: str, pane_id: str, session_id: Any
     ) -> None:
         self.output_activity.invalidate(agent_id)
-        self.agent_tuning.pop(pane_id, None)
-        self.session_tuning_cache.pop(session_id, None)
-        self.conversation_cache = {
-            key: value for key, value in self.conversation_cache.items()
-            if key[0] != agent_id
-        }
-        for request_id, scope in list(self.human_request_scopes.items()):
-            if scope[0] == agent_id:
-                self.pending_human_requests.pop(request_id, None)
-                self.human_request_scopes.pop(request_id, None)
+        self.sessions.invalidate(agent_id, pane_id, session_id)
 
     @staticmethod
     def _new_session_arguments(
@@ -342,7 +315,7 @@ class Bridge:
 
     def _retune_current_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
         agent = self._require_agent(payload)
-        if agent.get("paneId") in self.session_identity_errors:
+        if self.sessions.identity_error(agent.get("paneId")) is not None:
             raise BridgeError(
                 "SESSION_IDENTITY_UNRESOLVED", "The active provider session cannot be verified."
             )
@@ -361,7 +334,7 @@ class Bridge:
         Other providers' session formats are not read for tuning, so settings
         not remembered from creation remain unknown.
         """
-        ours = self.agent_tuning.get(pane_id) or {}
+        ours = self.sessions.tuning(pane_id)
         logged = self.provider_adapter(provider).session_tuning(provider_session_id)
         return {key: ours.get(key) or logged.get(key) for key in ORDERED_TUNING}
 
@@ -380,10 +353,9 @@ class Bridge:
     def _load_bound_conversation(self, agent: dict[str, Any]) -> dict[str, Any]:
         provider = agent["provider"]
         adapter = self.provider_adapter(provider)
-        if agent.get("paneId") in self.session_identity_errors:
-            reason = adapter.identity_error(
-                self.session_identity_errors[agent["paneId"]]
-            )
+        identity_error = self.sessions.identity_error(agent.get("paneId"))
+        if identity_error is not None:
+            reason = adapter.identity_error(identity_error)
             raise BridgeError("SESSION_IDENTITY_UNRESOLVED", reason)
         try:
             conversation = adapter.load_conversation(agent)
@@ -570,9 +542,10 @@ class Bridge:
     def _normalize_snapshot(
         self, snapshot: dict[str, Any], *, inspect_copilot: bool = True, include_activity: bool = False
     ) -> dict[str, Any]:
-        return runtime.normalize_snapshot(
-            self, snapshot, inspect_copilot=inspect_copilot, include_activity=include_activity,
-        )
+        with self.refresh_lock:
+            return runtime.normalize_snapshot(
+                self, snapshot, inspect_copilot=inspect_copilot, include_activity=include_activity,
+            )
 
     def _agent_catalog_snapshot(self, force: bool = False) -> list[dict[str, Any]]:
         return runtime.agent_catalog_snapshot(self, force)

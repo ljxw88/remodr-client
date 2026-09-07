@@ -27,6 +27,8 @@ export const agentStatusSchema = z.enum([
 export type AgentStatus = z.infer<typeof agentStatusSchema>;
 
 export const agentCapabilitiesSchema = z.object({
+  /** Older bridges omit this field; absence is not an explicit refusal. */
+  supportsRetuning: z.boolean().optional(),
   structuredConversation: z.boolean().default(false),
   streamingConversation: z.boolean().default(false),
   structuredQuestions: z.boolean().default(false),

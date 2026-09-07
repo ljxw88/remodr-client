@@ -1,6 +1,6 @@
 import { Stack, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { useState } from 'react';
+import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, View } from 'react-native';
 
 import { AppButton } from '@/components/ui/app-button';
 import { AppIcon } from '@/components/ui/app-icon';
@@ -10,14 +10,14 @@ import { Screen } from '@/components/ui/screen';
 import { TextField } from '@/components/ui/text-field';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
-import type { RemoteFile } from '@/domain/remote';
 import {
   childRemoteFolderPath,
   isValidRemoteFolderName,
   parentRemoteFolderPath,
   remoteFolderSftpPath,
 } from '@/features/files/remote-folder-path';
-import { useHostSession } from '@/features/connection/use-host-session';
+import { refreshSessions, useHostSession } from '@/features/connection/use-host-session';
+import { useRemoteDirectory } from '@/features/files/use-remote-directory';
 import { useTheme } from '@/hooks/use-theme';
 import { remoteClient } from '@/services/native-remote-client';
 import { toUserMessage } from '@/utils/user-error';
@@ -26,89 +26,17 @@ export default function FilesScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const theme = useTheme();
   const session = useHostSession(id ?? '');
-  const [path, setPath] = useState('~');
-  const currentPath = useRef('~');
-  const loadVersion = useRef(0);
-  const [files, setFiles] = useState<RemoteFile[]>([]);
+  const sessionId = session?.status === 'connected' ? session.sessionId : null;
+  const directory = useRemoteDirectory({
+    hostId: id ?? '', sessionId, client: remoteClient, onSessionChange: refreshSessions,
+  });
+  const { path, navigate } = directory;
+  const viewRequest = directory.request;
   const [name, setName] = useState('');
   const parent = parentRemoteFolderPath(path);
   const canCreateFolder = isValidRemoteFolderName(name);
 
-  const navigate = useCallback((nextPath: string) => {
-    currentPath.current = nextPath;
-    setPath(nextPath);
-  }, []);
-
-  const commitFiles = useCallback(
-    (
-      requestedPath: string,
-      requestedSessionId: string,
-      version: number,
-      nextFiles: RemoteFile[],
-    ) => {
-      if (
-        remoteClient.getSession(id ?? '')?.sessionId === requestedSessionId &&
-        version === loadVersion.current &&
-        currentPath.current === requestedPath
-      ) {
-        setFiles(nextFiles);
-      }
-    },
-    [id],
-  );
-
-  const reportLoadError = useCallback(
-    (
-      requestedPath: string,
-      requestedSessionId: string,
-      version: number,
-      error: unknown,
-    ) => {
-      if (
-        remoteClient.getSession(id ?? '')?.sessionId === requestedSessionId &&
-        version === loadVersion.current &&
-        currentPath.current === requestedPath
-      ) {
-        Alert.alert('SFTP', toUserMessage(error));
-      }
-    },
-    [id],
-  );
-
-  const load = useCallback(async (requestedPath: string) => {
-    if (!session) {
-      return;
-    }
-    const requestedSessionId = session.sessionId;
-    if (remoteClient.getSession(id ?? '')?.sessionId !== requestedSessionId) {
-      return;
-    }
-    const version = ++loadVersion.current;
-    try {
-      const nextFiles = await listRemoteEntries(requestedSessionId, requestedPath);
-      commitFiles(requestedPath, requestedSessionId, version, nextFiles);
-    } catch (error) {
-      reportLoadError(requestedPath, requestedSessionId, version, error);
-    }
-  }, [commitFiles, id, reportLoadError, session]);
-
-  useEffect(() => {
-    if (!session) {
-      return;
-    }
-    const requestedPath = path;
-    const requestedSessionId = session.sessionId;
-    const version = ++loadVersion.current;
-    void listRemoteEntries(requestedSessionId, requestedPath).then(
-      (nextFiles) => commitFiles(requestedPath, requestedSessionId, version, nextFiles),
-      (error) => reportLoadError(requestedPath, requestedSessionId, version, error),
-    );
-    return () => {
-      loadVersion.current += 1;
-    };
-  }, [commitFiles, path, reportLoadError, session]);
-
-  if (!session) {
+  if (!sessionId) {
     return <NeedsSession title="Files" />;
   }
 
@@ -135,14 +63,20 @@ export default function FilesScreen() {
                     );
                     return;
                   }
-                  const mutationPath = path;
-                  const folderPath = childRemoteFolderPath(path, name.trim());
+                  if (!viewRequest || !directory.isCurrent(viewRequest)) {
+                    Alert.alert('Folder changed', 'The folder or connection changed. Try again.');
+                    return;
+                  }
+                  const submittedName = name.trim();
+                  const folderPath = childRemoteFolderPath(path, submittedName);
                   await remoteClient.sftpMkdir(
-                    session.sessionId,
+                    viewRequest.sessionId,
                     remoteFolderSftpPath(folderPath),
                   );
-                  setName('');
-                  await load(mutationPath);
+                  if (directory.capture() === viewRequest) {
+                    setName((current) => current.trim() === submittedName ? '' : current);
+                  }
+                  directory.refresh(viewRequest);
                 } catch (error) {
                   Alert.alert('Could not create folder', toUserMessage(error));
                 }
@@ -152,7 +86,7 @@ export default function FilesScreen() {
         </View>
       </View>
       <FlatList
-        data={files}
+        data={directory.entries}
         keyExtractor={(item) => item.path}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.list}
@@ -163,7 +97,7 @@ export default function FilesScreen() {
               item.isDirectory ? 'folder' : `${item.size} bytes`
             }`}
             onPress={() => {
-              if (item.isDirectory) {
+              if (item.isDirectory && directory.capture() === viewRequest) {
                 navigate(childRemoteFolderPath(path, item.name));
               }
             }}
@@ -174,13 +108,18 @@ export default function FilesScreen() {
                   text: 'Delete',
                   style: 'destructive',
                   onPress: () => {
-                    const mutationPath = path;
-                    void remoteClient
-                      .sftpRemove(session.sessionId, item.path)
-                      .then(() => load(mutationPath))
-                      .catch((error) => {
+                    void (async () => {
+                      try {
+                        if (!viewRequest || !directory.isCurrent(viewRequest)) {
+                          Alert.alert('Folder changed', 'The folder or connection changed. Try again.');
+                          return;
+                        }
+                        await remoteClient.sftpRemove(viewRequest.sessionId, item.path);
+                        directory.refresh(viewRequest);
+                      } catch (error) {
                         Alert.alert('Could not delete item', toUserMessage(error));
-                      });
+                      }
+                    })();
                   },
                 },
               ]);
@@ -231,36 +170,20 @@ export default function FilesScreen() {
         )}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <ThemedText type="small" themeColor="textMuted">
-              This folder is empty.
-            </ThemedText>
+            {directory.loading ? (
+              <ActivityIndicator accessibilityLabel="Loading files" />
+            ) : directory.error ? (
+              <>
+                <ThemedText type="small" themeColor="textMuted">{directory.error}</ThemedText>
+                <AppButton label="Try again" variant="secondary" onPress={() => directory.refresh()} />
+              </>
+            ) : (
+              <ThemedText type="small" themeColor="textMuted">This folder is empty.</ThemedText>
+            )}
           </View>
         }
       />
     </Screen>
-  );
-}
-
-function sortRemoteEntries(entries: RemoteFile[]): RemoteFile[] {
-  return entries
-    .filter((entry) => entry.name !== '.' && entry.name !== '..')
-    .sort((left, right) => {
-      if (left.isDirectory !== right.isDirectory) {
-        return left.isDirectory ? -1 : 1;
-      }
-      const hiddenOrder =
-        Number(left.name.startsWith('.')) -
-        Number(right.name.startsWith('.'));
-      return hiddenOrder || left.name.localeCompare(right.name);
-    });
-}
-
-async function listRemoteEntries(
-  sessionId: string,
-  path: string,
-): Promise<RemoteFile[]> {
-  return sortRemoteEntries(
-    await remoteClient.sftpList(sessionId, remoteFolderSftpPath(path)),
   );
 }
 

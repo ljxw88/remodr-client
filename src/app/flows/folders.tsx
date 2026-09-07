@@ -8,29 +8,20 @@ import { AppIcon } from '@/components/ui/app-icon';
 import { FormError, FormPage, FormSection, MissingFlow, SelectionRow } from '@/components/ui/form-page';
 import { TextField } from '@/components/ui/text-field';
 import { ControlHeight, Radius, Spacing } from '@/constants/theme';
-import type { RemoteFile } from '@/domain/remote';
 import { useHerdr } from '@/features/agents/use-herdr';
 import { refreshSessions, useHostSession } from '@/features/connection/use-host-session';
 import {
   childRemoteFolderPath,
   normalizeRemoteFolderPath,
   parentRemoteFolderPath,
-  remoteFolderSftpPath,
 } from '@/features/files/remote-folder-path';
+import { useRemoteDirectory } from '@/features/files/use-remote-directory';
 import { flowDrafts, useFlowDraft, type NewSpaceDraft } from '@/features/forms/flow-drafts';
 import { useHosts } from '@/features/hosts/use-hosts';
 import { useTheme } from '@/hooks/use-theme';
 import { herdrRepository } from '@/services/herdr-repository';
 import { remoteClient } from '@/services/native-remote-client';
 import { toUserMessage } from '@/utils/user-error';
-
-type Listing = {
-  path: string;
-  sessionId: string;
-  revision: number;
-  folders: RemoteFile[];
-  error: string | null;
-};
 
 export default function FoldersPage() {
   const params = useLocalSearchParams<{ flowId?: string | string[] }>();
@@ -47,68 +38,49 @@ function FolderBrowser({ flowId, draft }: { flowId: string; draft: NewSpaceDraft
   const device = devices[draft.deviceId];
   const session = useHostSession(draft.deviceId);
   const sessionId = device?.connection === 'connected' && session?.status === 'connected' ? session.sessionId : null;
-  const [path, setPath] = useState(() => normalizeRemoteFolderPath(draft.cwd));
+  const directory = useRemoteDirectory({
+    hostId: draft.deviceId, sessionId, initialPath: draft.cwd, directoriesOnly: true,
+    client: remoteClient, onSessionChange: refreshSessions,
+  });
+  const { path, loading, ready } = directory;
+  const viewRequest = directory.request;
   const [entry, setEntry] = useState(() => path === '~' ? '~/' : path);
-  const [revision, setRevision] = useState(0);
-  const [listing, setListing] = useState<Listing | null>(null);
-  const [selectionError, setSelectionError] = useState<string | null>(null);
-  const generation = useRef(0);
+  const [selectionFailure, setSelectionFailure] = useState<{
+    path: string; sessionId: string | null; message: string;
+  } | null>(null);
+  const selectionError = selectionFailure?.path === path && selectionFailure.sessionId === sessionId
+    ? selectionFailure.message : null;
   const selected = useRef(false);
-  const currentListing = listing?.path === path && listing.sessionId === sessionId && listing.revision === revision ? listing : null;
   const connectionError = !device ? 'This device is no longer available. Go back and choose another device.'
     : !sessionId ? 'This device is not connected. Folders will reload when it reconnects.' : null;
-  const loading = !!sessionId && !currentListing;
-  const error = selectionError ?? connectionError ?? currentListing?.error;
+  const error = selectionError ?? connectionError ?? directory.error;
   const unopenedPath = !entry.trim() || normalizeRemoteFolderPath(entry) !== path;
   const parent = parentRemoteFolderPath(path);
 
   useFocusEffect(useCallback(() => {
-    const token = ++generation.current;
     selected.current = false;
-    setSelectionError(null);
-    setListing(null);
-    if (!sessionId) return;
-    let active = true;
-    void remoteClient.sftpList(sessionId, remoteFolderSftpPath(path))
-      .then((entries) => {
-        if (!active || generation.current !== token) return;
-        const live = remoteClient.getSession(draft.deviceId);
-        if (live?.sessionId !== sessionId || live.status !== 'connected') {
-          refreshSessions();
-          return;
-        }
-        setListing({
-          path, sessionId, revision, error: null,
-          folders: entries.filter((item) => item.isDirectory && item.name !== '.' && item.name !== '..')
-            .sort((left, right) => Number(left.name.startsWith('.')) - Number(right.name.startsWith('.')) || left.name.localeCompare(right.name)),
-        });
-      })
-      .catch((cause) => {
-        if (active && generation.current === token) {
-          setListing({ path, sessionId, revision, folders: [], error: toUserMessage(cause) });
-        }
-      });
-    return () => {
-      active = false;
-      generation.current++;
-    };
-  }, [draft.deviceId, path, revision, sessionId]));
+    setSelectionFailure(null);
+  }, []));
+
+  function setSelectionError(message: string | null) {
+    setSelectionFailure(message == null ? null : { path, sessionId, message });
+  }
 
   function navigate(nextPath: string) {
     if (selected.current) return;
     Keyboard.dismiss();
-    generation.current++;
     const normalized = normalizeRemoteFolderPath(nextPath);
     setSelectionError(null);
-    setListing(null);
     setEntry(normalized === '~' ? '~/' : normalized);
-    setPath(normalized);
-    setRevision((value) => value + 1);
+    directory.navigate(normalized);
   }
 
   function retry() {
-    refreshSessions();
-    navigate(path);
+    if (selected.current) return;
+    Keyboard.dismiss();
+    setSelectionError(null);
+    setEntry(path === '~' ? '~/' : path);
+    directory.refresh();
   }
 
   function openAddress() {
@@ -116,22 +88,21 @@ function FolderBrowser({ flowId, draft }: { flowId: string; draft: NewSpaceDraft
   }
 
   function useFolder() {
-    if (selected.current || loading || error || unopenedPath || !currentListing || !sessionId) return;
+    if (selected.current || loading || error || unopenedPath || !ready || !sessionId) return;
     const current = flowDrafts.get(flowId);
     if (current?.kind !== 'new-space' || current.deviceId !== draft.deviceId) return;
     try {
-      const live = remoteClient.getSession(current.deviceId);
-      if (live?.sessionId !== sessionId || live.status !== 'connected' ||
+      if (!directory.isCurrent(viewRequest) ||
         herdrRepository.getSnapshot().devices[current.deviceId]?.connection !== 'connected') {
         refreshSessions();
         setSelectionError('This device disconnected. Reconnect and try again.');
         return;
       }
       selected.current = true;
-      generation.current++;
       flowDrafts.update(flowId, (value) => value.kind === 'new-space' && value.deviceId === current.deviceId
         ? { ...value, cwd: path === '~' ? '~/' : path } : value);
       router.back();
+      directory.cancel();
     } catch (cause) {
       selected.current = false;
       setSelectionError(toUserMessage(cause));
@@ -142,7 +113,7 @@ function FolderBrowser({ flowId, draft }: { flowId: string; draft: NewSpaceDraft
     <FormPage title="Choose Folder" scroll={false} footer={
       <>
         {unopenedPath ? <ThemedText type="caption" themeColor="textMuted">Open the entered path before selecting it.</ThemedText> : null}
-        <AppButton label="Use this folder" disabled={loading || !!error || unopenedPath || !currentListing} onPress={useFolder} />
+        <AppButton label="Use this folder" disabled={loading || !!error || unopenedPath || !ready} onPress={useFolder} />
       </>
     }>
       <ThemedText type="small" themeColor="textSecondary">{hosts.find((host) => host.id === draft.deviceId)?.name ?? draft.deviceId}</ThemedText>
@@ -172,7 +143,7 @@ function FolderBrowser({ flowId, draft }: { flowId: string; draft: NewSpaceDraft
         : loading ? <View style={styles.center}><ActivityIndicator /><ThemedText type="small" themeColor="textMuted">Loading folders…</ThemedText></View>
         : error ? <View style={styles.center}><FormError message={error} /><AppButton label="Try again" variant="secondary" onPress={retry} /></View>
           : <FormSection fill>
-            <FlatList data={currentListing?.folders ?? []} keyExtractor={(folder) => folder.path}
+            <FlatList data={directory.entries} keyExtractor={(folder) => folder.path}
               style={styles.list} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false}
               renderItem={({ item }) => <SelectionRow label={item.name} description="Folder" onPress={() => navigate(childRemoteFolderPath(path, item.name))} />}
               ListEmptyComponent={<View style={styles.center}><ThemedText type="small" themeColor="textMuted">No folders here.</ThemedText></View>} />
