@@ -861,7 +861,10 @@ function PlanStep({ todo }: { todo: PlanItem }) {
   const blocked = todo.state === 'blocked';
 
   return (
-    <View style={styles.planStep}>
+    <View
+      accessible
+      accessibilityLabel={`${todo.text}, ${todo.state.replace('_', ' ')}`}
+      style={styles.planStep}>
       <View style={styles.planStepMark}>
         {active ? (
           <ActivityIndicator size="small" color={theme.accent} />
