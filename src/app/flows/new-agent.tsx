@@ -138,6 +138,7 @@ function NewAgentForm({ flowId, draft }: { flowId: string; draft: NewAgentDraft 
             <SelectionRow label="Allow tools automatically" description="Apply the provider's bypass-permissions flag."
               accessory={<Switch accessibilityLabel="Allow tools automatically" value={draft.bypassPermissions} disabled={creating}
                 trackColor={{ false: theme.border, true: theme.accent }}
+                thumbColor={draft.bypassPermissions ? theme.onAccent : theme.textMuted}
                 onValueChange={(bypassPermissions) => update((current) => ({ ...current, bypassPermissions }))} />} />
           </FormSection>
         </View>

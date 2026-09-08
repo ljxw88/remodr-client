@@ -1,7 +1,8 @@
 import { createElement } from 'react';
 import TestRenderer from 'react-test-renderer';
-import { Text } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
 
+import { Colors } from '@/constants/theme';
 import { FinishDot } from './finish-dot';
 
 describe('FinishDot', () => {
@@ -22,6 +23,9 @@ describe('FinishDot', () => {
     const dot = root.findByProps({ accessibilityLabel: 'Unread finished work' });
     expect(dot.props.accessible).toBe(true);
     expect(dot.props.pointerEvents).toBe('none');
+    expect(dot.props.style).toEqual(expect.arrayContaining([
+      expect.objectContaining({ backgroundColor: Colors.accentSecondary }),
+    ]));
   });
 
   it('does not show an indicator for zero unread finishes', () => {
@@ -37,6 +41,8 @@ describe('FinishDot', () => {
   it('shows the count once there is more than one unread finish to aggregate', () => {
     const root = render({ count: 3, label: '3 unread finished agents' });
     expect(root.findByType(Text).props.children).toBe(3);
+    expect(StyleSheet.flatten(root.findByType(Text).props.style).color)
+      .toBe(Colors.onAccentSecondary);
     expect(root.findByProps({ accessibilityLabel: '3 unread finished agents' })).toBeDefined();
   });
 

@@ -17,7 +17,7 @@ type Props = {
 };
 
 /**
- * The blue "something finished, unread" indicator.
+ * The orange supplemental "something finished, unread" indicator.
  *
  * Deliberately not the status dot: status (working/blocked/done/idle) reads
  * the agent's current state, this reads whether *you* have looked at a finish
@@ -35,9 +35,9 @@ export function FinishDot({ count, label, style }: Props) {
       accessibilityRole="image"
       accessibilityLabel={label}
       pointerEvents="none"
-      style={[badge ? styles.badge : styles.dot, { backgroundColor: theme.accent }, style]}>
+      style={[badge ? styles.badge : styles.dot, { backgroundColor: theme.accentSecondary }, style]}>
       {badge ? (
-        <ThemedText style={[styles.badgeText, { color: theme.onAccent }]} numberOfLines={1}>
+        <ThemedText style={[styles.badgeText, { color: theme.onAccentSecondary }]} numberOfLines={1}>
           {count > 9 ? '9+' : count}
         </ThemedText>
       ) : null}

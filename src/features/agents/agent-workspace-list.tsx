@@ -132,9 +132,9 @@ function AgentRow({ agent, active }: Readonly<{ agent: RemoteAgent; active: bool
         // Scale belongs to controls that stand alone on the canvas.
         { backgroundColor: pressed ? theme.backgroundSelected : 'transparent' },
       ]}>
-      <View style={[styles.providerIcon, { backgroundColor: theme.accentSoft }]}>
+      <GlassSurface highlight={false} style={[styles.providerIcon, { backgroundColor: theme.accentSoft }]}>
         <AgentProviderIcon provider={agent.provider} tintColor={theme.accent} />
-      </View>
+      </GlassSurface>
       <View style={styles.agentCopy}>
         <View style={styles.agentTitle}>
           <MarqueeText
@@ -227,6 +227,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 14,
+    overflow: 'hidden',
   },
   divider: {
     height: StyleSheet.hairlineWidth,

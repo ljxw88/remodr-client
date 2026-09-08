@@ -18,7 +18,7 @@ import { hostRepository } from '@/services/host-repository';
 import { remoteClient } from '@/services/native-remote-client';
 import { toUserMessage } from '@/utils/user-error';
 import { disconnectDeviceRuntime, retryDeviceConnection } from '@/features/agents/connect-runtime';
-import { ConnectionDetails } from '@/features/connection/connection-status';
+import { useConnectionSnapshot } from '@/features/connection/use-connection';
 
 export default function HostDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -26,6 +26,7 @@ export default function HostDetailScreen() {
   const [host, setHost] = useState<HostProfile | null | undefined>(undefined);
   const [connecting, setConnecting] = useState(false);
   const session = useHostSession(id ?? '');
+  const agentSnapshot = useConnectionSnapshot(id);
 
   useEffect(() => {
     let active = true;
@@ -91,6 +92,8 @@ export default function HostDetailScreen() {
 
   const hasSavedCredential =
     !!host.credentialId && remoteClient.hasSecret(host.credentialId);
+  const serverConnected = session?.status === 'connected';
+  const agentConnected = agentSnapshot?.phase === 'connected';
 
   async function connectSavedCredential(
     target: HostProfile,
@@ -144,35 +147,21 @@ export default function HostDetailScreen() {
               />
             </View>
             <View style={styles.serverCopy}>
-              <ThemedText type="heading" numberOfLines={1} style={styles.serverName}>
+              <ThemedText type="section" numberOfLines={1}>
                 {host.name}
               </ThemedText>
-              <View style={styles.serverMeta}>
-                <ThemedText
-                  type="caption"
-                  themeColor="textSecondary"
-                  numberOfLines={1}
-                  style={styles.endpoint}>
-                  {host.username}@{host.hostname}:{host.port}
-                </ThemedText>
-                <View
-                  accessible
-                  accessibilityLabel={session ? 'Connected' : 'Offline'}
-                  style={styles.status}>
-                  <View
-                    style={[
-                      styles.statusDot,
-                      { backgroundColor: session ? theme.success : theme.textMuted },
-                    ]}
-                  />
-                  <ThemedText
-                    type="caption"
-                    style={{ color: session ? theme.success : theme.textMuted }}>
-                    {session ? 'Connected' : 'Offline'}
-                  </ThemedText>
-                </View>
-              </View>
+              <ThemedText
+                type="caption"
+                themeColor="textSecondary"
+                numberOfLines={1}
+                style={styles.endpoint}>
+                {host.username}@{host.hostname}:{host.port}
+              </ThemedText>
             </View>
+          </View>
+          <View style={styles.statusList}>
+            <StatusRow label="Server" connected={serverConnected} />
+            <StatusRow label="Agent" connected={agentConnected} />
           </View>
           <View style={styles.primaryAction}>
             <AppButton
@@ -192,8 +181,6 @@ export default function HostDetailScreen() {
             />
           </View>
         </GlassSurface>
-
-        <ConnectionDetails deviceId={host.id} />
 
         <View style={styles.section}>
           <ThemedText type="section">Server tools</ThemedText>
@@ -331,6 +318,22 @@ function ActionTile({ label, icon, disabled, onPress }: ActionTileProps) {
   );
 }
 
+function StatusRow({ label, connected }: { label: string; connected: boolean }) {
+  return (
+    <View
+      accessible
+      accessibilityLabel={`${label} ${connected ? 'Connected' : 'Not connected'}`}
+      style={styles.statusRow}>
+      <ThemedText type="caption" themeColor="textMuted">
+        {label}
+      </ThemedText>
+      <ThemedText type="caption" themeColor={connected ? 'success' : 'textMuted'}>
+        {connected ? 'Connected' : 'Not connected'}
+      </ThemedText>
+    </View>
+  );
+}
+
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.infoRow}>
@@ -368,16 +371,6 @@ const styles = StyleSheet.create({
     minWidth: 0,
     gap: 2,
   },
-  serverName: {
-    fontSize: 20,
-    lineHeight: 26,
-    letterSpacing: -0.2,
-  },
-  serverMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
-  },
   serverIcon: {
     width: 44,
     height: 44,
@@ -385,20 +378,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 14,
   },
-  status: {
-    flexShrink: 0,
+  endpoint: {
+    fontFamily: Fonts.mono,
+  },
+  statusList: {
+    gap: 4,
+  },
+  statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.half,
-  },
-  statusDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 3,
-  },
-  endpoint: {
-    flex: 1,
-    fontFamily: Fonts.mono,
+    justifyContent: 'space-between',
+    gap: Spacing.two,
   },
   primaryAction: {
     alignSelf: 'stretch',

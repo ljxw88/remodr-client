@@ -3,16 +3,16 @@
 [Documentation index](README.md) | [App identity](development.md#app-identity)
 
 The display name is **Remodr**. The icon is an original geometric R with a
-window-shaped counter, a porcelain-white surface, and a softly lit indigo
-background. Its silhouette, rather than small decorative details, carries the
+window-shaped counter, rendered as Tahoe liquid glass on a flat `#171717`
+field. Its silhouette, rather than small decorative details, carries the
 identity at launcher size.
 
 ## Source and exports
 
 Edit the vectors in [`assets/brand/`](../assets/brand/), not the generated PNGs:
 
-- `mark.svg`: the R geometry and surface shading; no fonts or external artwork.
-- `background.svg`: the opaque indigo field and restrained lighting.
+- `mark.svg`: the R geometry and liquid-glass shading; no fonts or external artwork.
+- `background.svg`: the opaque `#171717` field.
 
 Generate the platform assets with the pinned development dependency:
 

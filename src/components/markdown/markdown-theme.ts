@@ -9,25 +9,25 @@ export const CODE_FONT_SIZE = 13;
 export const CODE_LINE_HEIGHT = 20;
 
 /**
- * Syntax palette tuned for the near-black canvas. Violet stays reserved for
- * keywords so code reads as part of the product rather than a foreign theme.
+ * Syntax palette tuned for the graphite canvas. Structure stays neutral while
+ * semantic literals retain restrained success, warning, and danger colours.
  */
 export const SyntaxColors: Record<SyntaxRole, string> = {
   plain: Colors.text,
-  keyword: '#B49CFF',
+  keyword: '#E5E5E5',
   string: Colors.success,
   number: Colors.warning,
   comment: Colors.placeholder,
-  function: '#7FB4FF',
-  type: '#67E8F9',
+  function: '#D4D4D4',
+  type: '#F5F5F5',
   operator: Colors.textSecondary,
   tag: Colors.danger,
-  attribute: '#FFB27F',
+  attribute: '#D6B98C',
 };
 
 export const DiffColors: Record<DiffLineKind, { text: string; background: string }> = {
-  added: { text: Colors.success, background: 'rgba(91,228,155,0.10)' },
-  removed: { text: Colors.danger, background: 'rgba(255,113,107,0.10)' },
+  added: { text: Colors.success, background: 'rgba(125,211,167,0.10)' },
+  removed: { text: Colors.danger, background: 'rgba(255,122,122,0.10)' },
   hunk: { text: Colors.accent, background: withAlpha(Colors.accent, 0.10) },
   meta: { text: Colors.textMuted, background: 'transparent' },
   context: { text: Colors.textSecondary, background: 'transparent' },

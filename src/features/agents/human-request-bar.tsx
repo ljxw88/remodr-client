@@ -129,10 +129,10 @@ export function HumanRequestBar({ agentId, session, request, enqueueing = false,
             <AppIcon
               name={{ ios: 'questionmark.circle', android: 'help', web: 'help' }}
               size={14}
-              tintColor={theme.accent}
+              tintColor={theme.accentSecondary}
               fallback="?"
             />
-            <ThemedText type="label" style={{ color: theme.accent }}>
+            <ThemedText type="label" style={{ color: theme.accentSecondary }}>
               {sent ? 'ANSWER SENT'
                 : command?.state === 'failed' || command?.state === 'uncertain' ? 'REVIEW ANSWER'
                   : command ? 'ANSWER QUEUED'
@@ -178,7 +178,7 @@ export function HumanRequestBar({ agentId, session, request, enqueueing = false,
                   ]}>
                   <ThemedText
                     type="smallBold"
-                    style={{ color: isSelected ? theme.accent : theme.text }}>
+                    style={{ color: theme.text }}>
                     {option.label}
                   </ThemedText>
                 </Pressable>

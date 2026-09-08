@@ -27,11 +27,11 @@ type Props = {
  * The round button at the far end of the home header.
  *
  * It wears the New agent button's material — the frosted body and the slowly
- * turning iridescent rim, through `LiquidGlassRim` — because it shares a line
+ * turning polished rim, through `LiquidGlassRim` — because it shares a line
  * with it and would otherwise read as an unrelated widget beside it. Same
  * height, for the same reason.
  *
- * That rim is why there is no status colour here. An iridescent edge and a
+ * That rim is why there is no status colour here. A specular edge and a
  * semantic one cannot both have the border, and connection status has the
  * floating indicator and the dot on each device chip already.
  */

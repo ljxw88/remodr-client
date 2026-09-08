@@ -1,27 +1,3 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <defs>
-    <linearGradient id="indigo" x1="80" y1="0" x2="870" y2="1024" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#596CF5"/>
-      <stop offset=".46" stop-color="#3544D8"/>
-      <stop offset="1" stop-color="#171C66"/>
-    </linearGradient>
-    <radialGradient id="light" cx="180" cy="-90" r="950" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#CAD6FF" stop-opacity=".62"/>
-      <stop offset=".62" stop-color="#8496FF" stop-opacity=".08"/>
-      <stop offset="1" stop-color="#8496FF" stop-opacity="0"/>
-    </radialGradient>
-    <radialGradient id="reflected" cx="1080" cy="1120" r="890" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#7869FF" stop-opacity=".72"/>
-      <stop offset=".62" stop-color="#6259ED" stop-opacity=".14"/>
-      <stop offset="1" stop-color="#6259ED" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="sheen" x1="500" y1="0" x2="450" y2="470" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FFFFFF" stop-opacity=".10"/>
-      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
-    </linearGradient>
-  </defs>
-  <rect width="1024" height="1024" fill="url(#indigo)"/>
-  <rect width="1024" height="1024" fill="url(#light)"/>
-  <rect width="1024" height="1024" fill="url(#reflected)"/>
-  <path d="M0 0H1024V172C794 330 350 392 0 298Z" fill="url(#sheen)"/>
+  <rect width="1024" height="1024" fill="#171717"/>
 </svg>

@@ -60,8 +60,8 @@ export function BlurBackdropProvider({ children }: { children: ReactNode }) {
 /**
  * The content frosted chrome is allowed to sample.
  *
- * It carries its own copy of the canvas gradient because the blur can only see
- * this subtree: with the gradient left outside, chrome blurs transparent
+ * It carries its own copy of the canvas because the blur can only see
+ * this subtree: with the canvas left outside, chrome blurs transparent
  * pixels and reads as a dead grey slab.
  */
 export function BlurBackdropTarget({

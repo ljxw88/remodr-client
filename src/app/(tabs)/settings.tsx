@@ -117,6 +117,7 @@ function SettingSwitchRow({
         value={value}
         onValueChange={onValueChange}
         trackColor={{ false: theme.border, true: theme.accent }}
+        thumbColor={value ? theme.onAccent : theme.textMuted}
       />
     </View>
   );
