@@ -16,11 +16,6 @@ import {
 import { launchableAgentProviderSchema } from '@/domain/herdr';
 
 jest.mock('@/domain/model-catalogues/copilot.json', () => require('./__fixtures__/copilot.json'));
-jest.mock('@/domain/model-catalogues/opencode.json', () => ({
-  schemaVersion: 1, provider: 'opencode', updatedAt: null,
-  sources: [{ kind: 'manual', location: 'test fixture' }], notes: [], models: [],
-  unavailableReason: 'OpenCode models depend on the configured provider accounts. Refresh the catalogue or use Auto.',
-}));
 
 describe('what a model can be asked for', () => {
   it('offers the efforts that model has and no others', () => {
@@ -103,8 +98,8 @@ describe('what a model can be asked for', () => {
   it('does not read one CLI\u2019s models against another', () => {
     // Two CLIs could ship the same model id with different capabilities, so
     // every lookup is answered for one provider only.
-    expect(effortsFor('claude', 'gpt-5.6-sol')).toEqual([]);
-    expect(modelLabel('claude', 'gpt-5.6-sol')).toBe('gpt-5.6-sol');
+    expect(effortsFor('unknown', 'gpt-5.6-sol')).toEqual([]);
+    expect(modelLabel('unknown', 'gpt-5.6-sol')).toBe('gpt-5.6-sol');
   });
 });
 
@@ -126,7 +121,7 @@ describe('the catalogue itself', () => {
 
   it('does not confuse launch configuration with live retuning support', () => {
     expect(supportsRetuning('copilot')).toBe(true);
-    for (const provider of ['claude', 'codex', 'opencode', 'unknown'] as const) {
+    for (const provider of ['opencode', 'unknown'] as const) {
       expect(supportsRetuning(provider)).toBe(false);
     }
   });
@@ -196,9 +191,7 @@ describe('changing model', () => {
     })).toEqual({ model: 'configured-provider/account-model', effort: null, context: null });
     expect(modelLabel('opencode', 'configured-provider/account-model')).toBe('configured-provider/account-model');
     expect(modelsFor('opencode')).toEqual([]);
-    expect(catalogueUnavailableReason('opencode')).toBe(
-      'OpenCode models depend on the configured provider accounts. Refresh the catalogue or use Auto.',
-    );
+    expect(catalogueUnavailableReason('opencode')).toBeUndefined();
   });
 
   it('keeps settings the new model still offers', () => {

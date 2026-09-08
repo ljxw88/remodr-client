@@ -1,6 +1,4 @@
 import copilot from '../../modules/remote-core/bridge/fixtures/protocol/copilot-session-replacement.json';
-import claude from '../../modules/remote-core/bridge/fixtures/protocol/claude-empty-session.json';
-import codex from '../../modules/remote-core/bridge/fixtures/protocol/codex-empty-session.json';
 import unknown from '../../modules/remote-core/bridge/fixtures/protocol/unknown-null-session-fallback.json';
 import opencode from '../../modules/remote-core/bridge/fixtures/protocol/opencode-semantic-session.json';
 import commands from '../../modules/remote-core/bridge/fixtures/protocol/durable-command-responses.json';
@@ -22,8 +20,6 @@ import {
 const fixtures = [
   ['opencode-semantic-session', opencode],
   ['copilot-session-replacement', copilot],
-  ['claude-empty-session', claude],
-  ['codex-empty-session', codex],
   ['unknown-null-session-fallback', unknown],
 ] as const;
 

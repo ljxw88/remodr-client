@@ -36,7 +36,8 @@ const tool: ConversationItem = {
 const plan: ConversationItem = {
   id: 'plan', kind: 'todo_update', todos: [
     { text: 'Finished', state: 'done' }, { text: 'Working', state: 'in_progress' },
-    { text: 'Blocked', state: 'blocked' }, { text: 'Latest step', state: 'pending' },
+    { text: 'Blocked', state: 'blocked' }, { text: 'Cancelled', state: 'cancelled' },
+    { text: 'Latest step', state: 'pending' },
   ],
 };
 
@@ -227,16 +228,21 @@ describe('separate glass activity section', () => {
     const list = renderer!.root.findByType(FlatList);
     expect(list.props.inverted).toBe(true);
     expect(list.props.data.map((row: { todo: { text: string } }) => row.todo.text))
-      .toEqual(['Latest step', 'Blocked', 'Working', 'Finished']);
+      .toEqual(['Latest step', 'Cancelled', 'Blocked', 'Working', 'Finished']);
     expect(list.props.initialScrollIndex).toBeUndefined();
     expect(list.props.maintainVisibleContentPosition).toEqual({
       minIndexForVisible: 0, autoscrollToTopThreshold: 24,
     });
 
     expect(list.props.onContentSizeChange).toBeUndefined();
-    for (const label of ['Finished, done', 'Working, in progress', 'Blocked, blocked', 'Latest step, pending']) {
+    for (const label of [
+      'Finished, done', 'Working, in progress', 'Blocked, blocked',
+      'Cancelled, cancelled', 'Latest step, pending',
+    ]) {
       expect(renderer!.root.findAll((entry) => entry.props.accessibilityLabel === label).length).toBeGreaterThan(0);
     }
+    const cancelled = renderer!.root.findAllByProps({ accessibilityLabel: 'Cancelled, cancelled' })[0];
+    expect(cancelled.props.children[0].props.children.props.name.android).toBe('close');
   });
 
   it('measures only its overlay clearance and does not paint a full-width backing or shadow', () => {

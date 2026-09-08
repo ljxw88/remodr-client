@@ -10,6 +10,7 @@ import { Spacing } from '@/constants/theme';
 import { catalogueUnavailableReason, modelLabel } from '@/domain/agent-catalogue';
 import { chooseModel, modelChoices } from '@/features/agents/agent-edit-flow';
 import { flowDrafts, useFlowDraft } from '@/features/forms/flow-drafts';
+import { OpenCodeModelPicker } from '@/features/agents/opencode-model-picker';
 
 export default function ModelsPage() {
   const params = useLocalSearchParams<{ flowId?: string | string[] }>();
@@ -20,6 +21,9 @@ export default function ModelsPage() {
   const insets = useSafeAreaInsets();
   if (!flowId || !draft || (draft.kind !== 'new-agent' && draft.kind !== 'agent-settings')) {
     return <MissingFlow title="Models Unavailable" />;
+  }
+  if (draft.kind === 'new-agent' && draft.provider === 'opencode') {
+    return <OpenCodeModelPicker flowId={flowId} draft={draft} />;
   }
 
   const choices = modelChoices(

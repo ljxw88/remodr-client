@@ -10,15 +10,19 @@ describe('live retuning capabilities', () => {
     expect(retuningUnavailableReason('copilot', capabilities) == null).toBe(supported);
   });
 
-  it.each(['claude', 'codex', 'opencode', 'unknown'] as const)(
-    'does not enable %s merely because a server advertises support',
-    (provider) => {
+  it('does not enable unknown providers merely because a server advertises support', () => {
+    const provider = 'unknown' as const;
       expect(supportsRetuning(provider, { supportsRetuning: true })).toBe(false);
       expect(supportsRetuning(provider, { supportsRetuning: false })).toBe(false);
       expect(supportsRetuning(provider)).toBe(false);
       expect(retuningUnavailableReason(provider, { supportsRetuning: true })).toContain('This app');
-    },
-  );
+  });
+
+  it('enables OpenCode variants only with explicit bridge support', () => {
+    expect(supportsRetuning('opencode', { supportsRetuning: true })).toBe(true);
+    expect(supportsRetuning('opencode', { supportsRetuning: false })).toBe(false);
+    expect(supportsRetuning('opencode')).toBe(false);
+  });
 
   it.each([true, false])('retains the reported %s capability instead of stripping it', (value) => {
     expect(agentCapabilitiesSchema.parse({ supportsRetuning: value }).supportsRetuning).toBe(value);

@@ -54,6 +54,7 @@ export function PlanStep({ todo }: { todo: PlanItem }) {
   const active = todo.state === 'in_progress';
   const finished = todo.state === 'done';
   const blocked = todo.state === 'blocked';
+  const cancelled = todo.state === 'cancelled';
 
   return (
     <View accessible accessibilityLabel={`${todo.text}, ${todo.state.replace('_', ' ')}`} style={styles.planStep}>
@@ -65,7 +66,7 @@ export function PlanStep({ todo }: { todo: PlanItem }) {
             name={planStateIcon(todo.state)}
             size={ActivityLayout.iconSize}
             tintColor={blocked ? theme.warning : theme.textMuted}
-            fallback={finished ? '✓' : blocked ? '!' : '○'}
+            fallback={finished ? '✓' : blocked ? '!' : cancelled ? '×' : '○'}
           />
         )}
       </View>
@@ -84,6 +85,7 @@ export function PlanStep({ todo }: { todo: PlanItem }) {
 function planStateIcon(state: PlanItem['state']): AppIconName {
   if (state === 'done') return { ios: 'checkmark', android: 'check', web: 'check' };
   if (state === 'blocked') return { ios: 'exclamationmark.circle.fill', android: 'error', web: 'error' };
+  if (state === 'cancelled') return { ios: 'xmark', android: 'close', web: 'close' };
   return { ios: 'circle', android: 'radio_button_unchecked', web: 'radio_button_unchecked' };
 }
 

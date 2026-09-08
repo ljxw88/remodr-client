@@ -17,11 +17,6 @@ import { beginAgentSettingsFlow, beginRenameAgentFlow } from './agent-edit-flow'
 import { TuningFields } from './tuning-fields';
 
 jest.mock('@/domain/model-catalogues/copilot.json', () => require('../../domain/__fixtures__/copilot.json'));
-jest.mock('@/domain/model-catalogues/opencode.json', () => ({
-  schemaVersion: 1, provider: 'opencode', updatedAt: null,
-  sources: [{ kind: 'manual', location: 'test fixture' }],
-  notes: [], unavailableReason: 'CLI not installed', models: [],
-}));
 
 jest.mock('expo-router', () => ({
   router: { back: jest.fn(), push: jest.fn() },
@@ -132,7 +127,7 @@ describe('agent settings and model pages', () => {
     expect(herdrRepository.retuneAgent).toHaveBeenCalledTimes(1);
     expect(renderer.root.findByType(FormError).props.message).toContain('Reconnect');
     device.connection = 'connected';
-    device.runtime.agents[0].provider = 'claude';
+    device.runtime.agents[0].provider = 'unknown';
     await TestRenderer.act(async () => renderer.root.findByType(AppButton).props.onPress());
     expect(herdrRepository.retuneAgent).toHaveBeenCalledTimes(1);
     expect(renderer.root.findByType(FormError).props.message).toContain('provider has changed');
@@ -244,11 +239,11 @@ describe('agent settings and model pages', () => {
     flowDrafts.discard(incompatible);
   });
 
-  it('does not expose Copilot-only live retuning for OpenCode', () => {
+  it('rejects a provider-changed draft before querying OpenCode variants', () => {
     flowDrafts.update(flowId, (draft) =>
       draft.kind === 'agent-settings' ? { ...draft, provider: 'opencode' } : draft);
     TestRenderer.act(() => { renderer = TestRenderer.create(createElement(AgentSettingsPage)); });
-    expect(renderer.root.findByType(MissingFlow)).toBeDefined();
+    expect(renderer.root.findByType(FormError).props.message).toContain('provider has changed');
     expect(herdrRepository.retuneAgent).not.toHaveBeenCalled();
   });
 
@@ -262,10 +257,11 @@ describe('agent settings and model pages', () => {
     jest.mocked(useLocalSearchParams).mockReturnValue({ flowId });
     TestRenderer.act(() => { renderer = TestRenderer.create(createElement(ModelsPage)); });
     expect(renderer.root.findByType(FlatList).props.data).toEqual([
-      { model: null, label: 'Auto', description: 'Let the agent choose its model.' },
+      { model: null, label: 'Auto', description: "Use OpenCode's default model on this server." },
     ]);
     expect(renderer.root.findAllByType(ThemedText).flatMap((node) => node.props.children).join(''))
-      .toContain('Auto uses the remote CLI defaults');
+      .toContain("Models come from this space's OpenCode configuration");
+    expect(renderer.root.findByType(FormError).props.message).toContain('Choose an available space');
   });
 
   it('uses one guarded rename for keyboard and footer, with blank and unchanged names disabled', async () => {

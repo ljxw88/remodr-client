@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
+  agentVariantOptionsSchema,
   closeSpaceInputSchema,
   closeSpaceResultSchema,
   agentMutationResultSchema,
@@ -40,6 +41,7 @@ import { DraftStore } from '@/services/draft-store';
 import { ConversationStore, type ConversationRequest } from '@/services/conversation-store';
 import { completionForSnapshot } from '@/domain/agent-completion';
 import { createId } from '@/utils/create-id';
+import { openCodeModelsSchema } from '@/domain/opencode-models';
 
 const RUNTIME_CACHE_KEY = 'remote-workspace.herdr.runtimes.v2';
 
@@ -418,7 +420,26 @@ export class HerdrRepository {
     }
     const unavailable = retuningUnavailableReason(agent.provider, agent.capabilities);
     if (unavailable) throw new Error(unavailable);
+    if (agent.provider === 'opencode' && (
+      request.variant === undefined || !request.modelToken ||
+      request.providerSessionId !== agent.providerSessionId ||
+      request.model != null || request.effort != null || request.context != null
+    )) {
+      throw new Error('Reload OpenCode variants for this session. Only its reasoning variant can be changed here.');
+    }
     return this.mutateAgent(input.agentId, 'agent.retune', request);
+  }
+
+  async agentVariantOptions(agentId: string, providerSessionId: string) {
+    const agent = this.currentAgent(agentId);
+    if (!agent || agent.provider !== 'opencode' || agent.providerSessionId !== providerSessionId) {
+      throw new Error('This OpenCode session has changed. Reopen its model settings.');
+    }
+    const unavailable = retuningUnavailableReason(agent.provider, agent.capabilities);
+    if (unavailable) throw new Error(unavailable);
+    return agentVariantOptionsSchema.parse(await this.requestForAgent(
+      agentId, 'agent.variant_options', { agentId, providerSessionId },
+    ));
   }
 
   async closeAgent(agentId: string): Promise<AgentMutationResult> {
@@ -463,6 +484,33 @@ export class HerdrRepository {
 
   async refreshRuntime(deviceId?: string, includeActivity = false): Promise<void> {
     await this.refreshDeviceRuntime(deviceId ?? this.requireSelectedDeviceId(), includeActivity);
+  }
+
+  async openCodeModels(deviceId: string, workspaceId: string, refresh = false) {
+    const device = this.devices.get(deviceId);
+    const workspace = device?.state.runtime.workspaces.find((space) =>
+      space.id === workspaceId && (!space.deviceId || space.deviceId === deviceId),
+    );
+    if (!device || device.state.connection !== 'connected') {
+      throw new Error('Connect this device before fetching OpenCode models.');
+    }
+    if (!workspace?.cwd) throw new Error('Choose an available space before fetching OpenCode models.');
+    const cwd = workspace.cwd;
+    const generation = device.generation;
+    const result = openCodeModelsSchema.parse(
+      await device.transport.request('opencode.models', { workspaceId, refresh }),
+    );
+    if (this.devices.get(deviceId) !== device || device.generation !== generation
+      || device.state.connection !== 'connected') {
+      throw new ConnectionError('ERR_BRIDGE_CLOSED', 'Model results belong to a closed connection. Fetch them again.');
+    }
+    const current = device.state.runtime.workspaces.find((space) =>
+      space.id === workspaceId && (!space.deviceId || space.deviceId === deviceId),
+    );
+    if (result.workspaceId !== workspaceId || !current || current.cwd !== cwd) {
+      throw new Error('The space changed while fetching models. Reopen the model picker.');
+    }
+    return result;
   }
 
   private async refreshDeviceRuntime(deviceId: string, includeActivity = false): Promise<void> {
@@ -556,9 +604,6 @@ export class HerdrRepository {
       throw new Error('Reconnect to update the device bridge before sending.');
     }
     if (!agent.providerSessionId) {
-      if (agent.provider === 'codex') {
-        throw new Error('Codex has not exposed its active thread yet. Finish its startup dialogs or enable Thread ID in Codex /statusline. New Remodr Codex agents enable this automatically.');
-      }
       throw new Error('Waiting for the agent session identity. Reconnect or refresh before sending.');
     }
     await this.dispatcher.enqueue({

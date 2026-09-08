@@ -17,9 +17,11 @@ describe('model refresh publication', () => {
   });
 
   it('selects all vendors by default and validates arguments', () => {
-    expect(parseArgs([]).providers).toEqual(['opencode', 'copilot', 'claude', 'codex']);
-    expect(parseArgs(['--provider', 'codex,opencode', '--provider', 'codex']).providers).toEqual(['codex', 'opencode']);
-    expect(() => parseArgs(['--provider', 'cursor'])).toThrow();
+    expect(parseArgs([]).providers).toEqual(['copilot']);
+    expect(parseArgs(['--provider', 'copilot', '--provider', 'copilot']).providers).toEqual(['copilot']);
+    for (const provider of ['opencode', 'claude', 'codex', 'cursor']) {
+      expect(() => parseArgs(['--provider', provider])).toThrow();
+    }
     expect(() => parseArgs(['--unknown'])).toThrow();
     expect(() => parseArgs(['--provider'])).toThrow();
     expect(() => parseArgs(['--check', '--dry-run'])).toThrow();
@@ -33,15 +35,12 @@ describe('model refresh publication', () => {
     expect(JSON.parse(await readFile(path.join(directory, 'copilot.json'), 'utf8'))).toEqual(next);
   });
 
-  it('leaves all snapshots untouched if any selected vendor fails', async () => {
+  it('leaves the snapshot untouched when discovery fails', async () => {
     const before = await readFile(path.join(directory, 'copilot.json'), 'utf8');
-    await expect(refresh(parseArgs(['--provider', 'copilot,opencode']), {
+    await expect(refresh(parseArgs(['--provider', 'copilot']), {
       directory, log: jest.fn(),
-      fetchProvider: async (provider: string) => {
-        if (provider === 'opencode') throw new Error('OpenCode is not installed');
-        return { ...copilot, updatedAt: '2026-09-05T12:00:00.000Z' };
-      },
-    })).rejects.toThrow('OpenCode is not installed');
+      fetchProvider: async () => { throw new Error('Copilot is not installed'); },
+    })).rejects.toThrow('Copilot is not installed');
     expect(await readFile(path.join(directory, 'copilot.json'), 'utf8')).toBe(before);
   });
 
@@ -50,9 +49,9 @@ describe('model refresh publication', () => {
     await expect(writeCatalogue({ ...copilot, models: [] }, directory)).rejects.toThrow();
     await expect(refresh(parseArgs(['--provider', 'copilot']), {
       directory, log: jest.fn(), fetchProvider: async () => ({
-        ...copilot, provider: 'codex', models: copilot.models.map((model) => ({ ...model, contexts: [] })),
+        ...copilot, provider: 'unsupported',
       }),
-    })).rejects.toThrow('provider mismatch');
+    })).rejects.toThrow();
     expect(await readFile(path.join(directory, 'copilot.json'), 'utf8')).toBe(before);
   });
 

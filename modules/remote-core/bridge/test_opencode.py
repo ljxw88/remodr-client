@@ -19,6 +19,18 @@ CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER
 CREATE TABLE part (id TEXT PRIMARY KEY, session_id TEXT, message_id TEXT, data TEXT);
 CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER, data TEXT);
 """
+TODO_SCHEMA = """
+CREATE TABLE todo (
+    session_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    status TEXT NOT NULL,
+    priority TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    time_created INTEGER NOT NULL,
+    time_updated INTEGER NOT NULL,
+    PRIMARY KEY (session_id, position)
+);
+"""
 
 
 class OpenCodeTest(unittest.TestCase):
@@ -64,6 +76,10 @@ class OpenCodeTest(unittest.TestCase):
 
     def load(self):
         return self.adapter.load_conversation(self.agent)
+
+    def enable_todos(self):
+        self.connection.executescript(TODO_SCHEMA)
+        self.connection.commit()
 
     def test_v1_filters_private_parts_and_cross_session_joins(self):
         self.v1("msg_user", "user", [
@@ -120,6 +136,78 @@ class OpenCodeTest(unittest.TestCase):
         self.connection.execute("DROP TABLE session_message")
         self.assertEqual(self.load()["items"], [])
         self.assertTrue(self.adapter.has_semantic_session("ses_root"))
+
+    def test_todos_are_exact_session_ordered_snapshots_with_native_states(self):
+        self.enable_todos()
+        self.connection.executemany(
+            "INSERT INTO todo VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("ses_root", "Inspect", "completed", "high", 0, 10, 20),
+                ("ses_root", "Implement", "in_progress", "medium", 1, 11, 21),
+                ("ses_root", "Verify", "pending", "low", 2, 12, 22),
+                ("ses_root", "Superseded", "cancelled", "low", 3, 13, 23),
+                ("ses_other", "Other session", "pending", "high", 0, 14, 24),
+            ],
+        )
+        self.connection.commit()
+        conversation = self.load()
+        self.assertEqual(conversation["items"], [{
+            "id": "opencode:ses_root:todos",
+            "kind": "todo_update",
+            "timestamp": 23,
+            "todos": [
+                {"id": "opencode:ses_root:todo:0", "text": "Inspect", "state": "done"},
+                {"id": "opencode:ses_root:todo:1", "text": "Implement", "state": "in_progress"},
+                {"id": "opencode:ses_root:todo:2", "text": "Verify", "state": "pending"},
+                {"id": "opencode:ses_root:todo:3", "text": "Superseded", "state": "cancelled"},
+            ],
+        }])
+        self.assertTrue(self.adapter.agent_capabilities("ses_root")["todos"])
+        self.assertTrue(self.adapter.provider_capabilities(True)["todos"])
+        self.connection.execute("DELETE FROM todo WHERE session_id = 'ses_root'")
+        self.connection.commit()
+        self.assertEqual(self.load()["items"], [])
+
+    def test_invalid_todo_rows_fail_instead_of_publishing_a_partial_plan(self):
+        self.enable_todos()
+        invalid = [
+            ("x" * (transcript.MAX_TODO_CONTENT + 1), "pending", "high", 0, 1),
+            ("Task", "bad\nstatus", "high", 0, 1),
+            ("Task", "pending", "bad\npriority", 0, 1),
+            ("Task", "pending", "high", 1, 1),
+            ("Task", "pending", "high", 0, -1),
+        ]
+        for content, status, priority, position, updated in invalid:
+            self.connection.execute("DELETE FROM todo")
+            self.connection.execute(
+                "INSERT INTO todo VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("ses_root", content, status, priority, position, 1, updated),
+            )
+            self.connection.commit()
+            with self.subTest(row=(content, status, priority, position, updated)):
+                with self.assertRaises(transcript.TranscriptError):
+                    self.load()
+        self.connection.execute("DELETE FROM todo")
+        self.connection.executemany(
+            "INSERT INTO todo VALUES (?, ?, 'pending', 'high', ?, 1, 1)",
+            [("ses_root", "One", 0), ("ses_root", "Two", 1)],
+        )
+        self.connection.commit()
+        with patch.object(transcript, "MAX_TODOS", 1), self.assertRaises(transcript.TranscriptError):
+            self.load()
+
+    def test_future_todo_status_and_priority_use_safe_fallbacks(self):
+        self.enable_todos()
+        self.connection.execute(
+            "INSERT INTO todo VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("ses_root", "Future state", "paused", "critical", 0, 1, 2),
+        )
+        self.connection.commit()
+        self.assertEqual(self.load()["items"][0]["todos"], [{
+            "id": "opencode:ses_root:todo:0",
+            "text": "Future state",
+            "state": "unknown",
+        }])
 
     def test_v2_only_database_is_supported(self):
         self.connection.execute("DROP TABLE part")
@@ -192,7 +280,8 @@ class OpenCodeTest(unittest.TestCase):
         capabilities = self.adapter.agent_capabilities("ses_root")
         self.assertTrue(capabilities["structuredConversation"])
         self.assertTrue(capabilities["toolActivity"])
-        for key in ("supportsRetuning", "streamingConversation", "structuredQuestions", "todos"):
+        self.assertTrue(capabilities["supportsRetuning"])
+        for key in ("streamingConversation", "structuredQuestions", "todos"):
             self.assertFalse(capabilities[key])
         self.assertIsNone(self.adapter.output_path(self.agent))
         self.assertTrue(self.adapter.provider_capabilities(True)["structuredConversation"])
@@ -227,7 +316,7 @@ class OpenCodeTest(unittest.TestCase):
         self.bridge._herdr_request.assert_called_once_with(
             "agent.send_keys", {"target": "p1", "keys": ["escape"]},
         )
-        for provider in ("copilot", "claude", "codex", "unknown"):
+        for provider in ("copilot", "unknown"):
             self.assertEqual(self.bridge.providers[provider].spec.interrupt_keys, ("ctrl-c",))
 
     def test_malformed_json_and_schema_are_not_empty_transcripts(self):

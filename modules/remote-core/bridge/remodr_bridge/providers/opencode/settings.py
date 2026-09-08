@@ -9,6 +9,8 @@ SPEC = ProviderSpec(
     # Default session_interrupt; ctrl-c is app_exit. Herdr accepts "escape"/"esc".
     interrupt_keys=("escape",),
     tuning_flags={"model": "--model"},
+    retunable=True,
     structured_conversation=True,
     tool_activity=True,
+    todos=True,
 )

@@ -3,12 +3,12 @@
     {
       "session": {"provider": "opencode", "paneId": "contract-pane", "providerSessionId": "ses_contract"},
       "capabilities": {
-        "supportsRetuning": false,
+        "supportsRetuning": true,
         "structuredConversation": true,
         "streamingConversation": false,
         "structuredQuestions": false,
         "toolActivity": true,
-        "todos": false,
+        "todos": true,
         "fallback": true
       },
       "events": [],
@@ -22,6 +22,10 @@
           {"type": "tool", "id": "question", "name": "question", "state": {"status": "running", "input": {}}}
         ]}}
       ],
+      "databaseTodos": [
+        {"content": "Inspect the fixture", "status": "completed", "priority": "high", "time": 10},
+        {"content": "Verify the projection", "status": "in_progress", "priority": "medium", "time": 11}
+      ],
       "terminalText": "This terminal output must not replace the semantic transcript.",
       "conversation": {
         "agentId": "agent_4933996907bac635c6ea",
@@ -32,7 +36,11 @@
           {"id": "opencode:ses_contract:msg_user", "kind": "user_message", "text": "Inspect the synthetic fixture."},
           {"id": "opencode:ses_contract:msg_assistant:text", "kind": "assistant_message", "markdown": "I inspected the fixture."},
           {"id": "opencode:ses_contract:msg_assistant:read", "kind": "tool_activity", "tool": "read", "title": "Reading", "detail": "fixture.txt", "state": "completed"},
-          {"id": "opencode:ses_contract:msg_assistant:question", "kind": "tool_activity", "tool": "question", "title": "Question", "detail": null, "state": "running"}
+          {"id": "opencode:ses_contract:msg_assistant:question", "kind": "tool_activity", "tool": "question", "title": "Question", "detail": null, "state": "running"},
+          {"id": "opencode:ses_contract:todos", "kind": "todo_update", "timestamp": 11, "todos": [
+            {"id": "opencode:ses_contract:todo:0", "text": "Inspect the fixture", "state": "done"},
+            {"id": "opencode:ses_contract:todo:1", "text": "Verify the projection", "state": "in_progress"}
+          ]}
         ],
         "activeHumanRequest": null
       }
@@ -40,12 +48,12 @@
     {
       "session": {"provider": "opencode", "paneId": "contract-pane", "providerSessionId": "ses_empty"},
       "capabilities": {
-        "supportsRetuning": false,
+        "supportsRetuning": true,
         "structuredConversation": true,
         "streamingConversation": false,
         "structuredQuestions": false,
         "toolActivity": true,
-        "todos": false,
+        "todos": true,
         "fallback": true
       },
       "events": [],
@@ -63,7 +71,7 @@
     {
       "session": {"provider": "opencode", "paneId": "contract-pane", "providerSessionId": null},
       "capabilities": {
-        "supportsRetuning": false,
+        "supportsRetuning": true,
         "structuredConversation": false,
         "streamingConversation": false,
         "structuredQuestions": false,

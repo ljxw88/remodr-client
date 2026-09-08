@@ -390,7 +390,7 @@ class DurableCommandsTest(unittest.TestCase):
             {key: value for key, value in self.payload.items() if key != "precondition"},
             {**self.payload, "precondition": {**PRECONDITION, "providerSessionId": "old"}},
             {**self.payload, "precondition": {**PRECONDITION, "paneId": "old"}},
-            {**self.payload, "precondition": {**PRECONDITION, "provider": "claude"}},
+            {**self.payload, "precondition": {**PRECONDITION, "provider": "opencode"}},
         ]
         for payload in payloads:
             self.assert_error(

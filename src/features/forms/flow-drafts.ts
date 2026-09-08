@@ -12,6 +12,13 @@ export type NewAgentDraft = {
   provider: LaunchableAgentProvider;
   tuning: Tuning;
   bypassPermissions: boolean;
+  modelAvailability?: {
+    deviceId: string;
+    workspaceId: string;
+    cwd: string;
+    model: string;
+    available: boolean;
+  };
 };
 
 export type NewSpaceDraft = {
@@ -34,6 +41,12 @@ export type AgentSettingsDraft = {
   providerSessionId?: string | null;
   initialTuning: Tuning;
   tuning: Tuning;
+  /** Read from the active OpenCode chooser, not its last submitted message. */
+  variantSelection?: {
+    modelToken: string;
+    initial: string | null;
+    selected: string | null;
+  };
 };
 
 export type RenameAgentDraft = {

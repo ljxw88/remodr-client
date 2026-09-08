@@ -8,7 +8,7 @@ SPEC = ProviderSpec(
     substring_match=True,
     bypass_arguments=("--allow-all-tools",),
     tuning_flags={"model": "--model", "effort": "--effort", "context": "--context"},
-    efforts=tuple(effort for effort in REASONING_EFFORTS if effort != "ultra"),
+    efforts=REASONING_EFFORTS,
     retunable=True,
     structured_conversation=True,
     streaming=True,

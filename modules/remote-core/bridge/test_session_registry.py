@@ -14,7 +14,7 @@ class SessionRegistryTest(unittest.TestCase):
         self.sessions = SessionRegistry()
         self.key = SessionKey("a1", "copilot", "s1")
         self.binding = SessionBinding(self.key, "p1")
-        self.other = SessionKey("a2", "claude", "s2")
+        self.other = SessionKey("a2", "opencode", "s2")
 
     def seed(self, key, pane):
         self.sessions.record_launch(pane, key.session_id, {"model": key.session_id}, False)
@@ -46,7 +46,7 @@ class SessionRegistryTest(unittest.TestCase):
         with self.assertRaises(FrozenInstanceError):
             self.key.session_id = "changed"
         self.assertEqual(len({
-            self.key, SessionKey("a2", "copilot", "s1"), SessionKey("a1", "claude", "s1"),
+            self.key, SessionKey("a2", "copilot", "s1"), SessionKey("a1", "opencode", "s1"),
         }), 3)
 
     def test_first_identity_retains_launch_tuning_with_or_without_a_launch_id(self):
@@ -62,12 +62,12 @@ class SessionRegistryTest(unittest.TestCase):
                 self.assertFalse(sessions.bypass("p1"))
 
     def test_first_native_identity_after_unreported_placeholder_retains_tuning(self):
-        self.sessions.bind(SessionBinding(SessionKey("a1", "claude", None), "p1"), reported=False)
-        self.sessions.set_tuning("p1", {"model": "sonnet"})
+        self.sessions.bind(SessionBinding(SessionKey("a1", "opencode", None), "p1"), reported=False)
+        self.sessions.set_tuning("p1", {"model": "provider/model"})
         self.assertFalse(self.sessions.bind(
-            SessionBinding(SessionKey("a1", "claude", "native"), "p1"), reported=True,
+            SessionBinding(SessionKey("a1", "opencode", "native"), "p1"), reported=True,
         ))
-        self.assertEqual(self.sessions.tuning("p1"), {"model": "sonnet"})
+        self.assertEqual(self.sessions.tuning("p1"), {"model": "provider/model"})
 
     def test_launch_id_mismatch_invalidates_only_the_replaced_agents_state(self):
         self.seed(self.other, "p2")
@@ -117,7 +117,7 @@ class SessionRegistryTest(unittest.TestCase):
     def test_provider_switch_invalidates_even_when_session_id_is_unchanged(self):
         self.seed(self.key, "p1")
         self.seed(self.other, "p2")
-        replacement = SessionBinding(SessionKey("a1", "claude", "s1"), "p1")
+        replacement = SessionBinding(SessionKey("a1", "opencode", "s1"), "p1")
         self.assertTrue(self.sessions.bind(replacement, reported=True))
         self.assertEqual(self.sessions.binding("a1"), replacement)
         self.assertEqual(self.sessions.tuning("p1"), {})
@@ -127,7 +127,7 @@ class SessionRegistryTest(unittest.TestCase):
         self.assert_other_untouched()
 
     def test_shared_session_conversations_remain_scoped_to_the_agent_and_provider(self):
-        keys = (self.key, SessionKey("a2", "copilot", "s1"), SessionKey("a1", "claude", "s1"))
+        keys = (self.key, SessionKey("a2", "copilot", "s1"), SessionKey("a1", "opencode", "s1"))
         for key in keys:
             self.sessions.cache_conversation(key, VERSION, {"agent": key.agent_id, "provider": key.provider})
         for key in keys:

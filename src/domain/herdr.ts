@@ -6,8 +6,6 @@ export { contextTierSchema, reasoningEffortSchema } from '@/domain/model-catalog
 export const launchableAgentProviderSchema = z.enum([
   'opencode',
   'copilot',
-  'claude',
-  'codex',
 ]);
 export type LaunchableAgentProvider = z.infer<typeof launchableAgentProviderSchema>;
 
@@ -154,11 +152,35 @@ export function totalDeviceAgentCount(counts: DeviceAgentCounts): number {
   return Object.values(counts).reduce((total, count) => total + count, 0);
 }
 
+export const reasoningVariantSchema = z.string().min(1).max(128).refine(
+  (value) => value === value.trim() && !/[\u0000-\u001f\u007f]/.test(value),
+  'Variant names cannot contain control characters or surrounding whitespace',
+);
+
+export const agentVariantOptionsSchema = z.object({
+  modelLabel: z.string().min(1).max(512),
+  modelToken: z.string().min(1).max(1024),
+  currentVariant: reasoningVariantSchema.nullable(),
+  variants: z.array(reasoningVariantSchema).max(128),
+}).superRefine((options, ctx) => {
+  if (new Set(options.variants).size !== options.variants.length) {
+    ctx.addIssue({ code: 'custom', message: 'Duplicate variant choices' });
+  }
+  if (options.currentVariant !== null && !options.variants.includes(options.currentVariant)) {
+    ctx.addIssue({ code: 'custom', message: 'Current variant is not in the available choices' });
+  }
+});
+export type AgentVariantOptions = z.infer<typeof agentVariantOptionsSchema>;
+
 export const retuneAgentInputSchema = z.object({
   agentId: z.string().min(1),
   model: z.string().trim().nullable().optional(),
   effort: reasoningEffortSchema.nullable().optional(),
   context: contextTierSchema.nullable().optional(),
+  /** OpenCode variant IDs are model-specific, not portable reasoning efforts. */
+  variant: reasoningVariantSchema.nullable().optional(),
+  modelToken: z.string().min(1).max(1024).optional(),
+  providerSessionId: z.string().min(1).optional(),
 });
 export type RetuneAgentInput = z.infer<typeof retuneAgentInputSchema>;
 
@@ -274,7 +296,7 @@ export const conversationItemSchema = z.discriminatedUnion('kind', [
       z.object({
         id: z.string().nullable().optional(),
         text: z.string(),
-        state: z.enum(['pending', 'in_progress', 'done', 'blocked', 'unknown']),
+        state: z.enum(['pending', 'in_progress', 'done', 'blocked', 'cancelled', 'unknown']),
       }),
     ),
   }),
@@ -343,10 +365,6 @@ export function providerLabel(provider: AgentProvider): string {
   switch (provider) {
     case 'copilot':
       return 'GitHub Copilot';
-    case 'claude':
-      return 'Claude Code';
-    case 'codex':
-      return 'Codex';
     case 'opencode':
       return 'OpenCode';
     default:

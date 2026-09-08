@@ -102,8 +102,72 @@ function repositoryWith(transports: FakeTransport[]) {
   }));
 }
 
+describe('HerdrRepository OpenCode model discovery', () => {
+  const snapshot: HerdrRuntimeState = {
+    ...runtime, workspaces: [{ id: 'w1', cwd: '/work', name: 'Work', status: 'idle' }],
+  };
+  const models = { workspaceId: 'w1', cwd: '/work', models: ['configured/model', 'custom/vendor/model'] };
+  beforeEach(() => {
+    jest.mocked(AsyncStorage.getItem).mockReset().mockResolvedValue(null);
+    jest.mocked(AsyncStorage.setItem).mockReset().mockResolvedValue(undefined);
+    jest.mocked(AsyncStorage.removeItem).mockReset().mockResolvedValue(undefined);
+  });
+  it('uses the explicitly requested device and workspace without sharing provider lists', async () => {
+    const owner = fakeTransport(snapshot);
+    const other = fakeTransport({ ...snapshot, deviceId: 'other' });
+    const repository = repositoryWith([owner, other]);
+    await repository.connect('ssh-1', 'device-1');
+    await repository.connect('ssh-other', 'other');
+    repository.selectDevice('other');
+    owner.request.mockResolvedValueOnce(models);
+    expect(await repository.openCodeModels('device-1', 'w1', true)).toEqual(models);
+    expect(owner.request).toHaveBeenLastCalledWith('opencode.models', { workspaceId: 'w1', refresh: true });
+    expect(other.request).not.toHaveBeenCalledWith('opencode.models', expect.anything());
+    await repository.disconnectDevice('device-1');
+    await repository.disconnectDevice('other');
+  });
+  it('rejects unavailable or foreign workspaces without sending a request', async () => {
+    const transport = fakeTransport(snapshot);
+    const repository = repositoryWith([transport]);
+    await expect(repository.openCodeModels('device-1', 'w1')).rejects.toThrow('Connect');
+    await repository.connect('ssh-1', 'device-1');
+    await expect(repository.openCodeModels('device-1', 'missing')).rejects.toThrow('available space');
+    expect(transport.request).not.toHaveBeenCalledWith('opencode.models', expect.anything());
+    await repository.disconnectDevice('device-1');
+  });
+  it('rejects late model responses from a released SSH connection', async () => {
+    const transport = fakeTransport(snapshot);
+    const repository = repositoryWith([transport]);
+    await repository.connect('ssh-1', 'device-1');
+    let finish!: (value: typeof models) => void;
+    transport.request.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const request = repository.openCodeModels('device-1', 'w1');
+    const rejected = expect(request).rejects.toThrow('closed connection');
+    await repository.releaseDevice('device-1');
+    finish(models);
+    await rejected;
+    await repository.disconnectDevice('device-1');
+  });
+  it('validates model lists and workspace identity without leaking arbitrary metadata', async () => {
+    const transport = fakeTransport(snapshot);
+    const repository = repositoryWith([transport]);
+    await repository.connect('ssh-1', 'device-1');
+    for (const response of [
+      { ...models, workspaceId: 'other' },
+      { ...models, models: ['invalid model'] },
+      { ...models, models: ['p/m', 'p/m'] },
+    ]) {
+      transport.request.mockResolvedValueOnce(response);
+      await expect(repository.openCodeModels('device-1', 'w1')).rejects.toThrow();
+    }
+    transport.request.mockResolvedValueOnce({ ...models, apiKey: 'not-a-real-secret', models: [] });
+    expect(await repository.openCodeModels('device-1', 'w1')).toEqual({ ...models, models: [] });
+    await repository.disconnectDevice('device-1');
+  });
+});
+
 describe('HerdrRepository live retuning capabilities', () => {
-  function snapshot(supportsRetuning?: boolean, provider: 'copilot' | 'codex' = 'copilot'): HerdrRuntimeState {
+  function snapshot(supportsRetuning?: boolean, provider: 'copilot' | 'opencode' | 'unknown' = 'copilot'): HerdrRuntimeState {
     return {
       ...runtime,
       agents: [{
@@ -139,6 +203,37 @@ describe('HerdrRepository live retuning capabilities', () => {
     expect(transport.request).toHaveBeenCalledWith('agent.retune', { agentId: 'agent-1', model: 'new-model' });
   });
 
+  it('reads exact-session OpenCode choices and submits a guarded variant-only mutation', async () => {
+    const current = snapshot(true, 'opencode');
+    const transport = fakeTransport(current);
+    const repository = repositoryWith([transport]);
+    await repository.connect('ssh-1', 'device-1');
+    const options = { modelLabel: 'Example model', modelToken: 'Build | Example', currentVariant: 'high', variants: ['high', 'custom'] };
+    transport.request.mockResolvedValueOnce(options);
+    expect(await repository.agentVariantOptions('agent-1', 'copilot-session-1')).toEqual(options);
+    expect(transport.request).toHaveBeenLastCalledWith('agent.variant_options', {
+      agentId: 'agent-1', providerSessionId: 'copilot-session-1',
+    });
+    const input = { agentId: 'agent-1', providerSessionId: 'copilot-session-1', variant: 'custom', modelToken: options.modelToken };
+    transport.request.mockResolvedValueOnce({ agentId: 'agent-1', runtime: current });
+    await repository.retuneAgent(input);
+    expect(transport.request).toHaveBeenLastCalledWith('agent.retune', input);
+    await repository.releaseDevice('device-1');
+  });
+
+  it('rejects unsupported OpenCode model changes and stale variant sessions before transport', async () => {
+    const transport = fakeTransport(snapshot(true, 'opencode'));
+    const repository = repositoryWith([transport]);
+    await repository.connect('ssh-1', 'device-1');
+    await expect(repository.retuneAgent({ agentId: 'agent-1', model: 'another/model' })).rejects.toThrow('Only its reasoning variant');
+    await expect(repository.agentVariantOptions('agent-1', 'stale-session')).rejects.toThrow('session has changed');
+    await expect(repository.retuneAgent({
+      agentId: 'agent-1', providerSessionId: 'stale-session', variant: 'high', modelToken: 'model',
+    })).rejects.toThrow('Reload OpenCode variants');
+    expect(transport.request.mock.calls.some(([action]) => action === 'agent.retune' || action === 'agent.variant_options')).toBe(false);
+    await repository.releaseDevice('device-1');
+  });
+
   it('rejects direct retuning when the latest runtime explicitly disables it', async () => {
     const transport = fakeTransport(snapshot(true));
     const repository = repositoryWith([transport]);
@@ -152,7 +247,7 @@ describe('HerdrRepository live retuning capabilities', () => {
   });
 
   it('does not trust remote support for a provider the client cannot retune', async () => {
-    const transport = fakeTransport(snapshot(true, 'codex'));
+    const transport = fakeTransport(snapshot(true, 'unknown'));
     const repository = repositoryWith([transport]);
     await repository.connect('ssh-1', 'device-1');
     await expect(repository.retuneAgent({ agentId: 'agent-1', model: 'new-model' }))
@@ -360,12 +455,12 @@ describe('HerdrRepository device-scoped requests', () => {
     transport.request.mockResolvedValue({
       paneId: 'p2',
       agentId: 'agent-2',
-      name: 'codex',
+      name: 'opencode',
       runtime: {
         ...runtime,
         providers: [
           ...runtime.providers,
-          { provider: 'codex' as const, available: true, aliases: [] },
+          { provider: 'opencode' as const, available: true, aliases: [] },
         ],
       },
     });
@@ -373,13 +468,13 @@ describe('HerdrRepository device-scoped requests', () => {
     repository.selectDevice('device-1');
 
     const result = await repository.createAgent({
-      provider: 'codex',
+      provider: 'opencode',
       workspaceId: 'w1',
       bypassPermissions: true,
     });
 
     expect(transport.request).toHaveBeenCalledWith('agent.create', {
-      provider: 'codex',
+      provider: 'opencode',
       workspaceId: 'w1',
       bypassPermissions: true,
     });
@@ -439,19 +534,19 @@ describe('HerdrRepository device-scoped requests', () => {
 });
 
 describe('HerdrRepository multi-device runtime', () => {
-  it('gives Codex setup guidance without sending to an unidentified thread', async () => {
+  it('does not send to an unidentified provider session', async () => {
     const snapshot: HerdrRuntimeState = {
       ...runtime,
-      agents: [{ ...runtime.agents[0], provider: 'codex', providerSessionId: null }],
+      agents: [{ ...runtime.agents[0], provider: 'unknown', providerSessionId: null }],
     };
     const transport = fakeTransport(snapshot);
     const repository = repositoryWith([transport]);
     await repository.connect('ssh-1', 'device-1');
-    await expect(repository.sendMessage('agent-1', 'hello')).rejects.toThrow('Thread ID in Codex /statusline');
+    await expect(repository.sendMessage('agent-1', 'hello')).rejects.toThrow('Waiting for the agent session identity');
     expect(transport.request.mock.calls.some(([action]) => action === 'agent.send_message')).toBe(false);
   });
 
-  it('connects to an older bridge that still advertises removed Cursor Agent support', async () => {
+  it('connects to an older bridge that advertises removed or unknown providers', async () => {
     const transport = fakeTransport();
     transport.request.mockResolvedValue({
       ...runtime,
@@ -471,7 +566,11 @@ describe('HerdrRepository multi-device runtime', () => {
     const device = repository.getSnapshot().devices['device-1'];
     expect(device.connection).toBe('connected');
     expect(device.lastError).toBeNull();
-    expect(device.runtime.providers[3]).toMatchObject({ provider: 'unknown', available: false });
+    expect(device.runtime.providers.slice(1)).toEqual([
+      expect.objectContaining({ provider: 'unknown', available: false }),
+      expect.objectContaining({ provider: 'unknown', available: false }),
+      expect.objectContaining({ provider: 'unknown', available: false }),
+    ]);
     expect(device.runtime.agents.map((agent) => agent.provider)).toEqual(['copilot', 'unknown']);
   });
 

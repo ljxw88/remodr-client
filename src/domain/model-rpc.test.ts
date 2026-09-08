@@ -21,7 +21,7 @@ describe('model discovery RPC transport', () => {
   it('handles fragmented byte-counted Copilot frames and ignores notifications', async () => {
     const child = processStub();
     jest.mocked(spawn).mockReturnValue(child as unknown as ReturnType<typeof spawn>);
-    const rpc = openRpc('copilot', ['--headless'], 'headers');
+    const rpc = openRpc('copilot', ['--headless']);
     try {
       const result = rpc.request('models.list');
       const json = JSON.stringify({ id: 1, result: { name: 'Modèle' } });
@@ -37,55 +37,27 @@ describe('model discovery RPC transport', () => {
     expect(child.kill).toHaveBeenCalled();
   });
 
-  it('handles multiple NDJSON messages and RPC failures', async () => {
+  it('surfaces RPC failures', async () => {
     const child = processStub();
     jest.mocked(spawn).mockReturnValue(child as unknown as ReturnType<typeof spawn>);
-    const rpc = openRpc('codex', ['app-server']);
+    const rpc = openRpc('copilot', ['--headless']);
     try {
-      const result = rpc.request('model/list');
-      child.stdout.write('{"method":"notice"}\n{"id":1,"error":{"code":-32000}}\n');
+      const result = rpc.request('models.list');
+      const body = JSON.stringify({ id: 1, error: { code: -32000 } });
+      child.stdout.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
       await expect(result).rejects.toThrow('RPC error -32000');
     } finally {
       rpc.close();
     }
   });
 
-  it('uses Claude control initialization without sending a user prompt', async () => {
-    const child = processStub();
-    jest.mocked(spawn).mockReturnValue(child as unknown as ReturnType<typeof spawn>);
-    const rpc = openRpc('claude', [], 'claude');
-    try {
-      const result = rpc.request('initialize');
-      expect(JSON.parse(child.writes[0])).toEqual({
-        type: 'control_request', request_id: '1', request: { subtype: 'initialize' },
-      });
-      child.stdout.write(JSON.stringify({
-        type: 'control_response',
-        response: { subtype: 'success', request_id: '1', response: { models: [{ value: 'sonnet' }] } },
-      }) + '\n');
-      await expect(result).resolves.toEqual({ models: [{ value: 'sonnet' }] });
-    } finally {
-      rpc.close();
-    }
-  });
-
-  it('refuses Claude tool/control requests during discovery', async () => {
-    const child = processStub();
-    jest.mocked(spawn).mockReturnValue(child as unknown as ReturnType<typeof spawn>);
-    const rpc = openRpc('claude', [], 'claude');
-    const result = rpc.request('initialize');
-    child.stdout.write('{"type":"control_request","request":{"subtype":"can_use_tool"}}\n');
-    await expect(result).rejects.toThrow('Unexpected Claude control request');
-    rpc.close();
-  });
-
   it('surfaces missing binaries and malformed responses instead of hanging', async () => {
     for (const malformed of [false, true]) {
       const child = processStub();
       jest.mocked(spawn).mockReturnValue(child as unknown as ReturnType<typeof spawn>);
-      const rpc = openRpc('missing-cli', []);
+      const rpc = openRpc('copilot', []);
       const result = rpc.request('model/list');
-      if (malformed) child.stdout.write('not json\n');
+      if (malformed) child.stdout.write('Content-Length: 8\r\n\r\nnot json');
       else child.emit('error', Object.assign(new Error('not found'), { code: 'ENOENT' }));
       await expect(result).rejects.toThrow(malformed ? 'malformed discovery' : 'ENOENT');
       rpc.close();
@@ -96,7 +68,7 @@ describe('model discovery RPC transport', () => {
     jest.useFakeTimers();
     const child = processStub();
     jest.mocked(spawn).mockReturnValue(child as unknown as ReturnType<typeof spawn>);
-    const rpc = openRpc('codex', ['app-server'], 'lines', 10);
+    const rpc = openRpc('copilot', ['--headless'], 10);
     try {
       const result = rpc.request('model/list');
       const rejection = expect(result).rejects.toThrow('timed out');

@@ -164,12 +164,6 @@ and status. A session-only change is not guaranteed to produce a Herdr status
 event, so conversation reads must reconcile authoritative session identity
 rather than relying on event delivery alone.
 
-For Codex, the active UUID comes from its configured live status line: session
-hooks run too late to identify a new thread before the first prompt. The footer
-also detects `/new` before the hook reference changes. No cwd/newest-file
-heuristic is used, and an unverifiable identity blocks dispatch. See
-[Codex startup](herdr-mobile-architecture.md#codex-startup-and-thread-identity).
-
 Conversation responses carry `providerSessionId`. `ConversationStore` fences reads
 and disk restores with an agent-session epoch, clears the previous transcript
 and question on a changed provider/session, and serializes cache removals with

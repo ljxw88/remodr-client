@@ -18,7 +18,6 @@ from remodr_bridge.providers import (
     SUPPORTED_PROVIDERS, BYPASS_ARGUMENTS, TUNING_ARGUMENTS, RETUNABLE_PROVIDERS,
     PROVIDER_EFFORTS,
 )
-from remodr_bridge.providers.codex.settings import CODEX_STATUS_CONFIG
 from remodr_bridge.providers.copilot.processes import (
     PROCESS_INSPECTION_TIMEOUT, PROCESS_INSPECTION_MAX_BYTES, PROCESS_INSPECTION_MAX_FDS,
 )
