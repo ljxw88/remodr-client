@@ -115,7 +115,7 @@ export default function HostsScreen() {
             accessibilityRole="button"
             accessibilityLabel="Retry"
             onPress={() => void reload()}>
-            <ThemedText type="smallBold" style={{ color: theme.accent }}>
+            <ThemedText type="smallBold" style={{ color: theme.danger }}>
               Try again
             </ThemedText>
           </Pressable>

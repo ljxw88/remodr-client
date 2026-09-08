@@ -32,7 +32,7 @@ type Props = {
 /**
  * Layer order matters. Skia's backdrop filter reads what this canvas has
  * already drawn, so anything the glass should bend must come first. The glow
- * exists to give the glass something to refract: on a near-black canvas a
+ * exists to give the glass something to refract: on a flat graphite canvas a
  * displacement filter over flat colour is invisible.
  */
 export function LiquidGlassButton({
@@ -129,10 +129,10 @@ export function LiquidGlassButton({
               transform={rimTransform}
               colors={[
                 'rgba(255,255,255,0.42)',
-                'rgba(150,170,255,0.55)',
-                'rgba(150,255,240,0.45)',
+                'rgba(163,163,163,0.50)',
+                'rgba(212,212,212,0.44)',
                 'rgba(255,255,255,0.60)',
-                'rgba(255,220,170,0.45)',
+                'rgba(138,138,138,0.46)',
                 'rgba(255,255,255,0.42)',
               ]}
             />
@@ -144,7 +144,7 @@ export function LiquidGlassButton({
               c={{ x: orbCentre, y: orbCentre }}
               origin={{ x: orbCentre, y: orbCentre }}
               transform={bezelTransform}
-              colors={['#FFFFFF', '#9AA4BE', '#FFFFFF', '#6E778F', '#EDF1FF', '#FFFFFF']}
+              colors={['#FFFFFF', '#A3A3A3', '#FFFFFF', '#525252', '#E5E5E5', '#FFFFFF']}
             />
           </Circle>
           <ChromaticMetal

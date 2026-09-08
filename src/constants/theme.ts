@@ -3,43 +3,41 @@ import '@/global.css';
 import { Platform } from 'react-native';
 
 export const Colors = {
-  text: '#F5F6F8',
-  background: '#08090B',
-  // Frosted surfaces are white at low alpha rather than opaque grey, so they
-  // pick up the canvas: a light panel over the indigo, and roughly the old
-  // near-black grey where the gradient bottoms out.
-  backgroundElement: 'rgba(255,255,255,0.07)',
-  backgroundSelected: 'rgba(255,255,255,0.13)',
-  textSecondary: '#B2B6C0',
-  textMuted: '#A2A8B6',
-  placeholder: '#8E95A5',
-  border: 'rgba(255,255,255,0.12)',
-  accent: '#6682F0',
-  danger: '#FF716B',
-  success: '#5BE49B',
-  warning: '#FFC65C',
-  onAccent: '#FFFFFF',
-  // Sheets and menus render in their own window, so they cannot blur the app
-  // behind them. Tinted toward the canvas indigo instead, so an opaque surface
-  // still reads as part of the same material family.
-  fog: 'rgba(6,7,10,0.55)',
-  // Panel glass: a translucent white plate rather than an opaque grey one, so
-  // controls pick up whatever the canvas is doing behind them.
-  glass: 'rgba(255,255,255,0.07)',
+  text: '#FAFAFA',
+  background: '#171717',
+  // A 6.5% white plate over #171717 resolves near the reference #262626.
+  backgroundElement: 'rgba(255,255,255,0.065)',
+  // Selected content resolves near #373737 without introducing another hue.
+  backgroundSelected: 'rgba(255,255,255,0.14)',
+  textSecondary: '#B8B8B8',
+  textMuted: '#A3A3A3',
+  placeholder: '#A3A3A3',
+  border: 'rgba(255,255,255,0.14)',
+  accent: '#F5F5F5',
+  accentSecondary: '#FF8000',
+  danger: '#FF7A7A',
+  success: '#7DD3A7',
+  warning: '#F5C66A',
+  onAccent: '#171717',
+  onAccentSecondary: '#171717',
+  // Sheets and menus render in their own window, so use an opaque-feeling
+  // neutral veil rather than a hue borrowed from the old canvas.
+  fog: 'rgba(10,10,10,0.72)',
+  glass: 'rgba(255,255,255,0.065)',
   glassStrong: 'rgba(255,255,255,0.10)',
-  glassBorder: 'rgba(255,255,255,0.16)',
+  glassBorder: 'rgba(255,255,255,0.14)',
   glassHighlight: 'rgba(255,255,255,0.22)',
-  glassShadow: 'rgba(0,0,0,0.58)',
-  accentSoft: 'rgba(102,130,240,0.22)',
-  successSoft: 'rgba(91,228,155,0.16)',
-  warningSoft: 'rgba(255,198,92,0.16)',
+  glassShadow: 'rgba(0,0,0,0.65)',
+  accentSoft: 'rgba(245,245,245,0.14)',
+  successSoft: 'rgba(125,211,167,0.16)',
+  warningSoft: 'rgba(245,198,106,0.16)',
 } as const;
 
 /**
  * Frosted materials, in two families.
  *
  * `panel` is for controls that sit directly on the canvas — chips, header
- * buttons, cards. There is nothing behind them but the gradient, so blurring
+ * buttons, cards. There is nothing behind them but the canvas, so blurring
  * would cost a render pass to produce an identical picture. They are a
  * translucent fill plus a rim, and that is enough to read as glass.
  *
@@ -86,16 +84,6 @@ export const GlassMaterial = {
 } as const;
 
 /**
- * App canvas. A deep blue matching the action hue falls away to the near-black
- * `background` well before the lower third, so content lower on a screen still
- * sits on a neutral surface.
- */
-export const BackgroundGradient = {
-  colors: ['#2241C0', '#1D3182', '#0D1226', Colors.background] as const,
-  locations: [0, 0.28, 0.58, 1] as const,
-};
-
-/**
  * Fades at the edges of scrollable regions, so rows dissolve into the canvas
  * instead of ending at a hard clipping line behind the dock or composer.
  *
@@ -104,7 +92,7 @@ export const BackgroundGradient = {
  * opacity to 0 to disable that edge.
  */
 export const ScrollEdgeFade = {
-  /** Colour content dissolves into. Match the foot of the canvas gradient. */
+  /** Colour content dissolves into. Match the canvas. */
   color: Colors.background,
   topHeight: 18,
   topOpacity: 0.16,

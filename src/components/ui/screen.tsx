@@ -41,7 +41,7 @@ export function Screen({ children, style, includeTopSafeArea = false }: Props) {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    // The foot of the canvas gradient, so the frame before the gradient has
+    // The canvas colour, so the frame before the background has
     // measured itself is the colour it is about to be rather than a hole.
     backgroundColor: Colors.background,
   },

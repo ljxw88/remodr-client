@@ -15,7 +15,7 @@ export type LiquidGlassSettings = {
   refraction: number;
   /** Apparent thickness. Controls how far in from the rim the bend reaches. */
   depth: number;
-  /** Per-channel spread producing the rainbow fringe. */
+  /** Per-channel spread producing a restrained edge separation. */
   dispersion: number;
   /** Backdrop blur radius. */
   frost: number;
@@ -27,7 +27,7 @@ export const LIQUID_GLASS: LiquidGlassSettings = {
   light: 0.18,
   refraction: 14,
   depth: 22,
-  dispersion: 0.55,
+  dispersion: 0.08,
   frost: 3,
   splay: 1,
 };

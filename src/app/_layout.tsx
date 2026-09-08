@@ -90,7 +90,7 @@ export default function RootLayout() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    // The foot of the canvas gradient. Nothing should ever see this — a route
+    // The canvas colour. Nothing should ever see this — a route
     // covers it from the first frame — but it means an unpainted moment is the
     // colour the app is about to be.
     backgroundColor: Colors.background,

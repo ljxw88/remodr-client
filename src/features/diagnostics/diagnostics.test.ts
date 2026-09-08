@@ -15,12 +15,12 @@ jest.mock('@/components/ui/screen', () => ({
 
 jest.mock('@/hooks/use-theme', () => ({
   useTheme: () => ({
-    backgroundElement: '#141519',
-    border: '#252830',
-    success: '#5BE49B',
-    warning: '#FFC65C',
-    textMuted: '#A2A8B6',
-    danger: '#FF716B',
+    backgroundElement: '#262626',
+    border: '#373737',
+    success: '#7DD3A7',
+    warning: '#F5C66A',
+    textMuted: '#A3A3A3',
+    danger: '#FF7A7A',
   }),
 }));
 

@@ -115,7 +115,10 @@ function ConnectServerForm({ id }: { id: string }) {
         <SelectionRow
           label="Remember credential"
           description="Encrypted with Android Keystore"
-          accessory={<Switch value={saveSecret} onValueChange={setSaveSecret} disabled={busy} trackColor={{ true: Colors.accent }} accessibilityLabel="Remember credential" />}
+          accessory={<Switch value={saveSecret} onValueChange={setSaveSecret} disabled={busy}
+            trackColor={{ false: Colors.border, true: Colors.accent }}
+            thumbColor={saveSecret ? Colors.onAccent : Colors.textMuted}
+            accessibilityLabel="Remember credential" />}
         />
       </FormSection>
       <FormError message={error} />

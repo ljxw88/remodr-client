@@ -6,30 +6,27 @@ Almost everything lives in **`src/constants/theme.ts`**. Start there.
 
 ## Tuning recipes
 
-### The canvas gradient
+### The graphite canvas
 
-`BackgroundGradient` in `src/constants/theme.ts`.
+`Colors.background` in `src/constants/theme.ts`.
 
 ```ts
-export const BackgroundGradient = {
-  colors: ['#2241C0', '#1D3182', '#0D1226', Colors.background],
-  locations: [0, 0.28, 0.58, 1],
-};
+background: '#171717'
 ```
 
-`locations` are fractions of screen height. Lower the third stop to reach
-near-black sooner, which keeps more of a screen neutral; raise it to carry the
-indigo further down. Keep the last colour equal to `Colors.background` so the
-foot of the gradient matches anything painted with the flat canvas colour.
+`AppBackground` paints this exact flat field on every route and blur target.
+It needs no measured window alignment or gradient pass. `Colors.accent` is
+`#F5F5F5`, so action and selection emphasis remain neutral rather than
+reintroducing a hue.
 
-The gradient and `Colors.accent` (`#6682F0`) share the same blue hue. The
-gradient is slightly darker than the original indigo; stop positions and
-glass opacity remain unchanged.
+`Colors.accentSecondary` is `#FF8000`. It is supplemental, not a replacement
+for the off-white primary accent: use it for unread indicators and
+input-required prompts. Selected filters and agent icons remain white.
 
-`src/components/ui/app-background.tsx` renders the gradient at the root and in
-routes/blur targets that need their own opaque backdrop. `CanvasFill` aligns
-those copies with the window. Transparent headers read through to the route's
-canvas, not to the preceding screen; see `DESIGN.md`.
+`src/components/ui/app-background.tsx` renders the canvas at the root and in
+routes/blur targets that need their own opaque backdrop. Transparent headers
+read through to the route's canvas, not to the preceding screen; see
+`DESIGN.md`.
 
 ### The fade at the bottom of scrolling content
 
@@ -50,9 +47,8 @@ export const ScrollEdgeFade = {
 - **Longer dissolve**: raise `bottomHeight`.
 - **Disable an edge**: set its opacity to `0`.
 
-`color` should track the foot of the canvas gradient. A scrim tuned against a
-different colour reads as a grey band, which is what happened when the canvas
-became a gradient while these values still assumed flat near-black.
+`color` should track the canvas. A scrim tuned against a different neutral
+reads as a visible band.
 
 Consumed by `src/components/ui/scroll-edge-frame.tsx`, which builds the CSS
 gradient strings from these values. Applied to tab scrollables and the agent
@@ -72,14 +68,14 @@ There are two families, and picking the right one matters:
 | `panel` | Chips, header buttons, cards, search fields | Translucent white fill plus a rim. No blur. |
 | `chrome` | The floating dock, the chat composer | A live backdrop blur plus a light fill. |
 
-`panel` does not blur because there is nothing behind it but the canvas
-gradient: a blur pass would spend a frame producing the same picture. It gets
+`panel` does not blur because there is nothing behind it but the flat canvas:
+a blur pass would spend a frame producing the same picture. It gets
 its glassiness from the fill, the hairline rim, and the specular top edge.
 
 ```ts
 export const GlassMaterial = {
   panel: {
-    fill: Colors.glass,             // rgba white, 0.07
+    fill: Colors.glass,             // rgba white, 0.065
     fillStrong: Colors.glassStrong, // rgba white, 0.10
     border: Colors.glassBorder,
     highlight: Colors.glassHighlight,
@@ -95,10 +91,9 @@ export const GlassMaterial = {
 ```
 
 - **Lighter or heavier panels**: change `Colors.glass` / `Colors.glassStrong`.
-  These are white at low alpha on purpose. A white alpha fill reads as a bright
-  panel over the indigo at the top of the canvas and as roughly the old
-  near-black grey where the gradient bottoms out, so one token works at both
-  ends. An opaque grey does not.
+  These are white at low alpha on purpose. A 6.5% white plate over `#171717`
+  resolves near `#262626`; the stronger and selected plates step toward
+  `#373737` without adding another hue.
 - **Crisper edges**: raise `Colors.glassBorder`, then `Colors.glassHighlight`.
 - **More blur without a darker bar**: on Android `intensity` drives the tint
   alpha *and* the blur radius, so raising it for more blur also smokes the
@@ -135,10 +130,10 @@ columns say whether you normally touch them.
 
 | Location | Holds | Edit? |
 |---|---|---|
-| `src/constants/theme.ts` | `Colors`, `BackgroundGradient`, `ScrollEdgeFade`, `GlassMaterial` | **Yes — start here** |
+| `src/constants/theme.ts` | `Colors`, `ScrollEdgeFade`, `GlassMaterial` | **Yes — start here** |
 | `src/global.css` | CSS variables mirroring `Colors` | Only to keep in sync |
 | `src/app/_layout.tsx` | `AbyssTheme` navigation colours | Reads `Colors` directly |
-| `app.json` | Root, splash, and adaptive-icon background | Native chrome, not JS |
+| `app.json` | Root and splash background | Keep equal to `#171717`; adaptive-icon branding is separate |
 | `src/components/markdown/markdown-theme.ts` | `SyntaxColors`, `DiffColors`, markdown block styles | For code and diff rendering |
 | `src/components/ui/chromatic-metal.tsx` | `CHROME.gradient` ramp | For the shader orb |
 | `src/features/agents/liquid-glass-button.tsx` | Glow, rim, and bezel gradients | For the glass button |
@@ -149,8 +144,8 @@ One duplication is worth knowing about. `src/global.css` restates values from
 TypeScript. Changing a core surface colour means editing both.
 
 `app.json` is separate again: it colours the native window and splash before
-any JavaScript runs, so it cannot read `Colors`. Keep it equal to
-`Colors.background`, which is also the foot of the canvas gradient.
+any JavaScript runs, so it cannot read `Colors`. Keep both equal to
+`Colors.background`.
 
 ## Rules
 
@@ -159,8 +154,8 @@ any JavaScript runs, so it cannot read `Colors`. Keep it equal to
 - Name by role, not by hue. `danger`, not `red`.
 - Derive translucent variants with `withAlpha`, so the base colour stays the
   single source.
-- Scrims and fades must reference the canvas colour, never a hardcoded
-  near-black.
+- Scrims and fades must reference the canvas colour, never a different
+  hardcoded neutral.
 - Brand colours for third-party providers are the one accepted exception, and
   belong beside the icon that uses them.
 - Do not hand-roll a frosted surface. Use `GlassSurface`, or `glassRim` when a

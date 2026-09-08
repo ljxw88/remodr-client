@@ -454,23 +454,23 @@ function FilterChip({
       onPress={onPress}
       style={({ pressed }) => [
         styles.filterChip,
-        glassRim(selected ? theme.accent : undefined),
+        selected ? styles.selectedFilterChip : glassRim(),
         {
           backgroundColor: selected ? theme.accentSoft : theme.backgroundElement,
           opacity: disabled ? 0.5 : pressed ? 0.72 : 1,
         },
       ]}>
-      {/* Selection quotes the New agent button: the same iridescent rim and
-          frosted body, drawn over the accent tint. */}
+      {/* Selection quotes the New agent button: the same polished rim and
+          frosted body, drawn over the neutral accent tint. */}
       {selected ? <LiquidGlassRim /> : null}
-      <View style={styles.filterChipContent}>
+      <View style={[styles.filterChipContent, selected && styles.selectedFilterChipContent]}>
         {statusColor ? (
           <View style={[styles.deviceDot, { backgroundColor: statusColor }]} />
         ) : null}
         <ThemedText
           type="caption"
           numberOfLines={1}
-          style={{ color: selected ? theme.onAccent : theme.textSecondary, flexShrink: 1 }}>
+          style={{ color: selected ? theme.text : theme.textSecondary, flexShrink: 1 }}>
           {label}
         </ThemedText>
         {unreadCount > 0 ? (
@@ -549,11 +549,18 @@ const styles = StyleSheet.create({
     borderRadius: Radius.pill,
     overflow: 'hidden',
   },
+  selectedFilterChip: {
+    borderWidth: 0,
+  },
   filterChipContent: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: ChipGeometry.gap,
     paddingHorizontal: ChipGeometry.paddingHorizontal,
+  },
+  selectedFilterChipContent: {
+    // Replaces the width previously contributed by the two-pixel native rim.
+    paddingHorizontal: ChipGeometry.paddingHorizontal + StyleSheet.hairlineWidth * 2,
   },
   deviceDot: {
     width: 6,

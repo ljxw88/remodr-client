@@ -1,11 +1,57 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
   <defs>
-    <linearGradient id="porcelain" x1="170" y1="72" x2="350" y2="450" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FFFFFF"/>
-      <stop offset=".45" stop-color="#F7F9FF"/>
-      <stop offset="1" stop-color="#D8E0FF"/>
+    <path id="r" fill-rule="evenodd" d="M136 72H256C330 72 376 111 376 180C376 226 354 260 316 278L398 407C407 421 397 440 380 440H324L230 292H182V416C182 429 171 440 158 440H136C123 440 112 429 112 416V104C112 86 120 72 136 72ZM182 140V224H252C287 224 306 209 306 183C306 155 287 140 252 140H182Z"/>
+    <clipPath id="clip"><use href="#r"/></clipPath>
+    <linearGradient id="body" x1="112" y1="64" x2="390" y2="448" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FAFAFA"/>
+      <stop offset=".32" stop-color="#E5E5E5"/>
+      <stop offset=".62" stop-color="#D4D4D4"/>
+      <stop offset="1" stop-color="#8A8A8A"/>
+    </linearGradient>
+    <linearGradient id="depth" x1="250" y1="180" x2="410" y2="452" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#525252" stop-opacity="0"/>
+      <stop offset="1" stop-color="#373737" stop-opacity=".42"/>
+    </linearGradient>
+    <radialGradient id="caustic" cx="168" cy="92" r="270" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity=".82"/>
+      <stop offset=".28" stop-color="#F5F5F5" stop-opacity=".34"/>
+      <stop offset="1" stop-color="#D4D4D4" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sheen" x1="190" y1="72" x2="250" y2="268" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity=".58"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="leftRim" x1="112" y1="72" x2="168" y2="72" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity=".9"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="topRim" x1="136" y1="72" x2="136" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity=".7"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="cyan" x1="112" y1="120" x2="196" y2="220" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity=".4"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="magenta" x1="392" y1="210" x2="292" y2="430" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#A3A3A3" stop-opacity=".26"/>
+      <stop offset="1" stop-color="#A3A3A3" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="stroke" x1="112" y1="72" x2="240" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity=".95"/>
+      <stop offset=".5" stop-color="#FFFFFF" stop-opacity=".28"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
     </linearGradient>
   </defs>
-  <path transform="translate(-20 0)" fill="url(#porcelain)" fill-rule="evenodd"
-    d="M156 72H276C350 72 396 111 396 180C396 226 374 260 336 278L418 407C427 421 417 440 400 440H344L250 292H202V416C202 429 191 440 178 440H156C143 440 132 429 132 416V104C132 86 140 72 156 72ZM202 140V224H272C307 224 326 209 326 183C326 155 307 140 272 140H202Z"/>
+  <use href="#r" fill="url(#body)"/>
+  <g clip-path="url(#clip)">
+    <rect width="512" height="512" fill="url(#depth)"/>
+    <rect width="512" height="512" fill="url(#caustic)"/>
+    <rect width="512" height="512" fill="url(#sheen)"/>
+    <rect width="512" height="512" fill="url(#leftRim)"/>
+    <rect width="512" height="512" fill="url(#topRim)"/>
+    <rect width="512" height="512" fill="url(#cyan)"/>
+    <rect width="512" height="512" fill="url(#magenta)"/>
+  </g>
+  <use href="#r" fill="none" stroke="url(#stroke)" stroke-width="3.5" stroke-linejoin="round" clip-path="url(#clip)"/>
 </svg>

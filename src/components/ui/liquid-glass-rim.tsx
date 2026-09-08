@@ -10,19 +10,19 @@ import { Colors, withAlpha } from '@/constants/theme';
 
 const RIM_COLOURS = [
   'rgba(255,255,255,0.42)',
-  'rgba(150,170,255,0.55)',
-  'rgba(150,255,240,0.45)',
+  'rgba(163,163,163,0.50)',
+  'rgba(212,212,212,0.44)',
   'rgba(255,255,255,0.60)',
-  'rgba(255,220,170,0.45)',
+  'rgba(138,138,138,0.46)',
   'rgba(255,255,255,0.42)',
 ] as const;
 
 /**
- * The New agent button's iridescent rim, on its own.
+ * The New agent button's polished neutral rim, on its own.
  *
  * A stripped-down sibling of `LiquidGlassButton`: the frosted body and the
  * static sweep-gradient stroke, without the refraction, the backdrop glow,
- * or the chromatic orb. Those are what make that button expensive, and they
+ * or the polished orb. Those are what make that button expensive, and they
  * are what make it the one hero control — a selected chip should quote the
  * material, not compete with it.
  *
@@ -69,11 +69,11 @@ export function LiquidGlassRim() {
           </RoundedRect>
 
           <RoundedRect
-            x={0.75}
-            y={0.75}
-            width={size.width - 1.5}
-            height={size.height - 1.5}
-            r={(size.height - 1.5) / 2}
+            x={1}
+            y={1}
+            width={size.width - 2}
+            height={size.height - 2}
+            r={(size.height - 2) / 2}
             style="stroke"
             strokeWidth={1.5}>
             <SweepGradient

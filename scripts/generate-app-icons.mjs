@@ -35,12 +35,19 @@ async function flatLayer(image, [r, g, b], opacity = 1) {
 }
 
 async function shadow(width) {
-  const mask = await flatLayer(await markLayer(width, 14), [5, 8, 44], 0.28);
-  return sharp(mask).blur(12).png().toBuffer();
+  const mask = await flatLayer(await markLayer(width, 12), [0, 0, 0], 0.42);
+  return sharp(mask).blur(14).png().toBuffer();
+}
+
+async function bloom(width) {
+  const mask = await flatLayer(await markLayer(width), [245, 245, 245], 0.2);
+  return sharp(mask).blur(16).png().toBuffer();
 }
 
 // Adaptive layers use the full 108dp canvas; the essential mark fits its 66dp safe circle.
-const adaptiveMark = await markLayer(680);
+const adaptiveWidth = 600;
+const mainWidth = 840;
+const adaptiveMark = await markLayer(adaptiveWidth);
 const monochrome = await flatLayer(adaptiveMark, [255, 255, 255]);
 const alpha = await sharp(monochrome).extractChannel('alpha').raw().toBuffer();
 if (!alpha.some((value) => value > 0)) throw new Error('The icon mark is empty.');
@@ -53,10 +60,18 @@ for (let pixel = 0; pixel < alpha.length; pixel++) {
   }
 }
 const foreground = await sharp({ create: { width: size, height: size, channels: 4, background: '#00000000' } })
-  .composite([{ input: await shadow(680) }, { input: adaptiveMark }]).png().toBuffer();
-const mainMark = await markLayer(960);
+  .composite([
+    { input: await bloom(adaptiveWidth) },
+    { input: await shadow(adaptiveWidth) },
+    { input: adaptiveMark },
+  ]).png().toBuffer();
+const mainMark = await markLayer(mainWidth);
 const composite = await sharp(background)
-  .composite([{ input: await shadow(960) }, { input: mainMark }]).png().toBuffer();
+  .composite([
+    { input: await bloom(mainWidth) },
+    { input: await shadow(mainWidth) },
+    { input: mainMark },
+  ]).png().toBuffer();
 const icon = await sharp(composite).removeAlpha().png().toBuffer();
 const faviconMask = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" rx="14" fill="white"/></svg>');
 const favicon = await sharp(icon).resize(64, 64)

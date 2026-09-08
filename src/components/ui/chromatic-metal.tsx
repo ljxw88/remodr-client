@@ -31,7 +31,7 @@ export const CHROME: ChromaticMetalSettings = {
   roughness: 0.04,
   // Small: the three channels must stay close on the ramp, otherwise they land
   // on different luminances and the orb reads as a rainbow rather than metal.
-  rgbSplit: 0.035,
+  rgbSplit: 0.006,
   scale: 1.2,
   stretch: 1.2,
   angle: -0.55,
@@ -41,7 +41,7 @@ export const CHROME: ChromaticMetalSettings = {
   evolution: 0.5,
   // Dominantly dark with a single bright sweep, so the orb reads as a polished
   // sphere rather than a zebra pattern.
-  gradient: ['#E6EDFF', '#2A3244', '#04050A', '#616D8C', '#0A0D14', '#020306'],
+  gradient: ['#FAFAFA', '#525252', '#0A0A0A', '#8A8A8A', '#262626', '#000000'],
 };
 
 /**

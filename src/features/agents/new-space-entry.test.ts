@@ -1,9 +1,11 @@
 import { createElement } from 'react';
 import TestRenderer from 'react-test-renderer';
 import { router } from 'expo-router';
+import { StyleSheet } from 'react-native';
 
 import AgentsScreen from '@/app/(tabs)/index';
 import { ThemedText } from '@/components/themed-text';
+import { LiquidGlassRim } from '@/components/ui/liquid-glass-rim';
 import { EMPTY_RUNTIME, remoteAgentSchema } from '@/domain/herdr';
 import type { HerdrRepositoryState } from '@/services/herdr-repository';
 import { herdrRepository } from '@/services/herdr-repository';
@@ -110,6 +112,15 @@ describe('New Space entry point', () => {
     expect(header.props.spaceLabel).toBeUndefined();
     expect(header.props.onPressSpace).toBeUndefined();
     expect(header.props.disabled).toBe(true);
+  });
+
+  it('uses one full-size white rim for selected filters instead of overlapping native and Skia borders', () => {
+    render();
+    const selected = renderer.root.findAll((node) =>
+      node.props.accessibilityState?.selected === true
+      && typeof node.props.style === 'function', { deep: false })[0];
+    expect(StyleSheet.flatten(selected.props.style({ pressed: false })).borderWidth).toBe(0);
+    expect(selected.findByType(LiquidGlassRim).props.accentColor).toBeUndefined();
   });
 
   it('offers creation in Spaces even before the first space exists', () => {

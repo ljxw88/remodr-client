@@ -1,8 +1,8 @@
 # Remodr — Dark Mobile Design
 
 Remodr is an always-dark, conversation-first Android client for
-remote coding agents. It uses a calm near-black canvas, restrained blue
-accents, and soft depth to make complex remote workflows feel native on a
+remote coding agents. It uses a calm `#171717` graphite canvas, neutral
+high-contrast accents, and soft depth to make complex remote workflows feel native on a
 phone. The interface borrows proven hierarchy from modern finance and chat
 apps without copying another product's branding or screen layouts.
 
@@ -25,7 +25,7 @@ the normal user flow.
 
 - Top-level navigation floats above the canvas as one rounded glass dock. It
   never spans edge to edge or paints a full-width navigation background.
-- The active destination uses one restrained blue-soft capsule; inactive
+- The active destination uses one restrained neutral-soft capsule; inactive
   destinations remain transparent.
 - At the top of a page, show icons and labels in a 72dp dock. After a deliberate
   downward scroll, animate to a narrower 54dp icon-only dock.
@@ -45,26 +45,25 @@ the normal user flow.
 
 ## Visual principles
 
-- The canvas is one indigo-to-near-black vertical gradient. Every screen paints
-  its own copy, aligned to the window rather than to the screen, so it still
-  reads as one surface the routes move across. Headers stay transparent so the
-  canvas shows through them.
+- The canvas is one flat `#171717` graphite field. Every screen paints its own
+  identical copy, so it reads as one surface the routes move across without a
+  measured gradient alignment pass. Headers stay transparent so the canvas
+  shows through them.
 - A screen must be opaque. Left transparent, it shows whatever it is covering
   in the navigator, which during a transition is the screen it is replacing —
   the two read as a double exposure until the animation ends.
-- Keep the canvas otherwise clean. No glow blobs, decorative wallpaper, or
-  noisy texture, and no second gradient competing with the canvas.
-- Scrims and edge fades must stay low in alpha. A scrim tuned against the old
-  solid near-black reads as a grey band over the saturated top of the
-  gradient.
-- Use one blue accent for primary actions, selection, focus, and active
+- Keep the canvas otherwise clean. No glow blobs, decorative wallpaper, noisy
+  texture, or decorative colour gradient.
+- Scrims and edge fades must stay low in alpha. A scrim tuned against another
+  neutral reads as a visible band over the flat canvas.
+- Use one off-white accent for primary actions, selection, focus, and active
   states.
 - Frosted glass is the app's one surface material. Chips, buttons, cards, the
   dock, and the composer are all the same glass at different strengths, so the
   interface reads as a single sheet rather than a set of unrelated widgets.
-- Glass surfaces are white at low alpha, never opaque grey. A white alpha fill
-  works at both ends of the canvas — a bright panel over the indigo, a dark
-  panel where the gradient bottoms out — so one token covers every screen.
+- Glass surfaces are white at low alpha, never opaque grey. Over `#171717`,
+  the shared alpha steps resolve close to the reference `#262626` and
+  `#373737` neutrals.
 - Prefer grouped modules and clear spacing over a collection of small cards.
 - Keep information compact, but preserve comfortable mobile touch targets.
 - Light mode and theme switching are intentionally out of scope.
@@ -76,22 +75,24 @@ a colour lives and which value to tune.
 
 | Role | Value |
 |---|---|
-| Canvas | `#08090B` |
-| Canvas gradient | `#2241C0` → `#1D3182` → `#0D1226` → `#08090B` |
-| Surface | `#141519` |
-| Selected surface | `#202229` |
-| Border | `#252830` |
-| Primary text | `#F5F6F8` |
-| Secondary text | `#B2B6C0` |
-| Muted text | `#A2A8B6` |
-| Placeholder | `#8E95A5` |
-| Primary accent | `#6682F0` |
-| Success | `#5BE49B` |
-| Warning | `#FFC65C` |
-| Danger | `#FF716B` |
+| Canvas | `#171717` |
+| Canvas treatment | Flat, aligned across routes |
+| Surface | 6.5% white over canvas (approximately `#262626`) |
+| Selected surface | 14% white over canvas (approximately `#373737`) |
+| Border | 14% white |
+| Primary text | `#FAFAFA` |
+| Secondary text | `#B8B8B8` |
+| Muted / placeholder | `#A3A3A3` |
+| Primary accent | `#F5F5F5` |
+| Supplemental accent | `#FF8000` |
+| Success | `#7DD3A7` |
+| Warning | `#F5C66A` |
+| Danger | `#FF7A7A` |
 
-Blue is reserved for action and active emphasis. Green, amber, and red are
-semantic and must always be paired with a label or icon.
+Off-white is reserved for primary action, selection, and agent iconography.
+Orange adds small moments of delight to unread indicators and input-required
+prompts. Green, amber, and red are semantic and must always be paired with a
+label or icon.
 
 ## Geometry and spacing
 
@@ -138,10 +139,10 @@ logs. Do not add marketing subtitles to mobile headers.
 
 ### Buttons and fields
 
-- Primary buttons use blue with white semibold text and a pill shape.
+- Primary buttons use off-white with graphite semibold text and a pill shape.
 - Secondary buttons use an elevated dark surface with a restrained border.
 - Destructive actions remain visually separate from the primary workflow.
-- Inputs use the shared minimum control height with an 18dp radius. Focus uses a blue border and
+- Inputs use the shared minimum control height with an 18dp radius. Focus uses an off-white border and
   subtle depth, not a glow.
 
 ### Workflow pages and contextual menus
@@ -188,7 +189,7 @@ plus a border; see [`COLOR.md`](COLOR.md) for the tokens.
   way `LiquidGlassButton` does.
 - Two families, chosen by what is behind the surface:
   - **Panel** — sits on the canvas. Fill and rim only, no blur, because there
-    is nothing behind it but the gradient.
+    is nothing behind it but the canvas.
   - **Chrome** — floats over scrolling content. Real backdrop blur.
 - Chrome with no blur target in scope backs itself with an opaque, window-
   aligned copy of the canvas, under the ordinary fill and rim, instead of
@@ -211,7 +212,7 @@ plus a border; see [`COLOR.md`](COLOR.md) for the tokens.
   and nesting targets is the same SIGSEGV as nesting a `BlurView` in its own.
 - A surface that resizes gets a flat fill and a real border, nothing that has
   to measure itself. The composer grows with the draft, and a rim traced by a
-  canvas or a gradient sized to the box lands a frame behind the resize and
+  canvas or a measured decorative fill sized to the box lands a frame behind the resize and
   shears against the edge while you type. Drawn materials — refraction, sweep
   rims, `LiquidGlassButton` — belong on controls with a fixed size.
 - iOS may use native Liquid Glass where supported.
@@ -225,12 +226,12 @@ always a *sibling* of `BlurBackdropTarget`; see
 `src/components/ui/blur-backdrop.tsx`.
 
 The blur can only see inside its target, so `BlurBackdropTarget` renders its
-own copy of the canvas gradient. With the gradient outside, frosted chrome
+own copy of the canvas. With the canvas outside, frosted chrome
 blurs transparent pixels and reads as a dead grey slab.
 
 Any copy is shifted up by however far it sits below the window top, so it
 *continues* the canvas rather than restarting it. A copy mounted under a
-navigation header would otherwise jump back to the gradient's brightest colour
+navigation header would otherwise restart its canvas
 at the header's lower edge, leaving a band across the top of the screen.
 `CanvasFill` does this measuring itself, and is what both `Screen` and
 `BlurBackdropTarget` use.
@@ -243,7 +244,7 @@ anyway.
 
 ### Status
 
-- Working: blue
+- Working: off-white
 - Needs input: amber
 - Done or connected: green
 - Failed: red
@@ -266,7 +267,7 @@ Status must remain understandable without color alone.
 - Show provider, working directory, and explicit status.
 - Preserve last-known content during reconnect and show a compact floating
   connection indicator.
-- A blue-soft icon tile gives each row a stable visual anchor.
+- A neutral-soft icon tile gives each row a stable visual anchor.
 - Tapping a row opens its conversation at the newest content.
 - Keep **New agent** as the only primary action. Its page chooses one
   of the server-advertised providers, a required space, and an explicit
@@ -283,13 +284,13 @@ Status must remain understandable without color alone.
 
 **New agent** is the one sanctioned exception to the flat, restrained surface
 rules above. It renders through Skia as refractive glass over an animated
-chromatic orb.
+polished neutral orb.
 
 - Treat it as scoped to this single hero control. Do not spread refraction,
-  iridescence, or animated rim light to other buttons, rows, or the canvas.
+  specular animation, or animated rim light to other buttons, rows, or the canvas.
 - Draw the refracted content and the glass in one canvas. A backdrop filter
   reads only what that canvas already painted, so a glass pill over the bare
-  near-black canvas has nothing to bend.
+  flat graphite canvas has nothing to bend.
 - Keep distortion strongest at the rim and near zero in the centre, so the
   label stays readable.
 - Stop the animation when the control is disabled, the screen loses focus, or
@@ -362,7 +363,7 @@ chromatic orb.
 - Give every fenced block a header with its language and a copy action, and
   scroll code horizontally rather than wrapping it, so indentation-sensitive
   output stays readable.
-- Colour `diff` fences per line: green additions, red removals, blue hunk
+- Colour `diff` fences per line: green additions, red removals, neutral hunk
   headers, muted file metadata.
 - Size table columns to fit the screen and scroll wide tables horizontally.
   Never clip a column off the edge.
@@ -385,7 +386,7 @@ chromatic orb.
 
 ## Settings
 
-- Use compact grouped rows with blue-soft icon tiles.
+- Use compact grouped rows with neutral-soft icon tiles.
 - Keep security claims specific: stored credentials, host-key verification,
   diagnostics, and app version.
 - Do not include Appearance controls because the product is intentionally

@@ -23,7 +23,7 @@ into a replacement provider session.
 
 ## Unread finish indicators
 
-A blue dot marks a completed agent whose finish has not been viewed in this app.
+An orange accent dot marks a completed agent whose finish has not been viewed in this app.
 Workspace headers and filter chips aggregate their agents; device chips on the
 Agents page aggregate their device. The Servers page shows connection status
 only. **All spaces** and the collapsed-filter
