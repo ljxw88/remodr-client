@@ -4,7 +4,8 @@ import { StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { GlassSurface } from '@/components/ui/glass-surface';
-import { ConversationComposer } from './conversation-composer';
+import { ConversationComposer, ConversationComposerSkeleton } from './conversation-composer';
+import { SkeletonBlock, SkeletonGroup } from '@/components/ui/skeleton';
 
 jest.mock('@/components/ui/app-icon', () => ({ AppIcon: () => null }));
 jest.mock('@/components/ui/glass-surface', () => ({
@@ -59,6 +60,18 @@ describe('ConversationComposer', () => {
     expect(button('Send').props.disabled).toBe(disabled);
     expect(button('Send').props.accessibilityState).toEqual({ disabled });
     expect(button('Send').props.onPress).toBe(props.onSend);
+  });
+
+  it('uses the real composer card shape for unknown metadata without offering fake controls', () => {
+    render();
+    const cardStyle = renderer!.root.findByType(GlassSurface).props.style;
+    TestRenderer.act(() => renderer!.update(createElement(ConversationComposerSkeleton)));
+    expect(renderer!.root.findByType(GlassSurface).props.style).toBe(cardStyle);
+    expect(renderer!.root.findByType(SkeletonGroup).props.label).toBe('Loading message controls');
+    expect(renderer!.root.findAllByType(TextInput)).toHaveLength(0);
+    expect(renderer!.root.findAll((node) => typeof node.props.onPress === 'function')).toHaveLength(0);
+    expect(renderer!.root.findAllByType(SkeletonBlock).filter((block) =>
+      block.props.width === 36 && block.props.height === 36 && block.props.radius === 18)).toHaveLength(1);
   });
 
   it.each([

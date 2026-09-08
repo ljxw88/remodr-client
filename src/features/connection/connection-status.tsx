@@ -1,6 +1,6 @@
 import { router, useIsFocused } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { AppButton } from '@/components/ui/app-button';
@@ -10,6 +10,7 @@ import { retryDeviceConnection } from '@/features/agents/connect-runtime';
 import type { ConnectionSnapshot } from '@/features/connection/connection-supervisor';
 import { useConnectionSnapshot, useForeground, usePendingCommands } from '@/features/connection/use-connection';
 import { useTheme } from '@/hooks/use-theme';
+import { useStatusFeedback } from '@/hooks/use-status-feedback';
 import { herdrRepository } from '@/services/herdr-repository';
 import { toUserMessage } from '@/utils/user-error';
 
@@ -99,6 +100,10 @@ function DeviceConnectionStatus({
     return () => clearInterval(timer);
   }, [visible, needsClock]);
   const status = getConnectionStatus(snapshot, now, queuedCount);
+  const feedback = useStatusFeedback(
+    visible && status.kind !== 'hidden' ? `${status.kind}:${snapshot?.phase ?? 'connected'}` : null,
+    visible && status.kind !== 'fatal',
+  );
   if (!visible || status.kind === 'hidden') return null;
 
   const label = status.kind === 'fatal' ? 'Connection needs attention'
@@ -117,6 +122,7 @@ function DeviceConnectionStatus({
             accessibilityHint={status.text}
             onPress={() => router.push({ pathname: '/hosts/[id]', params: { id: deviceId } })}
             style={({ pressed }) => [styles.detailsButton, { opacity: pressed ? 0.7 : 1 }]}>
+            <Animated.View style={feedback}>
             <ThemedText
               type="caption"
               numberOfLines={1}
@@ -124,6 +130,7 @@ function DeviceConnectionStatus({
               themeColor={status.kind === 'fatal' ? 'warning' : 'textSecondary'}>
               {label}
             </ThemedText>
+            </Animated.View>
           </Pressable>
           {status.kind !== 'fatal' && snapshot?.phase !== 'connected' ? (
             <Pressable
@@ -218,6 +225,8 @@ export function CommandDelivery({
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const status = getDeliveryStatus(delivery);
+  const feedback = useStatusFeedback(delivery ?? null,
+    delivery !== 'failed' && delivery !== 'uncertain' && !deliveryError);
   if (!status) return null;
 
   async function act(discard: boolean) {
@@ -242,9 +251,11 @@ export function CommandDelivery({
 
   return (
     <View style={styles.delivery}>
+      <Animated.View style={feedback}>
       <ThemedText type="caption" themeColor="textMuted" accessibilityLiveRegion="polite">
         {status.label}
       </ThemedText>
+      </Animated.View>
       {status.detail ? (
         <ThemedText type="caption" themeColor="warning">{status.detail}</ThemedText>
       ) : null}

@@ -6,13 +6,7 @@ import {
 } from '@shopify/react-native-skia';
 import { useCallback, useState } from 'react';
 import { StyleSheet, View, type LayoutChangeEvent } from 'react-native';
-import { useDerivedValue } from 'react-native-reanimated';
-
-import { useShaderClock } from '@/hooks/use-shader-clock';
 import { Colors, withAlpha } from '@/constants/theme';
-
-/** Matches the New agent button, so a selection reads as the same material. */
-const RIM_PERIOD_MS = 6000;
 
 const RIM_COLOURS = [
   'rgba(255,255,255,0.42)',
@@ -23,30 +17,24 @@ const RIM_COLOURS = [
   'rgba(255,255,255,0.42)',
 ] as const;
 
-type Props = {
-  /** Pauses the clock when the control is not selected. */
-  active?: boolean;
-};
-
 /**
  * The New agent button's iridescent rim, on its own.
  *
  * A stripped-down sibling of `LiquidGlassButton`: the frosted body and the
- * rotating sweep-gradient stroke, without the refraction, the backdrop glow,
+ * static sweep-gradient stroke, without the refraction, the backdrop glow,
  * or the chromatic orb. Those are what make that button expensive, and they
  * are what make it the one hero control — a selected chip should quote the
  * material, not compete with it.
  *
- * Cheap enough to use on a selection because only one chip per row can be
- * selected, and the clock stops as soon as it is not.
+ * Selected filters settle into this appearance instead of continuously asking
+ * for attention with a rotating highlight.
  *
  * Fills its parent, so the parent must carry the radius and no padding —
  * Yoga insets absolute children by the parent's padding, which would pull the
  * rim inside the control instead of tracing its edge.
  */
-export function LiquidGlassRim({ active = true }: Props) {
+export function LiquidGlassRim() {
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
-  const clock = useShaderClock(active);
 
   const onLayout = useCallback((event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout;
@@ -56,11 +44,6 @@ export function LiquidGlassRim({ active = true }: Props) {
         : { width, height },
     );
   }, []);
-
-  const rimTransform = useDerivedValue(
-    () => [{ rotate: (clock.value / RIM_PERIOD_MS) % (Math.PI * 2) }],
-    [clock],
-  );
 
   return (
     // Measured on a plain View: Skia's Canvas ignores `onLayout` under Fabric.
@@ -85,8 +68,6 @@ export function LiquidGlassRim({ active = true }: Props) {
             />
           </RoundedRect>
 
-          {/* Rotating iridescent rim. Rotation is on the gradient, not on a
-              Group: rotating the geometry spins the pill itself. */}
           <RoundedRect
             x={0.75}
             y={0.75}
@@ -98,7 +79,6 @@ export function LiquidGlassRim({ active = true }: Props) {
             <SweepGradient
               c={{ x: size.width / 2, y: size.height / 2 }}
               origin={{ x: size.width / 2, y: size.height / 2 }}
-              transform={rimTransform}
               colors={[...RIM_COLOURS]}
             />
           </RoundedRect>

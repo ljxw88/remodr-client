@@ -7,8 +7,8 @@ import { EMPTY_RUNTIME, remoteAgentSchema, type AgentConversation } from '@/doma
 import { ActionMenu } from '@/components/ui/action-menu';
 import { herdrRepository } from '@/services/herdr-repository';
 import { useConnectionSnapshot, useForeground, usePendingCommands } from '@/features/connection/use-connection';
-import { ConversationComposer } from './conversation-composer';
-import { ConversationMessageList } from './conversation-message-list';
+import { ConversationComposer, ConversationComposerSkeleton } from './conversation-composer';
+import { ConversationMessageList, ConversationSkeleton } from './conversation-message-list';
 import { ConversationActivityPanel } from './conversation-activity-panel';
 import { HumanRequestBar } from './human-request-bar';
 import { useConversationController } from './use-conversation-controller';
@@ -49,8 +49,9 @@ jest.mock('./use-conversation-controller', () => ({ useConversationController: j
 jest.mock('./use-herdr', () => ({ useHerdr: jest.fn(), useAgentConversation: jest.fn() }));
 jest.mock('./conversation-composer', () => ({
   ConversationComposer: ({ requestBar }: { requestBar?: import('react').ReactNode }) => requestBar,
+  ConversationComposerSkeleton: () => null,
 }));
-jest.mock('./conversation-message-list', () => ({ ConversationMessageList: () => null }));
+jest.mock('./conversation-message-list', () => ({ ConversationMessageList: () => null, ConversationSkeleton: () => null }));
 jest.mock('./conversation-activity-panel', () => ({ ConversationActivityPanel: () => null }));
 jest.mock('./human-request-bar', () => ({ HumanRequestBar: () => null }));
 jest.mock('@/features/connection/connection-status', () => ({ ConnectionStatus: () => null }));
@@ -106,7 +107,7 @@ describe('conversation page assembly', () => {
     jest.mocked(useForeground).mockReturnValue(true);
     jest.mocked(useConnectionSnapshot).mockReturnValue(undefined);
     jest.mocked(usePendingCommands).mockReturnValue([]);
-    jest.mocked(useConversationController).mockReturnValue({ error: null, retry: mockRetry });
+    jest.mocked(useConversationController).mockReturnValue({ error: null, retry: mockRetry, restoring: false });
     jest.mocked(herdrRepository.deviceIdForAgent).mockReturnValue('device-a');
     jest.mocked(herdrRepository.getPendingCommands).mockReturnValue([]);
     jest.mocked(herdrRepository.loadDraft).mockResolvedValue('');
@@ -133,10 +134,35 @@ describe('conversation page assembly', () => {
   });
 
   it('keeps read failures with the transcript instead of turning them into send failures', async () => {
-    jest.mocked(useConversationController).mockReturnValue({ error: 'Read failed', retry: mockRetry });
+    jest.mocked(useConversationController).mockReturnValue({ error: 'Read failed', retry: mockRetry, restoring: false });
     await mount();
     expect(renderer!.root.findByType(ConversationMessageList).props.error).toBe('Read failed');
     expect(composer().props.error).toBeNull();
+  });
+
+  it('keeps known agent controls ready while history restores independently', async () => {
+    jest.mocked(useAgentConversation).mockReturnValue(null);
+    jest.mocked(useConversationController).mockReturnValue({ error: null, retry: mockRetry, restoring: true });
+    await mount();
+    expect(renderer!.root.findByType(ConversationMessageList).props).toMatchObject({
+      restoring: true, hasConversation: false,
+    });
+    expect(renderer!.root.findAllByType(ConversationComposer)).toHaveLength(1);
+    expect(renderer!.root.findAllByType(ConversationComposerSkeleton)).toHaveLength(0);
+  });
+
+  it('shows the chat shell while agent metadata is still arriving instead of a false unavailable message', async () => {
+    runtime.devices['device-a'].runtime.agents = [];
+    runtime.devices['device-a'].connection = 'synchronizing';
+    jest.mocked(useAgentConversation).mockReturnValue(null);
+    await mount();
+    expect(renderer!.root.findAllByType(ConversationSkeleton)).toHaveLength(1);
+    expect(renderer!.root.findAllByType(ConversationComposerSkeleton)).toHaveLength(1);
+    runtime.devices['device-a'].runtime.agents = [currentAgent];
+    runtime.devices['device-a'].connection = 'connected';
+    await TestRenderer.act(async () => { renderer!.update(createElement(AgentConversationScreen)); });
+    expect(renderer!.root.findAllByType(ConversationComposerSkeleton)).toHaveLength(0);
+    expect(renderer!.root.findAllByType(ConversationMessageList)).toHaveLength(1);
   });
 
   it('passes only messages to the inverted transcript and keys activity to route and provider session', async () => {

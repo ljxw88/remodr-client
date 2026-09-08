@@ -1,15 +1,17 @@
 import { useMemo, useState, type Ref } from 'react';
-import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Animated, FlatList, Pressable, StyleSheet, View } from 'react-native';
 
 import { MarkdownMessage } from '@/components/markdown/markdown-message';
 import { MessageText } from '@/components/markdown/markdown-theme';
 import { ThemedText } from '@/components/themed-text';
 import { AppIcon } from '@/components/ui/app-icon';
 import { ScrollEdgeFrame } from '@/components/ui/scroll-edge-frame';
+import { SkeletonGroup, SkeletonLine } from '@/components/ui/skeleton';
 import { Colors, Radius, ScrollEdgeFade, Spacing } from '@/constants/theme';
 import { statusLabel, type ConversationItem, type HumanRequest, type RemoteAgent } from '@/domain/herdr';
 import { CommandDelivery } from '@/features/connection/connection-status';
 import { useTheme } from '@/hooks/use-theme';
+import { useContentReveal } from '@/hooks/use-content-reveal';
 import {
   conversationTranscript,
   type ConversationDisplayItem,
@@ -26,6 +28,7 @@ type Props = {
   connected: boolean;
   error: string | null;
   hasConversation: boolean;
+  restoring?: boolean;
   bottomInset: number;
   topInset?: number;
   onRetry: () => void;
@@ -45,12 +48,15 @@ export function ConversationMessageList({
   connected,
   error,
   hasConversation,
+  restoring = false,
   bottomInset,
   topInset = 0,
   onRetry,
   scroll,
 }: Props) {
   const transcript = useMemo(() => conversationTranscript(data), [data]);
+  const initialLoading = transcript.length === 0 && !error && !hasConversation && (connected || restoring);
+  const revealStyle = useContentReveal(initialLoading, conversationId);
   return (
     <ScrollEdgeFrame
       inverted
@@ -58,7 +64,7 @@ export function ConversationMessageList({
       // Cover the gaps between all of the composer's stacked panels.
       bottomHeight={Math.max(ScrollEdgeFade.bottomHeight, bottomInset)}>
       {(edge) => (
-        <FlatList<TranscriptItem>
+        <Animated.FlatList<TranscriptItem>
           {...edge}
           key={conversationId}
           ref={listRef}
@@ -66,6 +72,7 @@ export function ConversationMessageList({
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           data={transcript}
+          style={revealStyle}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <ConversationRow item={item} agent={agent} onEdit={onEdit} />
@@ -94,6 +101,9 @@ export function ConversationMessageList({
           ListHeaderComponent={<View style={{ height: bottomInset }} />}
           ListFooterComponent={<View style={{ height: topInset }} />}
           ListEmptyComponent={
+            initialLoading ? (
+              <View><ConversationSkeleton /></View>
+            ) : (
             <View style={styles.empty}>
               {error ? (
                 <>
@@ -113,18 +123,44 @@ export function ConversationMessageList({
                 <ThemedText type="small" themeColor="textMuted">
                   No conversation yet.
                 </ThemedText>
-              ) : connected ? (
-                <ActivityIndicator color={Colors.accent} />
               ) : (
                 <ThemedText type="small" themeColor="textMuted">
                   Conversation will load when this device reconnects.
                 </ThemedText>
               )}
             </View>
+            )
           }
         />
       )}
     </ScrollEdgeFrame>
+  );
+}
+
+export function ConversationSkeleton() {
+  const theme = useTheme();
+  return (
+    <SkeletonGroup label="Loading conversation" style={styles.skeletonMessages}>
+      {[0, 1].map((exchange) => (
+        <View key={exchange} style={styles.skeletonMessages}>
+          <View style={[styles.userWrap, { width: exchange === 0 ? '76%' : '62%' }]}>
+            <View style={[styles.userMessage, {
+              width: '100%', backgroundColor: theme.glassStrong, borderColor: theme.glassBorder,
+            }]}>
+              <SkeletonLine lineHeight={MessageText.lineHeight} />
+              {exchange === 0 ? <SkeletonLine width="58%" lineHeight={MessageText.lineHeight} /> : null}
+            </View>
+          </View>
+          <View style={styles.assistantMessage}>
+            <View>
+              <SkeletonLine width="96%" lineHeight={MessageText.lineHeight} />
+              <SkeletonLine width="88%" lineHeight={MessageText.lineHeight} />
+              <SkeletonLine width={exchange === 0 ? '68%' : '46%'} lineHeight={MessageText.lineHeight} />
+            </View>
+          </View>
+        </View>
+      ))}
+    </SkeletonGroup>
   );
 }
 
@@ -278,6 +314,7 @@ function AskedQuestionRow({ request }: { request: HumanRequest }) {
 }
 
 const styles = StyleSheet.create({
+  skeletonMessages: { gap: Spacing.three },
   messages: {
     flexGrow: 1,
     gap: Spacing.three,

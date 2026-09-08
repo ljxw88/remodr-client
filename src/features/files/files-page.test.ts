@@ -6,12 +6,12 @@ import { ActivityIndicator, Alert, FlatList } from 'react-native';
 import FilesScreen from '@/app/files/[id]';
 import { ThemedText } from '@/components/themed-text';
 import { AppButton } from '@/components/ui/app-button';
-import { NeedsSession } from '@/components/ui/needs-session';
+import { SelectionRowSkeleton } from '@/components/ui/form-page';
 import { TextField } from '@/components/ui/text-field';
 import type { RemoteFile, SessionSnapshot } from '@/domain/remote';
 import { refreshSessions, useHostSession } from '@/features/connection/use-host-session';
 import { remoteClient } from '@/services/native-remote-client';
-import { RemotePathBar } from './remote-path-bar';
+import { RemoteFileExplorer } from './remote-file-explorer';
 
 let mockFocused = true;
 jest.mock('expo-router', () => ({
@@ -23,14 +23,18 @@ jest.mock('expo-router', () => ({
     React.useEffect(() => focused ? effect() : undefined, [effect, focused]);
   },
 }));
-jest.mock('@/components/ui/screen', () => ({
-  Screen: ({ children }: { children: import('react').ReactNode }) => children,
-}));
+jest.mock('@/components/ui/form-page', () => {
+  const React = jest.requireActual<typeof import('react')>('react');
+  return {
+    ...jest.requireActual('@/components/ui/form-page'),
+    FormPage: ({ children, footer }: { children?: React.ReactNode; footer?: React.ReactNode }) =>
+      React.createElement(React.Fragment, null, children, footer),
+  };
+});
 jest.mock('@/components/ui/app-icon', () => ({ AppIcon: () => null }));
 jest.mock('@/components/ui/app-button', () => ({ AppButton: () => null }));
 jest.mock('@/components/ui/text-field', () => ({ TextField: () => null }));
-jest.mock('@/components/ui/needs-session', () => ({ NeedsSession: () => null }));
-jest.mock('./remote-path-bar', () => ({ RemotePathBar: () => null }));
+jest.mock('@/features/hosts/use-hosts', () => ({ useHosts: () => ({ hosts: [] }) }));
 jest.mock('@/hooks/use-theme', () => ({
   useTheme: () => jest.requireActual<typeof import('@/constants/theme')>('@/constants/theme').Colors,
 }));
@@ -71,8 +75,14 @@ describe('file manager directory integration', () => {
     return result;
   }
 
-  function pathBar() { return renderer!.root.findByType(RemotePathBar); }
-  function field() { return renderer!.root.findByType(TextField); }
+  function explorer() { return renderer!.root.findByType(RemoteFileExplorer); }
+  function field(label = 'New folder') {
+    return renderer!.root.findAllByType(TextField).find((node) => node.props.label === label)!;
+  }
+  async function navigate(path: string) {
+    TestRenderer.act(() => field('Folder path').props.onChangeText(path));
+    await TestRenderer.act(async () => field('Folder path').props.onSubmitEditing());
+  }
   function list() { return renderer!.root.findByType(FlatList); }
   function text() {
     return renderer!.root.findAllByType(ThemedText).map((node) => node.props.children).join(' ');
@@ -108,11 +118,32 @@ describe('file manager directory integration', () => {
     const pending = deferred<RemoteFile[]>();
     jest.mocked(remoteClient.sftpList).mockReturnValueOnce(pending.promise);
     await mount();
-    expect(renderer!.root.findAllByType(ActivityIndicator)).toHaveLength(1);
+    expect(renderer!.root.findAllByType(SelectionRowSkeleton)).toHaveLength(4);
+    expect(renderer!.root.findAllByType(ActivityIndicator)).toHaveLength(0);
     expect(text()).not.toContain('This folder is empty.');
     await TestRenderer.act(async () => { pending.resolve([]); });
     expect(text()).toContain('This folder is empty.');
     expect(renderer!.root.findAllByType(ActivityIndicator)).toHaveLength(0);
+    expect(renderer!.root.findAllByType(SelectionRowSkeleton)).toHaveLength(0);
+  });
+
+  it('retains known rows only within the same host, session and path while a refresh loads', async () => {
+    await mount();
+    const refreshing = deferred<RemoteFile[]>();
+    jest.mocked(remoteClient.sftpList).mockReturnValueOnce(refreshing.promise);
+    await navigate('~');
+    expect(list().props.data).toEqual([item]);
+    expect(list().props.renderItem({ item }).props.disabled).toBe(true);
+    const replacement = deferred<RemoteFile[]>();
+    jest.mocked(remoteClient.sftpList).mockReturnValueOnce(replacement.promise);
+    session = { hostId: 'device-a', sessionId: 'session-b', status: 'connected' };
+    await update();
+    expect(renderer!.root.findAllByType(SelectionRowSkeleton)).toHaveLength(4);
+    expect(list().props.data).not.toContain(item);
+    await TestRenderer.act(async () => { refreshing.resolve([item]); });
+    expect(renderer!.root.findAllByType(SelectionRowSkeleton)).toHaveLength(4);
+    await TestRenderer.act(async () => { replacement.resolve([]); });
+    expect(text()).toContain('This folder is empty.');
   });
 
   it('shows list errors inline and retries through the shared reader', async () => {
@@ -154,9 +185,10 @@ describe('file manager directory integration', () => {
     await mount();
     await TestRenderer.act(async () => { field().props.onChangeText('First'); });
     await TestRenderer.act(async () => { button('Create').props.onPress(); });
-    await TestRenderer.act(async () => { pathBar().props.onNavigate('/other'); field().props.onChangeText('Next'); });
+    await navigate('/other');
+    TestRenderer.act(() => field().props.onChangeText('Next'));
     await TestRenderer.act(async () => { creating.resolve(); });
-    expect(pathBar().props.path).toBe('/other');
+    expect(explorer().props.directory.path).toBe('/other');
     expect(field().props.value).toBe('Next');
     expect(remoteClient.sftpList).toHaveBeenCalledTimes(2);
     expect(remoteClient.sftpList).toHaveBeenLastCalledWith('session-a', '/other');
@@ -165,7 +197,7 @@ describe('file manager directory integration', () => {
   it.each(['path', 'session', 'blur'] as const)('refuses an old delete confirmation after a %s change', async (change) => {
     await mount();
     const confirm = promptDelete();
-    if (change === 'path') await TestRenderer.act(async () => { pathBar().props.onNavigate('/other'); });
+    if (change === 'path') await navigate('/other');
     else if (change === 'session') session = { hostId: 'device-a', sessionId: 'session-b', status: 'connected' };
     else { mockFocused = false; await update(); }
     await TestRenderer.act(async () => { confirm(); });
@@ -180,10 +212,10 @@ describe('file manager directory integration', () => {
     const confirm = promptDelete();
     await TestRenderer.act(async () => { confirm(); });
     expect(remoteClient.sftpRemove).toHaveBeenCalledWith('session-a', item.path);
-    await TestRenderer.act(async () => { pathBar().props.onNavigate('/other'); });
+    await navigate('/other');
     await TestRenderer.act(async () => { removing.resolve(); });
     expect(remoteClient.sftpList).toHaveBeenCalledTimes(2);
-    expect(pathBar().props.path).toBe('/other');
+    expect(explorer().props.directory.path).toBe('/other');
   });
 
   it('does not report a successful mutation as failed when its directory refresh fails', async () => {
@@ -213,7 +245,8 @@ describe('file manager directory integration', () => {
   it('does not retain file actions for a disconnected snapshot and resumes when connected', async () => {
     session = { hostId: 'device-a', sessionId: 'session-a', status: 'disconnected' };
     await mount();
-    expect(renderer!.root.findAllByType(NeedsSession)).toHaveLength(1);
+    expect(text()).toContain('Connect to this host first.');
+    expect(button('Create').props.disabled).toBe(true);
     expect(remoteClient.sftpList).not.toHaveBeenCalled();
     session = { ...session, status: 'connected' };
     await update();

@@ -5,11 +5,12 @@ import { ActivityIndicator, Alert, FlatList, StyleSheet } from 'react-native';
 import { MarkdownMessage } from '@/components/markdown/markdown-message';
 import { ThemedText } from '@/components/themed-text';
 import { ScrollEdgeFrame } from '@/components/ui/scroll-edge-frame';
+import { SkeletonGroup, SkeletonLine } from '@/components/ui/skeleton';
 import { ScrollEdgeFade } from '@/constants/theme';
 import { remoteAgentSchema } from '@/domain/herdr';
 import { CommandDelivery } from '@/features/connection/connection-status';
 import { type ConversationDisplayItem, type TranscriptItem } from './conversation-display';
-import { ConversationMessageList } from './conversation-message-list';
+import { ConversationMessageList, ConversationSkeleton } from './conversation-message-list';
 
 const mockEdge = {
   onScroll: jest.fn(),
@@ -150,7 +151,9 @@ describe('ConversationMessageList', () => {
     render({ hasConversation: false, connected: false });
     expect(text()).toContain('Conversation will load when this device reconnects.');
     render({ connected: true });
-    expect(renderer!.root.findAllByType(ActivityIndicator)).toHaveLength(1);
+    expect(renderer!.root.findAllByType(ConversationSkeleton)).toHaveLength(1);
+    expect(renderer!.root.findAllByType(ActivityIndicator)).toHaveLength(0);
+    expect(renderer!.root.findByType(SkeletonGroup).props.label).toBe('Loading conversation');
     render({ error: 'Read failed' });
     expect(text()).toContain('Read failed');
     const retry = buttons().find((node) =>
@@ -158,6 +161,54 @@ describe('ConversationMessageList', () => {
     TestRenderer.act(() => retry.props.onPress());
     expect(props.onRetry).toHaveBeenCalledTimes(1);
     expect(renderer!.root.findAllByType(ActivityIndicator)).toHaveLength(0);
+    expect(renderer!.root.findAllByType(ConversationSkeleton)).toHaveLength(0);
+  });
+
+  it('shows placeholders during offline cache restoration and retires them as soon as a message is available', () => {
+    render({ hasConversation: false, connected: false, restoring: true });
+    const instance = list().instance;
+    expect(renderer!.root.findAllByType(ConversationSkeleton)).toHaveLength(1);
+    expect(text()).not.toContain('reconnects');
+    render({ data: [{ id: 'cached', kind: 'assistant_message', markdown: 'Already available' }] });
+    expect(list().instance).toBe(instance);
+    expect(renderer!.root.findAllByType(ConversationSkeleton)).toHaveLength(0);
+    expect(renderer!.root.findByType(MarkdownMessage).props.children).toBe('Already available');
+    render({ data: [], restoring: false });
+    expect(text()).toContain('reconnects');
+    expect(renderer!.root.findAllByType(ConversationSkeleton)).toHaveLength(0);
+  });
+
+  it('never masks cached messages with placeholders during a refresh or failure', () => {
+    render({
+      data: [{ id: 'known', kind: 'assistant_message', markdown: 'Saved reply' }],
+      hasConversation: true, restoring: true, error: 'Refresh failed',
+    });
+    expect(renderer!.root.findAllByType(ConversationSkeleton)).toHaveLength(0);
+    expect(renderer!.root.findByType(MarkdownMessage).props.children).toBe('Saved reply');
+    render({ data: [], hasConversation: true, error: null });
+    expect(text()).toContain('No conversation yet.');
+    expect(renderer!.root.findAllByType(ConversationSkeleton)).toHaveLength(0);
+  });
+
+  it('matches real bubble padding, corners, message gaps and line boxes rather than adding generic cards', () => {
+    render({ data: [{ id: 'user', kind: 'user_message', text: 'A real message' }] });
+    const bubbles = () => renderer!.root.findAll((node) => {
+      if (typeof node.props.style === 'function') return false;
+      const style = StyleSheet.flatten(node.props.style);
+      return style?.paddingHorizontal === 16 && style.paddingVertical === 10 && style.borderRadius === 24;
+    }, { deep: false });
+    const realBubble = StyleSheet.flatten(bubbles()[0].props.style);
+    const messageGap = StyleSheet.flatten(list().props.contentContainerStyle).gap;
+    render({ data: [], hasConversation: false });
+    expect(bubbles()).toHaveLength(2);
+    for (const bubble of bubbles()) {
+      expect(StyleSheet.flatten(bubble.props.style)).toMatchObject({
+        borderRadius: realBubble.borderRadius, paddingHorizontal: realBubble.paddingHorizontal,
+        paddingVertical: realBubble.paddingVertical, backgroundColor: realBubble.backgroundColor,
+      });
+    }
+    expect(StyleSheet.flatten(renderer!.root.findByType(SkeletonGroup).props.style).gap).toBe(messageGap);
+    expect(renderer!.root.findAllByType(SkeletonLine).every((line) => line.props.lineHeight === 20)).toBe(true);
   });
 
   it('keeps delivery controls and only offers edit for sent or historical messages', () => {

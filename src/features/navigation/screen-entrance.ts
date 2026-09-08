@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Animated, Easing } from 'react-native';
+import { Animated } from 'react-native';
+import { Motion } from '@/constants/motion';
 
 import { useReduceMotion } from '@/hooks/use-reduce-motion';
 
@@ -26,7 +27,7 @@ import { useReduceMotion } from '@/hooks/use-reduce-motion';
  */
 const Entrance = {
   offsetFrom: 16,
-  duration: 200,
+  duration: Motion.duration.navigation,
 };
 
 type EntranceDirection = 1 | -1;
@@ -79,7 +80,7 @@ export function useScreenEntrance() {
     Animated.timing(translateX, {
       toValue: 0,
       duration: Entrance.duration,
-      easing: Easing.out(Easing.cubic),
+      easing: Motion.easing.entrance,
       useNativeDriver: true,
       isInteraction: false,
     }).start();

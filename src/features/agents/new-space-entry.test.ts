@@ -16,6 +16,7 @@ let mockFocusEffect: (() => void | (() => void)) | undefined;
 let mockForeground = true;
 
 jest.mock('expo-router', () => ({
+  useIsFocused: () => true,
   router: { push: jest.fn() },
   useFocusEffect: (effect: () => void | (() => void)) => { mockFocusEffect = effect; },
 }));

@@ -41,7 +41,10 @@ jest.mock('@/features/connection/connection-status', () => ({ ConnectionStatus: 
 jest.mock('@/hooks/use-keyboard-overlap', () => ({
   useKeyboardOverlap: () => ({ ref: null, inset: 0, measure: jest.fn() }),
 }));
-jest.mock('@/hooks/use-reduce-motion', () => ({ useReduceMotion: () => mockShouldReduceMotion }));
+jest.mock('@/hooks/use-reduce-motion', () => ({
+  useReduceMotion: () => mockShouldReduceMotion, subscribeReduceMotion: () => () => undefined,
+  useReducedMotion: () => true,
+}));
 jest.mock('./use-herdr', () => ({
   useHerdr: () => ({
     devices: { 'device-a': { runtime: { agents: [mockAgent] }, connection: 'connected' } },
@@ -59,6 +62,7 @@ jest.mock('./conversation-refresh', () => ({
 }));
 jest.mock('@/services/herdr-repository', () => ({
   herdrRepository: {
+    hydrate: jest.fn(async () => undefined),
     deviceIdForAgent: () => 'device-a',
     restoreConversation: jest.fn(async () => undefined),
     loadDraft: jest.fn(async () => ''),

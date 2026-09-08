@@ -6,6 +6,7 @@ import { AppIcon } from '@/components/ui/app-icon';
 import { FinishDot } from '@/components/ui/finish-dot';
 import { GlassSurface } from '@/components/ui/glass-surface';
 import { MarqueeText } from '@/components/ui/marquee-text';
+import { SkeletonBlock, SkeletonGroup, SkeletonLine } from '@/components/ui/skeleton';
 import { Fonts, Spacing } from '@/constants/theme';
 import { unreadCompletionCount } from '@/domain/agent-completion';
 import {
@@ -20,8 +21,8 @@ import type { AgentWorkspaceSection } from './agent-ordering';
 export { compareAgents, type AgentWorkspaceSection } from './agent-ordering';
 
 export function AgentWorkspaceList({
-  sections,
-}: Readonly<{ sections: AgentWorkspaceSection[] }>) {
+  sections, active = true,
+}: Readonly<{ sections: AgentWorkspaceSection[]; active?: boolean }>) {
   return (
     <>
       {sections.map((section) => (
@@ -29,16 +30,51 @@ export function AgentWorkspaceList({
           key={section.space.id}
           space={section.space}
           agents={section.agents}
+          active={active}
         />
       ))}
     </>
   );
 }
 
+export function AgentWorkspaceSkeleton() {
+  const theme = useTheme();
+  return (
+    <SkeletonGroup label="Loading agents" style={styles.workspace}>
+      <View style={styles.workspaceHeader}>
+        <View style={styles.workspaceTitle}>
+          <SkeletonLine width="42%" />
+          <SkeletonLine width="68%" />
+        </View>
+      </View>
+      <GlassSurface strength="strong" style={styles.workspaceCard}>
+        {[0, 1, 2].map((row) => (
+          <View key={row}>
+            <View style={styles.agent}>
+              <SkeletonBlock width={styles.providerIcon.width} height={styles.providerIcon.height}
+                radius={styles.providerIcon.borderRadius} />
+              <View style={styles.agentCopy}>
+                <View style={styles.agentTitle}>
+                  <View style={styles.providerName}><SkeletonLine width={row === 1 ? '60%' : '80%'} /></View>
+                  <SkeletonBlock width={7} height={7} radius={3.5} />
+                </View>
+                <SkeletonLine width="92%" />
+              </View>
+              <SkeletonBlock width={18} height={12} />
+            </View>
+            {row < 2 ? <View style={[styles.divider, { backgroundColor: theme.border }]} /> : null}
+          </View>
+        ))}
+      </GlassSurface>
+    </SkeletonGroup>
+  );
+}
+
 function WorkspaceGroup({
   space,
   agents,
-}: Readonly<AgentWorkspaceSection>) {
+  active,
+}: Readonly<AgentWorkspaceSection & { active: boolean }>) {
   const theme = useTheme();
   const unread = unreadCompletionCount(agents);
   return (
@@ -69,7 +105,7 @@ function WorkspaceGroup({
       <GlassSurface strength="strong" style={styles.workspaceCard}>
         {agents.map((agent, index) => (
           <View key={agent.id}>
-            <AgentRow agent={agent} />
+            <AgentRow agent={agent} active={active} />
             {index < agents.length - 1 ? (
               <View style={[styles.divider, { backgroundColor: theme.border }]} />
             ) : null}
@@ -80,7 +116,7 @@ function WorkspaceGroup({
   );
 }
 
-function AgentRow({ agent }: Readonly<{ agent: RemoteAgent }>) {
+function AgentRow({ agent, active }: Readonly<{ agent: RemoteAgent; active: boolean }>) {
   const theme = useTheme();
   return (
     <Pressable
@@ -102,6 +138,7 @@ function AgentRow({ agent }: Readonly<{ agent: RemoteAgent }>) {
       <View style={styles.agentCopy}>
         <View style={styles.agentTitle}>
           <MarqueeText
+            active={active}
             type="caption"
             style={styles.sessionTitle}
             containerStyle={styles.providerName}>

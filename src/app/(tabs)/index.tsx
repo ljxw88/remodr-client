@@ -1,7 +1,8 @@
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useIsFocused } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Alert,
   Keyboard,
   Pressable,
@@ -15,17 +16,18 @@ import { AppIcon } from '@/components/ui/app-icon';
 import { EmptyState } from '@/components/ui/empty-state';
 import { FinishDot } from '@/components/ui/finish-dot';
 import { Screen } from '@/components/ui/screen';
+import { AnimatedDisclosure } from '@/components/ui/animated-disclosure';
 import { ScrollEdgeFrame } from '@/components/ui/scroll-edge-frame';
 import { ThemedText } from '@/components/themed-text';
 import { ChipGeometry, Radius, Spacing } from '@/constants/theme';
 import { unreadCompletionCount, unreadCompletionsBySpace } from '@/domain/agent-completion';
-import { type AgentWorkspace } from '@/domain/herdr';
+import { EMPTY_RUNTIME, isRuntimeLoading, type AgentWorkspace } from '@/domain/herdr';
 import { connectAgentRuntime } from '@/features/agents/connect-runtime';
 import { HeaderRoundButton } from '@/features/agents/header-round-button';
 import { LiquidGlassButton } from '@/features/agents/liquid-glass-button';
 import { glassRim } from '@/components/ui/glass-surface';
 import { LiquidGlassRim } from '@/components/ui/liquid-glass-rim';
-import { AgentWorkspaceList } from '@/features/agents/agent-workspace-list';
+import { AgentWorkspaceList, AgentWorkspaceSkeleton } from '@/features/agents/agent-workspace-list';
 import { agentSections } from '@/features/agents/agent-ordering';
 import { startConversationRefresh } from '@/features/agents/conversation-refresh';
 import { beginNewAgentFlow, beginNewSpaceFlow } from '@/features/agents/creation-flow';
@@ -41,6 +43,7 @@ import { useForeground } from '@/features/connection/use-connection';
 import { useHosts } from '@/features/hosts/use-hosts';
 import { useAppSettings } from '@/hooks/use-app-settings';
 import { useTheme } from '@/hooks/use-theme';
+import { useContentReveal } from '@/hooks/use-content-reveal';
 import { herdrRepository } from '@/services/herdr-repository';
 import { HerdrBridgeRequestError } from '@/services/herdr-bridge-transport';
 import { toUserMessage } from '@/utils/user-error';
@@ -57,7 +60,7 @@ const ExpandFiltersIcon = {
 } as const;
 
 export default function AgentsScreen() {
-  const theme = useTheme();
+  const focused = useIsFocused();
   const { width } = useWindowDimensions();
   const state = useHerdr();
   const { hosts, loading: hostsLoading } = useHosts();
@@ -82,6 +85,9 @@ export default function AgentsScreen() {
     () => agentSections(state.runtime.agents, spaces, activeSpaceId),
     [activeSpaceId, spaces, state.runtime.agents],
   );
+  // A received empty snapshot is still a result, not another initial load.
+  const initialLoading = state.runtime === EMPTY_RUNTIME && (hostsLoading || isRuntimeLoading(state.connection));
+  const revealStyle = useContentReveal(initialLoading, selectedDeviceId ?? '');
   // "Current device" per the completion contract: this device's own agents,
   // independent of which space is selected, so switching spaces never hides
   // (or looks like it clears) another space's unread finish.
@@ -244,7 +250,8 @@ export default function AgentsScreen() {
         </View>
       </View>
 
-      {hosts.length > 0 && agentFiltersExpanded ? (
+      {hosts.length > 0 ? (
+        <AnimatedDisclosure open={agentFiltersExpanded} active={focused && foreground} testID="agent-filters-disclosure">
         <View style={styles.filters}>
           <FilterHeader label="Devices" value={selectedHost?.name} />
           <ScrollView
@@ -302,16 +309,19 @@ export default function AgentsScreen() {
             </>
           ) : null}
         </View>
+        </AnimatedDisclosure>
       ) : null}
 
-      {hostsLoading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={theme.accent} />
-          <ThemedText type="small" themeColor="textMuted">
-            Loading agents
-          </ThemedText>
-        </View>
-      ) : !selectedHost ? (
+      {initialLoading ? (
+        <ScrollEdgeFrame>
+          {(edge) => (
+            <Animated.ScrollView {...edge} style={revealStyle} showsVerticalScrollIndicator={false}
+              contentContainerStyle={[styles.list, { paddingBottom: dockContentInset }]}>
+              <AgentWorkspaceSkeleton />
+            </Animated.ScrollView>
+          )}
+        </ScrollEdgeFrame>
+      ) : !selectedHost && !hostsLoading ? (
         <EmptyState message={hosts.length === 0 ? 'No devices' : 'Select a device'} />
       ) : spaces.length === 0 ? (
         <EmptyState message={connected ? 'No spaces' : 'Waiting for this device’s spaces'} />
@@ -320,12 +330,13 @@ export default function AgentsScreen() {
       ) : (
         <ScrollEdgeFrame onScroll={onDockScroll}>
           {(edge) => (
-            <ScrollView
+            <Animated.ScrollView
               {...edge}
+              style={revealStyle}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={[styles.list, { paddingBottom: dockContentInset }]}>
-              <AgentWorkspaceList sections={sections} />
-            </ScrollView>
+              <AgentWorkspaceList sections={sections} active={focused && foreground} />
+            </Animated.ScrollView>
           )}
         </ScrollEdgeFrame>
       )}
@@ -451,7 +462,7 @@ function FilterChip({
       ]}>
       {/* Selection quotes the New agent button: the same iridescent rim and
           frosted body, drawn over the accent tint. */}
-      {selected ? <LiquidGlassRim active={!disabled} /> : null}
+      {selected ? <LiquidGlassRim /> : null}
       <View style={styles.filterChipContent}>
         {statusColor ? (
           <View style={[styles.deviceDot, { backgroundColor: statusColor }]} />

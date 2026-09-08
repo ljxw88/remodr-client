@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
-import { BackHandler, FlatList, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Animated, BackHandler, FlatList, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -8,6 +8,7 @@ import { GlassSurface } from '@/components/ui/glass-surface';
 import { ChipGeometry, ControlHeight, Radius, Spacing } from '@/constants/theme';
 import type { ConversationItem } from '@/domain/herdr';
 import { useTheme } from '@/hooks/use-theme';
+import { useDisclosureMotion } from '@/hooks/use-disclosure-motion';
 import { PlanStep, ToolActivityRow } from './conversation-activity-rows';
 import { ActivityLayout } from './conversation-activity-layout';
 import { conversationActivity, planProgress, type PlanItem, type ToolActivityItem } from './conversation-display';
@@ -54,9 +55,19 @@ function ActivitySection({ tools, todos, active, panelHeight, onHeightChange }: 
 }) {
   const theme = useTheme();
   const [selected, setSelected] = useState<Section | null>(null);
-  const visible = active && (selected === 'plan' ? todos.length > 0 : selected === 'tools' && tools.length > 0)
+  const [expanded, setExpanded] = useState(false);
+  const [headingHeight, setHeadingHeight] = useState(ActivityLayout.headingMinHeight);
+  const available = active && (selected === 'plan' ? todos.length > 0 : selected === 'tools' && tools.length > 0)
     ? selected : null;
-  if (selected && !visible) setSelected(null);
+  if (selected && !available) {
+    setSelected(null);
+    setExpanded(false);
+  }
+  const open = expanded && available != null;
+  const motion = useDisclosureMotion(open, active && available != null);
+  const visible = motion.present ? available : null;
+  const headerExtent = headingHeight + ActivityLayout.borderWidth * 2;
+  const bodyHeight = Math.max(0, panelHeight - headerExtent - Spacing.one);
   const { done, total } = planProgress(todos);
   const failed = tools.filter((tool) => tool.state === 'failed').length;
   const running = tools.some((tool) => tool.state === 'running' || tool.state === 'pending');
@@ -72,23 +83,26 @@ function ActivitySection({ tools, todos, active, panelHeight, onHeightChange }: 
   }, [onHeightChange, panelHeight, visible]);
 
   useEffect(() => {
-    if (!visible) return;
+    if (!open) return;
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      setSelected(null);
+      setExpanded(false);
       return true;
     });
     return () => subscription.remove();
-  }, [visible]);
+  }, [open]);
 
-  function labelRow(section: Section, label: string, detail: string, expanded = false) {
-    const chevron = (
+  function labelRow(section: Section, label: string, detail: string, panel = false) {
+    const chevronIcon = (
       <AppIcon
-        name={expanded
-          ? { ios: 'chevron.up', android: 'expand_less', web: 'expand_less' }
-          : { ios: 'chevron.down', android: 'expand_more', web: 'expand_more' }}
-        size={ActivityLayout.iconSize} tintColor={theme.textMuted} fallback={expanded ? '⌃' : '⌄'}
+        name={{ ios: 'chevron.down', android: 'expand_more', web: 'expand_more' }}
+        size={ActivityLayout.iconSize} tintColor={theme.textMuted} fallback="⌄"
       />
     );
+    const chevron = panel ? (
+      <Animated.View testID="activity-disclosure-chevron" style={[styles.chevron, { transform: [{
+        rotate: motion.progress.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '180deg'] }),
+      }] }]}>{chevronIcon}</Animated.View>
+    ) : chevronIcon;
     const icon = (
       <AppIcon
         name={section === 'plan'
@@ -102,7 +116,7 @@ function ActivitySection({ tools, todos, active, panelHeight, onHeightChange }: 
     const failure = section === 'tools' && failed > 0
       ? <View testID="activity-failure-dot" style={[styles.dot, { backgroundColor: theme.danger }]} />
       : null;
-    if (expanded) {
+    if (panel) {
       return (
         <View testID={`activity-${section}-heading`} style={styles.labelRow}
           accessibilityElementsHidden
@@ -139,7 +153,7 @@ function ActivitySection({ tools, todos, active, panelHeight, onHeightChange }: 
           `${tools.length} tool calls${failed ? `, ${failed} failed` : ''}. Opens at latest activity.`}
         accessibilityState={{ expanded: false, disabled: !active }}
         disabled={!active}
-        onPress={() => setSelected(section)}
+        onPress={() => { setSelected(section); setExpanded(true); }}
         style={({ pressed }) => [styles.chipTarget, { opacity: pressed ? 0.72 : active ? 1 : 0.5 }]}>
         <View testID={`activity-${section}-shadow`} style={styles.chipShadow}>
           <GlassSurface tone="chrome" style={styles.chip}>
@@ -151,31 +165,41 @@ function ActivitySection({ tools, todos, active, panelHeight, onHeightChange }: 
   }
 
   return (
-    <View testID="activity-section" pointerEvents="box-none" style={styles.section}
-      onLayout={(event) => onHeightChange?.(event.nativeEvent.layout.height + Spacing.one)}>
+    <View testID="activity-section" pointerEvents="box-none"
+      style={[styles.section, visible && { height: panelHeight + SURFACE_TOP_INSET }]}
+      onLayout={(event) => {
+        if (!visible) onHeightChange?.(event.nativeEvent.layout.height + Spacing.one);
+      }}>
       {visible ? (
-        <View testID="activity-panel-shadow" style={styles.panelShadow}>
+        <Animated.View testID="activity-panel-shadow" style={[styles.panelShadow, {
+          height: motion.progress.interpolate({
+            inputRange: [0, 1], outputRange: [Math.min(headerExtent, panelHeight), panelHeight], extrapolate: 'clamp',
+          }),
+        }]}>
         <GlassSurface
           testID="activity-panel"
           tone="chrome"
           strength="strong"
-          style={[styles.panel, { height: panelHeight }]}
+          style={styles.panel}
           accessible={false}
-          onAccessibilityEscape={() => setSelected(null)}>
-          <View testID="activity-heading">
+          onAccessibilityEscape={() => setExpanded(false)}>
+          <View testID="activity-heading" onLayout={(event) => setHeadingHeight(event.nativeEvent.layout.height)}>
             <Pressable
               testID="activity-collapse"
               accessibilityRole="button"
-              accessibilityLabel={`Collapse ${visible === 'plan' ? 'plan' : 'tool use'}`}
+              accessibilityLabel={open ? `Collapse ${visible === 'plan' ? 'plan' : 'tool use'}` : `Show ${visible}`}
               accessibilityHint={visible === 'plan' ? `${done} of ${total} steps complete` : `${tools.length} tool calls`}
-              accessibilityState={{ expanded: true }}
-              onPress={() => setSelected(null)}
+              accessibilityState={{ expanded: open }}
+              onPress={() => setExpanded((value) => !value)}
               style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}>
               {labelRow(visible, visible === 'plan' ? 'Plan' : 'Tools',
                 visible === 'plan' ? `${done}/${total}` : String(tools.length), true)}
             </Pressable>
           </View>
-          <View testID="activity-viewport" style={styles.viewport}>
+          <View testID="activity-viewport" style={styles.viewport}
+            pointerEvents={open ? 'auto' : 'none'} accessibilityElementsHidden={!open}
+            importantForAccessibility={open ? 'auto' : 'no-hide-descendants'}>
+          <View testID="activity-fixed-viewport" style={[styles.fixedViewport, { height: bodyHeight }]}>
           <FlatList<Row>
             key={visible}
             testID="activity-content"
@@ -188,6 +212,7 @@ function ActivitySection({ tools, todos, active, panelHeight, onHeightChange }: 
             maintainVisibleContentPosition={BOTTOM_ANCHOR}
             initialNumToRender={12}
             windowSize={5}
+            removeClippedSubviews={false}
             nestedScrollEnabled
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
@@ -195,8 +220,12 @@ function ActivitySection({ tools, todos, active, panelHeight, onHeightChange }: 
             contentContainerStyle={[styles.content, visible === 'tools' && styles.toolSpacing]}
           />
           </View>
+          </View>
+          <Animated.View pointerEvents="none" testID="activity-bottom-space" style={{
+            height: motion.progress.interpolate({ inputRange: [0, 1], outputRange: [0, Spacing.one] }),
+          }} />
         </GlassSurface>
-        </View>
+        </Animated.View>
       ) : (
         <ScrollView
           testID="activity-strip"
@@ -239,14 +268,17 @@ const styles = StyleSheet.create({
     marginTop: SURFACE_TOP_INSET,
     borderRadius: Radius.control,
     boxShadow: '0 5px 16px rgba(0, 0, 0, 0.18)',
+    overflow: 'hidden',
   },
   dot: { width: 5, height: 5, borderRadius: 3 },
-  panel: { borderRadius: Radius.control, borderWidth: ActivityLayout.borderWidth, padding: 0 },
+  panel: { flex: 1, borderRadius: Radius.control, borderWidth: ActivityLayout.borderWidth, padding: 0 },
+  chevron: { width: ActivityLayout.iconSize, height: ActivityLayout.iconSize, alignItems: 'center', justifyContent: 'center' },
   headingSide: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: ChipGeometry.gap },
   headingTrailing: { justifyContent: 'flex-end' },
   centeredTitle: { flexShrink: 1, marginHorizontal: ChipGeometry.gap, textAlign: 'center' },
   detail: { flexShrink: 1, fontVariant: ['tabular-nums'] },
-  viewport: { flex: 1, marginBottom: Spacing.one, overflow: 'hidden' },
+  viewport: { flex: 1, overflow: 'hidden' },
+  fixedViewport: { position: 'absolute', bottom: 0, left: 0, right: 0 },
   list: { flex: 1 },
   content: { paddingHorizontal: ChipGeometry.paddingHorizontal, paddingVertical: 0, gap: Spacing.half },
   toolSpacing: { gap: Spacing.one },

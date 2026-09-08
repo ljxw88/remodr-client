@@ -6,10 +6,14 @@ import { FinishDot } from '@/components/ui/finish-dot';
 import { EMPTY_RUNTIME, remoteAgentSchema, type RemoteAgent } from '@/domain/herdr';
 import type { HerdrRepositoryState } from '@/services/herdr-repository';
 import { selectWorkspace } from './workspace-selection';
+import { AgentWorkspaceList, AgentWorkspaceSkeleton } from './agent-workspace-list';
+import { EmptyState } from '@/components/ui/empty-state';
 
 let mockState: HerdrRepositoryState;
 let mockAgentFiltersExpanded = true;
 let mockSelectedWorkspaceId: string | null = null;
+let mockHostsLoading = false;
+let mockHosts = [{ id: 'server-a', name: 'Alpha' }, { id: 'server-b', name: 'Beta' }];
 
 function agent(id: string, workspaceId: string, unread: boolean): RemoteAgent {
   return remoteAgentSchema.parse({
@@ -22,13 +26,14 @@ function agent(id: string, workspaceId: string, unread: boolean): RemoteAgent {
 jest.mock('expo-router', () => ({
   router: { push: jest.fn() },
   useFocusEffect: () => undefined,
+  useIsFocused: () => true,
 }));
 jest.mock('@/components/ui/screen', () => ({ Screen: ({ children }: { children: import('react').ReactNode }) => children }));
 jest.mock('@/components/ui/app-icon', () => ({ AppIcon: () => null }));
 jest.mock('@/components/ui/liquid-glass-rim', () => ({ LiquidGlassRim: () => null }));
 jest.mock('./liquid-glass-button', () => ({ LiquidGlassButton: () => null }));
 jest.mock('./header-round-button', () => ({ HeaderRoundButton: () => null }));
-jest.mock('./agent-workspace-list', () => ({ AgentWorkspaceList: () => null }));
+jest.mock('./agent-workspace-list', () => ({ AgentWorkspaceList: () => null, AgentWorkspaceSkeleton: () => null }));
 jest.mock('./use-herdr', () => ({ useHerdr: () => mockState }));
 jest.mock('./workspace-selection', () => ({
   useWorkspaceSelection: () => mockSelectedWorkspaceId,
@@ -38,8 +43,8 @@ jest.mock('./connect-runtime', () => ({ connectAgentRuntime: jest.fn() }));
 jest.mock('./creation-flow', () => ({ beginNewAgentFlow: jest.fn(), beginNewSpaceFlow: jest.fn(() => 'space-flow') }));
 jest.mock('@/features/hosts/use-hosts', () => ({
   useHosts: () => ({
-    hosts: [{ id: 'server-a', name: 'Alpha' }, { id: 'server-b', name: 'Beta' }],
-    loading: false,
+    hosts: mockHosts,
+    loading: mockHostsLoading,
   }),
 }));
 jest.mock('@/features/connection/use-host-session', () => ({ useHostSession: () => null }));
@@ -64,6 +69,8 @@ describe('unread finish aggregation on the agents screen', () => {
     jest.clearAllMocks();
     mockAgentFiltersExpanded = true;
     mockSelectedWorkspaceId = null;
+    mockHostsLoading = false;
+    mockHosts = [{ id: 'server-a', name: 'Alpha' }, { id: 'server-b', name: 'Beta' }];
     const deviceARuntime = {
       ...EMPTY_RUNTIME,
       deviceId: 'server-a',
@@ -101,6 +108,44 @@ describe('unread finish aggregation on the agents screen', () => {
   function dotWithLabel(label: string) {
     return renderer.root.findAllByType(FinishDot).find((node) => node.props.label === label);
   }
+
+  it.each(['starting_bridge', 'synchronizing', 'reconnecting'] as const)(
+    'shows matched agent placeholders while an uncached runtime is %s', (connection) => {
+      mockState = { ...mockState, connection, runtime: EMPTY_RUNTIME };
+      render();
+      expect(renderer.root.findAllByType(AgentWorkspaceSkeleton)).toHaveLength(1);
+      expect(renderer.root.findAllByType(EmptyState)).toHaveLength(0);
+    },
+  );
+
+  it('shows initial placeholders immediately, but keeps cached rows while host metadata loads', () => {
+    const cached = mockState.runtime;
+    mockHostsLoading = true;
+    mockHosts = [];
+    mockState = { ...mockState, runtime: EMPTY_RUNTIME };
+    render();
+    expect(renderer.root.findAllByType(AgentWorkspaceSkeleton)).toHaveLength(1);
+    mockState = { ...mockState, runtime: cached };
+    TestRenderer.act(() => renderer.update(createElement(AgentsScreen)));
+    expect(renderer.root.findAllByType(AgentWorkspaceSkeleton)).toHaveLength(0);
+    expect(renderer.root.findAllByType(AgentWorkspaceList)).toHaveLength(1);
+  });
+
+  it.each(['connected', 'disconnected', 'error'] as const)(
+    'does not confuse a terminal %s empty runtime with loading', (connection) => {
+      mockState = { ...mockState, connection, runtime: EMPTY_RUNTIME };
+      render();
+      expect(renderer.root.findAllByType(AgentWorkspaceSkeleton)).toHaveLength(0);
+      expect(renderer.root.findAllByType(EmptyState)).toHaveLength(1);
+    },
+  );
+
+  it('keeps a received empty snapshot distinct from an uncached reconnect', () => {
+    mockState = { ...mockState, connection: 'reconnecting', runtime: { ...EMPTY_RUNTIME } };
+    render();
+    expect(renderer.root.findAllByType(AgentWorkspaceSkeleton)).toHaveLength(0);
+    expect(renderer.root.findAllByType(EmptyState)).toHaveLength(1);
+  });
 
   it('shows an All spaces aggregate covering every unread agent on the current device', () => {
     render();

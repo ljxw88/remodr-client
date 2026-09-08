@@ -1,9 +1,11 @@
 import { createElement } from 'react';
 import TestRenderer from 'react-test-renderer';
+import { Pressable, StyleSheet } from 'react-native';
 
 import { FinishDot } from '@/components/ui/finish-dot';
 import { remoteAgentSchema, type AgentWorkspace } from '@/domain/herdr';
-import { AgentWorkspaceList, type AgentWorkspaceSection } from './agent-workspace-list';
+import { AgentWorkspaceList, AgentWorkspaceSkeleton, type AgentWorkspaceSection } from './agent-workspace-list';
+import { SkeletonBlock, SkeletonGroup } from '@/components/ui/skeleton';
 
 jest.mock('expo-router', () => ({ router: { push: jest.fn() } }));
 jest.mock('@/components/ui/app-icon', () => ({ AppIcon: () => null }));
@@ -31,6 +33,27 @@ describe('AgentWorkspaceList unread finish dots', () => {
       renderer = TestRenderer.create(createElement(AgentWorkspaceList, { sections }));
     });
   }
+
+  it('uses the real workspace card and agent row geometry for initial loading', () => {
+    render([section([agent('a', false)])]);
+    const row = renderer.root.findAll((node) =>
+      node.props.accessibilityRole === 'button' && typeof node.props.style === 'function', { deep: false })[0];
+    const realStyle = StyleSheet.flatten(row.props.style({ pressed: false }));
+    TestRenderer.act(() => renderer.update(createElement(AgentWorkspaceSkeleton)));
+    const placeholders = renderer.root.findAll((node) =>
+      typeof node.props.style !== 'function' && StyleSheet.flatten(node.props.style)?.minHeight === 68,
+    { deep: false });
+    expect(placeholders).toHaveLength(3);
+    for (const placeholder of placeholders) {
+      expect(StyleSheet.flatten(placeholder.props.style)).toMatchObject({
+        minHeight: realStyle.minHeight, gap: realStyle.gap, paddingHorizontal: realStyle.paddingHorizontal,
+      });
+    }
+    expect(renderer.root.findByType(SkeletonGroup).props.label).toBe('Loading agents');
+    expect(renderer.root.findAllByType(SkeletonBlock).filter((node) =>
+      node.props.width === 44 && node.props.height === 44 && node.props.radius === 14)).toHaveLength(3);
+    expect(renderer.root.findAllByType(Pressable)).toHaveLength(0);
+  });
 
   it('draws a row dot only for agents with an unread completion receipt', () => {
     render([section([agent('a', true), agent('b', false)])]);

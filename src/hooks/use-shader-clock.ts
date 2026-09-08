@@ -1,12 +1,13 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { AppState } from 'react-native';
 import {
   useFrameCallback,
   useSharedValue,
   type FrameInfo,
   type SharedValue,
 } from 'react-native-reanimated';
+import { useForeground } from '@/hooks/use-foreground';
+import { useReducedMotion } from '@/hooks/use-reduce-motion';
 
 /** Ignore very long gaps so resuming never jumps the animation forward. */
 const MAX_FRAME_MS = 64;
@@ -34,8 +35,9 @@ export function useShaderClock(enabled = true): SharedValue<number> {
 
   const frame = useFrameCallback(onFrame, false);
 
-  const [focused, setFocused] = useState(true);
-  const [foreground, setForeground] = useState(() => AppState.currentState === 'active');
+  const [focused, setFocused] = useState(false);
+  const foreground = useForeground();
+  const reducedMotion = useReducedMotion();
 
   useFocusEffect(
     useCallback(() => {
@@ -45,15 +47,9 @@ export function useShaderClock(enabled = true): SharedValue<number> {
   );
 
   useEffect(() => {
-    const subscription = AppState.addEventListener('change', (state) => {
-      setForeground(state === 'active');
-    });
-    return () => subscription.remove();
-  }, []);
-
-  useEffect(() => {
-    frame.setActive(enabled && focused && foreground);
-  }, [enabled, focused, foreground, frame]);
+    frame.setActive(enabled && focused && foreground && !reducedMotion);
+    return () => frame.setActive(false);
+  }, [enabled, focused, foreground, frame, reducedMotion]);
 
   return clock;
 }

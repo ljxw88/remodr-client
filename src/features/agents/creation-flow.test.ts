@@ -40,6 +40,7 @@ jest.mock('expo-router', () => {
   const React = jest.requireActual<typeof import('react')>('react');
   return {
     useLocalSearchParams: jest.fn(),
+    useIsFocused: () => true,
     useFocusEffect: (effect: () => void | (() => void)) => React.useEffect(effect, [effect]),
     router: { back: jest.fn(), push: jest.fn(), replace: jest.fn(), dismissTo: jest.fn() },
   };
@@ -524,7 +525,7 @@ describe('creation pages and folder lifetime', () => {
     expect(field('Folder path').props.onSubmitEditing).toBe(control('Open path').props.onPress);
     expect(button('Use this folder').props.disabled).toBe(true);
     expect(control('Parent folder').props.disabled).toBe(true);
-    expect(renderer?.root.findAllByType(FlatList)).toHaveLength(0);
+    expect(renderer?.root.findByType(FlatList).props.data).toEqual([]);
     await TestRenderer.act(async () => field('Folder path').props.onSubmitEditing());
     expect(remoteClient.sftpList).toHaveBeenLastCalledWith('session-a', '/projects/mobile');
     expect(button('Use this folder').props.disabled).toBe(false);

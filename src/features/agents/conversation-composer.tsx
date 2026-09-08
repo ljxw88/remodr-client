@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { AppIcon } from '@/components/ui/app-icon';
 import { GlassSurface } from '@/components/ui/glass-surface';
+import { SkeletonBlock, SkeletonGroup, SkeletonLine } from '@/components/ui/skeleton';
 import { Colors, Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -27,6 +28,29 @@ type Props = {
 
 const MIN_INPUT_HEIGHT = 38;
 const MAX_INPUT_HEIGHT = 120;
+
+export function ConversationComposerSkeleton() {
+  return (
+    <SkeletonGroup label="Loading message controls" style={[styles.composer, { position: 'relative' }]}>
+      <View style={styles.cardWrapper}>
+        <GlassSurface strength="strong" style={styles.cardSurface}>
+          <View style={styles.cardContent}>
+            <View style={styles.cardTop}>
+              <SkeletonBlock width={styles.atButton.width} height={styles.atButton.height} radius={styles.atButton.borderRadius} />
+            </View>
+            <View style={{ minHeight: MIN_INPUT_HEIGHT, justifyContent: 'center' }}>
+              <SkeletonLine width="62%" lineHeight={20} />
+            </View>
+            <View style={styles.cardBottom}>
+              <View style={styles.pill}><SkeletonLine width={100} lineHeight={20} /></View>
+              <SkeletonBlock width={styles.send.width} height={styles.send.height} radius={styles.send.borderRadius} />
+            </View>
+          </View>
+        </GlassSurface>
+      </View>
+    </SkeletonGroup>
+  );
+}
 
 export function ConversationComposer({
   value,

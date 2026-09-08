@@ -11,9 +11,11 @@ import {
 } from 'react-native';
 
 import { Screen } from '@/components/ui/screen';
+import { SkeletonGroup, SkeletonLine } from '@/components/ui/skeleton';
 import { ThemedText } from '@/components/themed-text';
 import { Colors, Fonts, Radius, Spacing } from '@/constants/theme';
 import {
+  isRuntimeLoading,
   providerLabel,
   statusLabel,
   type RemoteAgent,
@@ -23,8 +25,8 @@ import { supportsRetuning } from '@/domain/agent-capabilities';
 import { agentSession, commandSession, sameAgentSession } from '@/domain/agent-session';
 import { beginAgentSettingsFlow, beginRenameAgentFlow } from '@/features/agents/agent-edit-flow';
 import { ActionMenu } from '@/components/ui/action-menu';
-import { ConversationComposer } from '@/features/agents/conversation-composer';
-import { ConversationMessageList } from '@/features/agents/conversation-message-list';
+import { ConversationComposer, ConversationComposerSkeleton } from '@/features/agents/conversation-composer';
+import { ConversationMessageList, ConversationSkeleton } from '@/features/agents/conversation-message-list';
 import { ConversationActivityPanel } from '@/features/agents/conversation-activity-panel';
 import { HumanRequestBar } from '@/features/agents/human-request-bar';
 import { useAgentConversation, useHerdr } from '@/features/agents/use-herdr';
@@ -67,7 +69,7 @@ export default function AgentConversationScreen() {
   const commands = usePendingCommands();
   const ownerConnected = ownerConnection === 'connected' &&
     (!ownerSnapshot || ownerSnapshot.phase === 'connected');
-  const { error: conversationError, retry: retryConversation } = useConversationController({
+  const { error: conversationError, restoring, retry: retryConversation } = useConversationController({
     conversationId: id,
     agent,
     hasOpenRequest,
@@ -189,10 +191,32 @@ export default function AgentConversationScreen() {
   }, [displayItems, composerHeight, keyboardHeight, scheduleScroll]);
 
   if (!agent) {
+    const loading = !conversationError && (restoring ||
+      isRuntimeLoading(runtime.connection) || Object.values(runtime.devices).some((device) => isRuntimeLoading(device.connection)));
     return (
-      <Screen>
+      <Screen style={styles.screen}>
         <Stack.Screen options={{ title: 'Agent' }} />
-        <ThemedText>This agent is no longer available.</ThemedText>
+        {loading ? (
+          <>
+            <SkeletonGroup label="Loading agent details" style={styles.context}>
+              <View style={styles.contextCopy}>
+                <View style={styles.flex}><SkeletonLine width="72%" /></View>
+                <SkeletonLine width={52} />
+              </View>
+            </SkeletonGroup>
+            <View style={styles.pendingConversation}><ConversationSkeleton /></View>
+            <ConversationComposerSkeleton />
+          </>
+        ) : (
+          <View style={styles.unavailable}>
+            <ThemedText>{conversationError ?? 'This agent is no longer available.'}</ThemedText>
+            {conversationError ? (
+              <Pressable accessibilityRole="button" accessibilityLabel="Retry loading conversation" onPress={retryConversation}>
+                <ThemedText themeColor="accent">Try again</ThemedText>
+              </Pressable>
+            ) : null}
+          </View>
+        )}
       </Screen>
     );
   }
@@ -300,6 +324,7 @@ export default function AgentConversationScreen() {
             connected={ownerConnected}
             error={conversationError}
             hasConversation={conversation != null}
+            restoring={restoring}
             bottomInset={composerHeight + keyboardHeight}
             topInset={hasActivity ? activityHeight : 0}
             onRetry={retryConversation}
@@ -413,6 +438,11 @@ function AgentHeader({ agent, connected }: { agent: RemoteAgent; connected: bool
 }
 
 const styles = StyleSheet.create({
+  pendingConversation: {
+    flex: 1, justifyContent: 'flex-end', overflow: 'hidden',
+    paddingHorizontal: Spacing.two, paddingVertical: Spacing.two,
+  },
+  unavailable: { padding: Spacing.two, gap: Spacing.one },
   screen: {
     paddingHorizontal: 0,
     paddingTop: 0,

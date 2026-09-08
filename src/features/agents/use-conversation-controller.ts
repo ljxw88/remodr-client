@@ -6,6 +6,7 @@ import { toUserMessage } from '@/utils/user-error';
 import { conversationRefreshInterval, startConversationRefresh } from './conversation-refresh';
 
 export interface ConversationReader {
+  hydrate(): Promise<void>;
   restoreConversation(agentId: string): Promise<void>;
   loadConversation(agentId: string): Promise<AgentConversation>;
   getCompletion(agentId: string): AgentCompletion | undefined;
@@ -45,20 +46,29 @@ export function useConversationController({
     source: 'restore' | 'read' | 'completion';
   } | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const restoreKey = JSON.stringify([scope, reloadToken]);
+  const [restoredKey, setRestoredKey] = useState<string | null>(null);
   const inFlight = useRef<Promise<void> | null>(null);
-  const retry = useCallback(() => setReloadToken((value) => value + 1), []);
+  const retry = useCallback(() => setReloadToken((value) => value + 1), [setReloadToken]);
 
   useEffect(() => {
     if (!conversationId) return;
     let cancelled = false;
-    void repository.restoreConversation(conversationId).then(() => {
-      if (!cancelled) setFailure((current) =>
-        current?.scope === scope && current.source === 'restore' ? null : current);
+    // Metadata and cached messages restore together, without gating online reads.
+    void Promise.all([repository.hydrate(), repository.restoreConversation(conversationId)]).then(() => {
+      if (!cancelled) {
+        setRestoredKey(restoreKey);
+        setFailure((current) =>
+          current?.scope === scope && current.source === 'restore' ? null : current);
+      }
     }, (error: unknown) => {
-      if (!cancelled) setFailure({ scope, message: toUserMessage(error), source: 'restore' });
+      if (!cancelled) {
+        setRestoredKey(restoreKey);
+        setFailure({ scope, message: toUserMessage(error), source: 'restore' });
+      }
     });
     return () => { cancelled = true; };
-  }, [conversationId, repository, scope, reloadToken]);
+  }, [conversationId, repository, scope, restoreKey]);
 
   useEffect(() => {
     if (!agentId || !connected || !focused || !foreground) return;
@@ -103,5 +113,9 @@ export function useConversationController({
     reloadToken, repository, scope, status, streaming,
   ]);
 
-  return { error: failure?.scope === scope ? failure.message : null, retry };
+  return {
+    error: failure?.scope === scope ? failure.message : null,
+    restoring: Boolean(conversationId) && restoredKey !== restoreKey,
+    retry,
+  };
 }

@@ -13,7 +13,6 @@ import {
 } from 'react';
 import {
   Animated,
-  Easing,
   StyleSheet,
   useWindowDimensions,
   type NativeScrollEvent,
@@ -23,11 +22,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppIcon, type AppIconName } from '@/components/ui/app-icon';
 import { GlassSurface } from '@/components/ui/glass-surface';
+import { Motion } from '@/constants/motion';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useScreenEntrance } from '@/features/navigation/screen-entrance';
 import type { StackNavigation } from '@/features/navigation/stack-screen-options';
-import { useReduceMotion } from '@/hooks/use-reduce-motion';
+import { useReduceMotion, useReducedMotion } from '@/hooks/use-reduce-motion';
 import { useTheme } from '@/hooks/use-theme';
+import { useForeground } from '@/hooks/use-foreground';
 
 type DockMotion = {
   progress: Animated.Value;
@@ -44,30 +45,49 @@ export function DockMotionProvider({ children }: PropsWithChildren) {
   const pathname = usePathname();
   const [progress] = useState(() => new Animated.Value(0));
   const shouldReduceMotion = useReduceMotion();
+  const reducedMotion = useReducedMotion();
+  const foreground = useForeground();
+  const visible = foreground && TabRoutes.includes(pathname);
+  const visibleRef = useRef(visible);
   const collapsed = useRef(false);
   const lastOffset = useRef(0);
   const direction = useRef<1 | -1 | 0>(0);
   const directionStart = useRef(0);
 
+  // Persistent geometry only — one easing, one duration, for either direction.
+  // Nothing overshoots past the collapsed or expanded size it is heading for.
   const setCollapsed = useCallback(
     (next: boolean) => {
       if (collapsed.current === next) {
         return;
       }
       collapsed.current = next;
-      if (shouldReduceMotion()) {
+      progress.stopAnimation();
+      if (shouldReduceMotion() || !visibleRef.current) {
         progress.setValue(next ? 1 : 0);
         return;
       }
       Animated.timing(progress, {
         toValue: next ? 1 : 0,
-        duration: next ? 180 : 220,
-        easing: next ? Easing.out(Easing.cubic) : Easing.out(Easing.back(1.05)),
+        duration: Motion.duration.disclosure,
+        easing: Motion.easing.standard,
         useNativeDriver: false,
+        isInteraction: false,
       }).start();
     },
     [progress, shouldReduceMotion],
   );
+
+  // If reduced motion switches on mid-flight, the dock must not keep sliding:
+  // stop wherever it is and snap straight to the resting size it belongs to.
+  useLayoutEffect(() => {
+    visibleRef.current = visible;
+    if (!reducedMotion && visible) return;
+    progress.stopAnimation();
+    progress.setValue(collapsed.current ? 1 : 0);
+  }, [progress, reducedMotion, visible]);
+
+  useEffect(() => () => progress.stopAnimation(), [progress]);
 
   const expand = useCallback(() => {
     lastOffset.current = 0;
@@ -244,6 +264,7 @@ export function FloatingDock() {
 
   return (
     <Animated.View
+      testID="floating-dock"
       pointerEvents="box-none"
       style={[
         styles.position,
@@ -308,18 +329,45 @@ function DockTab({
 }: DockTabProps) {
   const theme = useTheme();
   const [focusProgress] = useState(() => new Animated.Value(active ? 1 : 0));
+  const reducedMotionChanged = useReducedMotion();
+  const foreground = useForeground();
+  const pathname = usePathname();
+  const visible = foreground && TabRoutes.includes(pathname);
+  const previousActive = useRef(active);
+
+  // Selection is a fade of the indicator alone — nothing here scales, so there
+  // is nothing for a nested icon transform to fight for the same emphasis.
   useEffect(() => {
-    if (reduceMotion()) {
+    const changed = previousActive.current !== active;
+    previousActive.current = active;
+    if (reduceMotion() || reducedMotionChanged || !visible || !changed) {
+      focusProgress.stopAnimation();
       focusProgress.setValue(active ? 1 : 0);
       return;
     }
-    Animated.timing(focusProgress, {
+    const animation = Animated.timing(focusProgress, {
       toValue: active ? 1 : 0,
-      duration: active ? 190 : 130,
-      easing: Easing.out(Easing.cubic),
+      duration: Motion.duration.fade,
+      easing: active ? Motion.easing.entrance : Motion.easing.exit,
       useNativeDriver: true,
-    }).start();
-  }, [active, focusProgress, reduceMotion]);
+      isInteraction: false,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [active, focusProgress, reduceMotion, reducedMotionChanged, visible]);
+
+  // A preference flip mid-fade must not leave the indicator part-way visible.
+  useEffect(() => {
+    if (!reducedMotionChanged && visible) return;
+    focusProgress.stopAnimation();
+    focusProgress.setValue(active ? 1 : 0);
+  }, [active, focusProgress, reducedMotionChanged, visible]);
+
+  useEffect(() => () => focusProgress.stopAnimation(), [focusProgress]);
+
+  // Icon scale is reserved for the dock actually collapsing (driven by
+  // `progress`); tab selection no longer scales it, so there is one transform
+  // level here rather than a nested pair fighting for the same emphasis.
   const iconScale = progress.interpolate({
     inputRange: [0, 1],
     outputRange: [1, 0.82],
@@ -331,10 +379,6 @@ function DockTab({
   const labelOpacity = progress.interpolate({
     inputRange: [0, 0.62, 1],
     outputRange: [1, 0, 0],
-  });
-  const focusScale = focusProgress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.9, 1],
   });
   return (
     <TabTrigger
@@ -349,6 +393,7 @@ function DockTab({
         },
       ]}>
       <Animated.View
+        testID={`dock-focus-${name}`}
         pointerEvents="none"
         style={[
           styles.focusIndicator,
@@ -356,19 +401,16 @@ function DockTab({
             backgroundColor: theme.accentSoft,
             borderColor: theme.glassBorder,
             opacity: focusProgress,
-            transform: [{ scale: focusScale }],
           },
         ]}
       />
-      <Animated.View style={{ transform: [{ scale: iconScale }] }}>
-        <Animated.View style={{ transform: [{ scale: focusScale }] }}>
-          <AppIcon
-            name={icon}
-            size={22}
-            tintColor={active ? theme.accent : theme.textMuted}
-            fallback="•"
-          />
-        </Animated.View>
+      <Animated.View testID={`dock-icon-${name}`} style={{ transform: [{ scale: iconScale }] }}>
+        <AppIcon
+          name={icon}
+          size={22}
+          tintColor={active ? theme.accent : theme.textMuted}
+          fallback="•"
+        />
       </Animated.View>
       <Animated.Text
         numberOfLines={1}

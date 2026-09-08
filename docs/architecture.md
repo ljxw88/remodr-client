@@ -46,6 +46,7 @@ Expo Router screens
 | Composer drafts | [`use-persisted-draft.ts`](../src/features/agents/use-persisted-draft.ts) | Restore, input debounce, lifecycle flush, and revision-fenced send clearing |
 | Conversation lifecycle | [`use-conversation-controller.ts`](../src/features/agents/use-conversation-controller.ts) | Offline restore, visible-chat refresh, retry, scoped errors and completion-read acknowledgement |
 | Remote directories | [`use-remote-directory.ts`](../src/features/files/use-remote-directory.ts) | Normalized paths, focus/session-fenced SFTP reads, scoped loading/errors and mutation refresh tokens |
+| File explorer UI | [`remote-file-explorer.tsx`](../src/features/files/remote-file-explorer.tsx) | Shared New Space-style address bar, file/folder rows, scoped retained data, skeleton, errors and optional selection/actions |
 | Native client API | [`native-remote-client.ts`](../src/services/native-remote-client.ts) | Typed access to the local Expo module |
 | Native resources | [`modules/remote-core/android/`](../modules/remote-core/android/) | SSH sessions, channels, SFTP, forwards, secrets, background service |
 | Bridge runtime | [`remodr_bridge/`](../modules/remote-core/bridge/remodr_bridge/) | Herdr orchestration, protocol, durable commands, and shared session handling |
@@ -117,6 +118,25 @@ presentation styles. The list owns message rows, empty states and the inverted
 native list; tools and plan snapshots are filtered out before virtualization, not
 rendered as empty rows. It forwards
 measurements and gestures to the existing `useConversationScroll` controller.
+Initial content loading uses shared static `SkeletonGroup`, `SkeletonLine` and
+`SkeletonBlock` primitives. The conversation skeleton reuses the real message
+row styles and stays inside the same inverted list and blur target; available
+messages replace it immediately without remounting the list. Cache restoration
+has a scope-keyed pending state, including offline restoration and parallel
+runtime metadata hydration, while known
+agent metadata and the composer remain usable. When metadata is still arriving,
+the route shows matching context and composer silhouettes rather than declaring
+the agent unavailable. Agent, server, file and selection-list skeletons reuse
+their real row geometry, and cached results take precedence over refresh loading.
+Retained directory rows are keyed by host, session and path; they never carry
+mutation authority or survive a connection identity change.
+Loaded lists use `useContentReveal`: a 150ms native-driver opacity reveal from
+35% to full visibility, only after an actual initial loading state. Cached
+arrivals, streaming updates and refreshes with retained content do not replay it.
+The hook arms before paint and starts after animated host bindings settle; it
+stops on unmount or reduced-motion changes. Page shells, blur targets, glass
+chrome and list geometry are not animated.
+
 Below the context row, a thin horizontal section contains separate Plan and Tools
 glass chips. The section floats over the transcript as a sibling of its blur
 target: the conversation continues behind and between the controls rather than
@@ -156,6 +176,28 @@ The heading/collapse control
 and native Back restore the chips; route/session changes, blur/background, and
 viewport changes reset the section. The composer remains independently anchored.
 The heading is a normal-flow Pressable, not an absolute touch/tint layer.
+Disclosure motion comes from shared Carbon-derived tokens in `constants/motion.ts`.
+The activity panel animates its clipped height while keeping the heading fixed
+and the inverted list at its final height, anchored to the moving bottom edge.
+Transcript clearance changes only at logical open/close boundaries. Body touch
+and accessibility targets retire immediately on close; the heading can reverse
+an in-flight close, whose stale completion cannot remove a reopened panel.
+Home filters and Advanced options reuse `AnimatedDisclosure` for measured,
+unscaled content and remove their children once fully closed.
+
+Reduced-motion and foreground snapshots are shared application-wide. Shader
+clocks pause reactively; selected chip/header rims are static. Marquee titles
+make one automatic pass only when active and within the nearest scroll viewport,
+and otherwise remain manually readable. `ScrollEdgeFrame` exposes its plain-view
+window bounds without rerendering rows. Status feedback keys use semantic
+connection/delivery phases, not timestamps or streaming content.
+Dock geometry uses non-overshooting standard easing; selection changes only the
+indicator opacity. Menus start their local entry after the native modal's
+`onShow`, and each opening has its own epoch. Exit callbacks and queued item
+presses from an older opening cannot affect a reopened menu. Actions dismiss
+immediately; focus loss or backgrounding retires the modal without waiting for
+animation. Both dock and menu stop hidden or reduced-motion animation.
+
 The inverted list sits in its own clipped viewport directly below the heading,
 so scrolling rows cannot draw or receive touches through the heading. Opening
 at the bottom can leave an older row partially visible at the viewport's top;
@@ -171,12 +213,14 @@ cadence while stopping callbacks on blur, background, disconnection or identity
 change. Errors belong to a route/session, and a late receipt failure cannot
 replace the outcome of a newer refresh.
 
-File management and folder selection share `useRemoteDirectory`, not a common
-page. It depends only on native session lookup and directory listing, filters
-navigation entries, and preserves folder-first/non-hidden-first sorting. The
-picker requests directories only; the file manager also shows files and retains
-its own create/delete controls. Each page still determines whether its owning
-connection is eligible for browsing.
+File management and folder selection share `RemoteFileExplorer` and
+`useRemoteDirectory`. The shared explorer retains the New Space interface:
+`FormPage`, editable path with Up/Go, `SelectionRow` entries, and one stable
+animated list across loading, errors, empty results and real content. The picker
+opts into a Use this folder footer and requests directories only. Server Files
+opts into create-folder controls and long-press delete, with no duplicate path
+bar or card UI. Route adapters own those capabilities and revalidate captured
+requests; the shared view never bypasses native session authority.
 
 ## Detailed guides
 
