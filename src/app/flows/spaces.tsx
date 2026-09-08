@@ -7,6 +7,7 @@ import { FormError, FormPage, FormSection, MissingFlow, SelectionRow } from '@/c
 import { useHerdr } from '@/features/agents/use-herdr';
 import { flowDrafts, useFlowDraft } from '@/features/forms/flow-drafts';
 import { herdrRepository } from '@/services/herdr-repository';
+import { agentDraftForWorkspace } from '@/features/agents/creation-flow';
 
 export default function SpacesPage() {
   const params = useLocalSearchParams<{ flowId?: string | string[] }>();
@@ -27,7 +28,7 @@ export default function SpacesPage() {
       space.id === workspaceId && (!space.deviceId || space.deviceId === current.deviceId),
     )) return;
     selected.current = true;
-    flowDrafts.update(flowId, (value) => value.kind === 'new-agent' ? { ...value, workspaceId } : value);
+    flowDrafts.update(flowId, (value) => value.kind === 'new-agent' ? agentDraftForWorkspace(value, workspaceId) : value);
     router.back();
   }
 

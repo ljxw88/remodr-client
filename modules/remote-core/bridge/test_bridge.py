@@ -9,7 +9,6 @@ from remodr_bridge.session_registry import SessionBinding, SessionKey
 
 from herdr_mobile_bridge import (
     BYPASS_ARGUMENTS,
-    CODEX_STATUS_CONFIG,
     Bridge,
     BridgeError,
     SUBSCRIPTIONS,
@@ -19,26 +18,24 @@ from herdr_mobile_bridge import (
 
 
 class BridgeProtocolTest(unittest.TestCase):
-    def test_shipped_model_catalogues_only_offer_executable_tuning(self):
+    def test_shipped_copilot_catalogue_only_offers_executable_tuning(self):
         catalogues = Path(__file__).resolve().parents[3] / "src" / "domain" / "model-catalogues"
-        for provider in SUPPORTED_PROVIDERS:
-            catalogue = json.loads((catalogues / f"{provider}.json").read_text())
-            self.assertEqual(catalogue["provider"], provider)
-            for model in catalogue["models"]:
-                for effort in [None, *model["efforts"]]:
-                    for context in [None, *(option["tier"] for option in model["contexts"])]:
-                        with self.subTest(provider=provider, model=model["id"], effort=effort, context=context):
-                            arguments = Bridge._tuning_arguments(
-                                provider, {"model": model["id"], "effort": effort, "context": context}
-                            )
-                            self.assertEqual(arguments[:2], ["--model", model["id"]])
+        provider = "copilot"
+        catalogue = json.loads((catalogues / f"{provider}.json").read_text())
+        self.assertEqual(catalogue["provider"], provider)
+        for model in catalogue["models"]:
+            for effort in [None, *model["efforts"]]:
+                for context in [None, *(option["tier"] for option in model["contexts"])]:
+                    with self.subTest(model=model["id"], effort=effort, context=context):
+                        arguments = Bridge._tuning_arguments(
+                            provider, {"model": model["id"], "effort": effort, "context": context}
+                        )
+                        self.assertEqual(arguments[:2], ["--model", model["id"]])
 
     def test_supported_providers_have_herdrm_compatible_bypass_arguments(self):
         self.assertEqual(
             BYPASS_ARGUMENTS,
             {
-                "claude": ["--dangerously-skip-permissions"],
-                "codex": ["--dangerously-bypass-approvals-and-sandbox"],
                 "copilot": ["--allow-all-tools"],
                 "opencode": ["--auto"],
             },
@@ -61,8 +58,7 @@ class BridgeProtocolTest(unittest.TestCase):
             return_value={
                 "manifests": [
                     {"agent": "copilot"},
-                    {"agent": "claude-code"},
-                    {"agent": "codex"},
+                    {"agent": "unsupported-agent"},
                     {"agent": "cursor-agent", "aliases": ["cursor", "agent"]},
                     {"agent": "opencode", "aliases": ["OpenCode"]},
                     {"agent": "agent"},
@@ -90,7 +86,7 @@ class BridgeProtocolTest(unittest.TestCase):
             catalog = bridge._agent_catalog_snapshot()
         self.assertFalse(any(item["available"] for item in catalog))
 
-    def test_retuning_is_advertised_only_for_copilot(self):
+    def test_retuning_is_advertised_for_copilot_and_opencode(self):
         bridge = Bridge()
         capabilities = bridge._capabilities(check_store=False)
         self.assertEqual(capabilities["providers"], list(SUPPORTED_PROVIDERS))
@@ -101,11 +97,11 @@ class BridgeProtocolTest(unittest.TestCase):
             with self.subTest(provider=provider):
                 self.assertEqual(
                     capabilities["providerCapabilities"][provider]["supportsRetuning"],
-                    provider == "copilot",
+                    provider in ("copilot", "opencode"),
                 )
                 self.assertEqual(
                     bridge._agent_capabilities(provider, None)["supportsRetuning"],
-                    provider == "copilot",
+                    provider in ("copilot", "opencode"),
                 )
         self.assertFalse(bridge._agent_capabilities("unknown", None)["supportsRetuning"])
         self.assertFalse(
@@ -298,12 +294,17 @@ class BridgeProtocolTest(unittest.TestCase):
                 }
             ],
             "providers": [
-                {"provider": "codex", "available": True, "aliases": []}
+                {"provider": "opencode", "available": True, "aliases": []}
             ],
         }
-        catalog = [{"provider": "codex", "available": True, "aliases": []}]
+        bridge.runtime["workspaces"][0]["cwd"] = "/work/project"
+        catalog = [{"provider": "opencode", "available": True, "aliases": []}]
 
         with (
+            patch(
+                "remodr_bridge.providers.opencode.create_session",
+                return_value="ses_created",
+            ),
             patch.object(bridge, "_refresh_runtime"),
             patch.object(bridge, "_agent_catalog_snapshot", return_value=catalog),
             patch.object(
@@ -315,7 +316,7 @@ class BridgeProtocolTest(unittest.TestCase):
         ):
             result = bridge._create_agent(
                 {
-                    "provider": "codex",
+                    "provider": "opencode",
                     "workspaceId": "w1",
                     "bypassPermissions": True,
                 }
@@ -326,18 +327,14 @@ class BridgeProtocolTest(unittest.TestCase):
             {
                 "focus": False,
                 "workspace_id": "w1",
-                "label": "codex",
+                "label": "opencode",
             },
         )
         start_agent.assert_called_once_with(
-            "codex",
-            "codex",
+            "opencode",
+            "opencode",
             "p2",
-            [
-                "--dangerously-bypass-approvals-and-sandbox",
-                "-c",
-                'tui.status_line=["session-id","model-with-reasoning","current-dir"]',
-            ],
+            ["--auto", "--session", "ses_created"],
         )
         self.assertEqual(result["agentId"], agent_id)
 
@@ -455,7 +452,7 @@ class BridgeProtocolTest(unittest.TestCase):
         closed = {"id": "a1", "paneId": "p1", "workspaceId": "w1",
                   "provider": "copilot", "providerSessionId": "s1"}
         remaining = {"id": "a2", "paneId": "p2", "workspaceId": "w2",
-                     "provider": "claude", "providerSessionId": "s2"}
+                     "provider": "opencode", "providerSessionId": "s2"}
         pending = {"id": "a3", "paneId": "p3", "workspaceId": "w1",
                    "provider": "copilot", "providerSessionId": None}
         bridge.runtime = {
@@ -697,12 +694,12 @@ class BridgeProtocolTest(unittest.TestCase):
         self.assertEqual(
             bridge._agent_display_title(
                 {
-                    "name": "codex-a13f",
+                    "name": "opencode-a13f",
                     "title": "API migration",
-                    "terminal_title_stripped": "Codex",
+                    "terminal_title_stripped": "OpenCode",
                 },
-                "codex",
-                "codex",
+                "opencode",
+                "opencode",
             ),
             "API migration",
         )
@@ -1212,14 +1209,8 @@ class AgentManagementTest(unittest.TestCase):
 
     def test_creation_tuning_uses_each_providers_flags(self):
         cases = [
-            ("claude", {"model": "sonnet", "effort": "high"},
-             ["--model", "sonnet", "--effort", "high"]),
-            ("codex", {"model": "gpt-5.4", "effort": "xhigh"},
-             ["--model", "gpt-5.4", "-c", 'model_reasoning_effort="xhigh"']),
-            ("codex", {"model": "gpt-5.6-sol", "effort": "ultra"},
-             ["--model", "gpt-5.6-sol", "-c", 'model_reasoning_effort="ultra"']),
-            ("codex", {"model": "gpt-5.6-sol", "effort": "max"},
-             ["--model", "gpt-5.6-sol", "-c", 'model_reasoning_effort="max"']),
+            ("copilot", {"model": "gpt-5.4", "effort": "xhigh"},
+             ["--model", "gpt-5.4", "--effort", "xhigh"]),
             ("opencode", {"model": "anthropic/claude-sonnet-4-6"},
              ["--model", "anthropic/claude-sonnet-4-6"]),
         ]
@@ -1232,14 +1223,8 @@ class AgentManagementTest(unittest.TestCase):
         cases = [
             ("opencode", {"effort": "high"}, "UNSUPPORTED_TUNING"),
             ("opencode", {"context": "long_context"}, "UNSUPPORTED_TUNING"),
-            ("claude", {"context": "long_context"}, "UNSUPPORTED_TUNING"),
-            ("codex", {"context": "default"}, "UNSUPPORTED_TUNING"),
-            ("claude", {"effort": "minimal"}, "INVALID_EFFORT"),
-            ("claude", {"effort": "ultra"}, "INVALID_EFFORT"),
-            ("claude", {"effort": "ultracode"}, "INVALID_EFFORT"),
             ("copilot", {"effort": "ultra"}, "INVALID_EFFORT"),
             ("opencode", {"effort": "ultra"}, "UNSUPPORTED_TUNING"),
-            ("codex", {"effort": "ludicrous"}, "INVALID_EFFORT"),
             ("copilot", {"effort": "ludicrous"}, "INVALID_EFFORT"),
             ("opencode", {"model": "a-model"}, "INVALID_MODEL"),
             ("cursor", {"model": "a-model"}, "INVALID_PROVIDER"),
@@ -1266,10 +1251,6 @@ class AgentManagementTest(unittest.TestCase):
         cases = [
             ("copilot", "copilot", {"model": "gpt-5.4", "effort": "high"},
              ["--model", "gpt-5.4", "--effort", "high"]),
-            ("claude", "claude", {"model": "sonnet", "effort": "high"},
-             ["--model", "sonnet", "--effort", "high"]),
-            ("codex", "codex", {"model": "gpt-5.4", "effort": "high"},
-             ["--model", "gpt-5.4", "-c", 'model_reasoning_effort="high"']),
             ("opencode", "opencode", {"model": "anthropic/claude-sonnet-4-6"},
              ["--model", "anthropic/claude-sonnet-4-6"]),
             ("OpenCode", "opencode", {"model": "openai/gpt-5.4"}, ["--model", "openai/gpt-5.4"]),
@@ -1312,14 +1293,10 @@ class AgentManagementTest(unittest.TestCase):
                     elif provider == "opencode":
                         args.extend(["--session", "ses_bootstrap"])
                         self.assertEqual(bridge.sessions.launched_session("p1"), "ses_bootstrap")
-                    else:
-                        self.assertIsNone(bridge.sessions.launched_session("p1"))
                     if provider == "opencode":
                         bootstrap.assert_called_once_with("/work/synthetic", "")
                     else:
                         bootstrap.assert_not_called()
-                    if provider == "codex":
-                        args.extend(["-c", CODEX_STATUS_CONFIG])
                     self.assertEqual(start["kind"], provider)
                     self.assertEqual(start["args"], args)
                     self.assertEqual(bridge.sessions.tuning("p1")["model"], tuning["model"])
@@ -1329,7 +1306,7 @@ class AgentManagementTest(unittest.TestCase):
         for payload, code in [
             ({"provider": "opencode", "effort": "high"}, "UNSUPPORTED_TUNING"),
             ({"provider": "cursor"}, "INVALID_PROVIDER"),
-            ({"provider": "codex", "context": "long_context"}, "UNSUPPORTED_TUNING"),
+            ({"provider": "copilot", "effort": "ultra"}, "INVALID_EFFORT"),
         ]:
             with self.subTest(payload=payload):
                 bridge = Bridge()
@@ -1362,11 +1339,9 @@ class AgentManagementTest(unittest.TestCase):
         self.assertEqual(args, ["--session-id", session_id])
 
     def test_legacy_session_argument_hook_does_not_mint_opencode_ids(self):
-        for provider in ("claude", "opencode"):
-            with self.subTest(provider=provider):
-                args = []
-                self.assertIsNone(Bridge._new_session_arguments(provider, "Name", args))
-                self.assertEqual(args, [])
+        args = []
+        self.assertIsNone(Bridge._new_session_arguments("opencode", "Name", args))
+        self.assertEqual(args, [])
 
     def test_a_started_session_is_known_before_herdr_reports_it(self):
         # Herdr only learns the id once the agent writes its state out. Until
@@ -1434,7 +1409,7 @@ class AgentManagementTest(unittest.TestCase):
             },
             "a2": {
                 "id": "a2", "paneId": "p2", "tabId": "w1:t1",
-                "provider": "claude", "providerSessionId": "live-session",
+                "provider": "opencode", "providerSessionId": "live-session",
             },
         }
         version = (1, 2, 3, 4)
@@ -1709,8 +1684,8 @@ class AgentTuningTest(unittest.TestCase):
     def test_another_cli_name_is_left_where_it_is(self):
         # It is part of the title, not this agent saying what it is.
         self.assertEqual(
-            Bridge._without_provider_suffix("Port it - Claude Code", "copilot"),
-            "Port it - Claude Code",
+            Bridge._without_provider_suffix("Port it - Other Tool", "copilot"),
+            "Port it - Other Tool",
         )
 
     def test_every_tunable_cli_is_one_the_bridge_can_launch(self):
@@ -1912,15 +1887,13 @@ class AgentTuningTest(unittest.TestCase):
             bridge._retune_agent({"agentId": "a1", "effort": "high"})
         self.assertEqual(caught.exception.code, "SESSION_UNKNOWN")
 
-    def test_non_copilot_retuning_is_refused_without_any_cli_mutation(self):
-        for provider in ("claude", "codex", "opencode", "unknown"):
-            with self.subTest(provider=provider):
-                bridge = self._bridge({}, provider=provider)
-                with patch.object(bridge, "_herdr_request") as request:
-                    with self.assertRaises(BridgeError) as caught:
-                        bridge._retune_agent({"agentId": "a1", "model": "gpt-5.4"})
-                self.assertEqual(caught.exception.code, "PROVIDER_NOT_TUNABLE")
-                request.assert_not_called()
+    def test_unsupported_provider_retuning_is_refused_without_any_cli_mutation(self):
+        bridge = self._bridge({}, provider="unknown")
+        with patch.object(bridge, "_herdr_request") as request:
+            with self.assertRaises(BridgeError) as caught:
+                bridge._retune_agent({"agentId": "a1", "model": "gpt-5.4"})
+        self.assertEqual(caught.exception.code, "PROVIDER_NOT_TUNABLE")
+        request.assert_not_called()
 
     def test_retuning_does_not_normalize_invalid_types_into_defaults(self):
         bridge = self._bridge({"model": "gpt-5.4"})
@@ -1931,7 +1904,7 @@ class AgentTuningTest(unittest.TestCase):
         request.assert_not_called()
 
     def test_other_providers_never_read_copilot_session_tuning(self):
-        for provider in ("claude", "codex", "opencode", "unknown"):
+        for provider in ("opencode", "unknown"):
             with self.subTest(provider=provider):
                 bridge = Bridge()
                 bridge.sessions.set_tuning("p1", {"model": "provider-model"})
@@ -1958,14 +1931,14 @@ class AgentTuningTest(unittest.TestCase):
         })
         self.assertIsNone(snapshot["agents"][0]["providerSessionId"])
 
-    def test_pending_opencode_agent_reports_creation_tuning_and_no_retuning(self):
+    def test_pending_opencode_agent_reports_creation_tuning_and_retuning_capability(self):
         bridge = Bridge()
         bridge.sessions.set_tuning("p1", {"model": "openai/gpt-5.4", "effort": None, "context": None})
         bridge._install_pending_agent("a1", "opencode", "opencode", "w1", "p1")
         agent = bridge.runtime["agents"][0]
         self.assertEqual(agent["tuning"], bridge.sessions.tuning("p1"))
         self.assertEqual(agent["provider"], "opencode")
-        self.assertFalse(agent["capabilities"]["supportsRetuning"])
+        self.assertTrue(agent["capabilities"]["supportsRetuning"])
 
     def test_a_context_window_becomes_a_command_line_argument(self):
         self.assertEqual(

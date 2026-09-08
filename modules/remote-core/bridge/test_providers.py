@@ -1,15 +1,11 @@
-import json
-import tempfile
 import unittest
 from dataclasses import replace
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 from remodr_bridge.bridge import Bridge
 from remodr_bridge.errors import BridgeError
 from remodr_bridge.providers import ADAPTER_TYPES
 from remodr_bridge.providers.base import ProviderAdapter, ProviderSpec
-from remodr_bridge.providers.claude import ClaudeAdapter
 
 
 class ProbeAdapter(ProviderAdapter):
@@ -119,38 +115,7 @@ class ProviderRegistryTest(unittest.TestCase):
         first.sessions.cache_tuning("session", 1, {"model": "first"})
         self.assertIsNone(second.sessions.cached_tuning("session"))
 
-    def test_claude_uses_native_identity_and_reads_only_its_transcript(self):
-        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
-            home = Path(directory)
-            project = home / ".claude" / "projects" / "workspace"
-            project.mkdir(parents=True)
-            (project / "claude-native.jsonl").write_text(
-                json.dumps({"id": "user", "type": "user", "message": {
-                    "role": "user", "content": [{"type": "text", "text": "native transcript"}],
-                }}) + "\n"
-            )
-            with patch.object(Path, "home", return_value=home):
-                bridge = Bridge()
-                adapter = bridge.providers["claude"]
-                self.assertIsInstance(adapter, ClaudeAdapter)
-                bridge._herdr_request = Mock()
-                bridge.sessions.record_identity(
-                    "p1", error="old provider error", diagnostic="old diagnostic",
-                    process_bound=True,
-                )
-                session = adapter.resolve_session(
-                    {"pane_id": "p1"}, "claude-native", inspect=True,
-                )
-                self.assertEqual(session, "claude-native")
-                self.assertFalse(bridge.sessions.is_process_bound("p1"))
-                self.assertIsNone(bridge.sessions.identity_error("p1"))
-                result = adapter.load_conversation({"id": "a1", "providerSessionId": session})
-                self.assertEqual(result["items"][0]["text"], "native transcript")
-                self.assertTrue(result["semantic"])
-                self.assertEqual(adapter.session_tuning(session), {})
-                bridge._herdr_request.assert_not_called()
-
-    def test_opencode_without_identity_and_unknown_do_not_claim_semantic_or_retuning_support(self):
+    def test_opencode_without_identity_and_unknown_refuse_retuning(self):
         bridge = Bridge()
         for name in ("opencode", "unknown"):
             adapter = bridge.providers[name]
@@ -158,7 +123,7 @@ class ProviderRegistryTest(unittest.TestCase):
             self.assertFalse(adapter.agent_capabilities("s1")["structuredConversation"])
             with self.assertRaises(BridgeError) as error:
                 adapter.retune({})
-            self.assertEqual(error.exception.code, "PROVIDER_NOT_TUNABLE")
+            self.assertEqual(error.exception.code, "INVALID_VARIANT" if name == "opencode" else "PROVIDER_NOT_TUNABLE")
 
 
 if __name__ == "__main__":

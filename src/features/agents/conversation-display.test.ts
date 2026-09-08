@@ -80,8 +80,9 @@ describe('conversation display', () => {
       { text: 'a', state: 'done' },
       { text: 'b', state: 'in_progress' },
       { text: 'c', state: 'blocked' },
+      { text: 'cancelled', state: 'cancelled' },
       { text: 'd', state: 'pending' },
-    ])).toEqual({ done: 1, total: 4 });
+    ])).toEqual({ done: 1, total: 5 });
     expect(planProgress([])).toEqual({ done: 0, total: 0 });
   });
 });

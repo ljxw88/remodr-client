@@ -19,6 +19,7 @@ import {
   agentCreationInput,
   agentDraftForDevice,
   agentDraftForProvider,
+  agentDraftForWorkspace,
   beginNewAgentFlow,
   beginNewSpaceFlow,
   newAgentDraft,
@@ -73,7 +74,7 @@ function device(deviceId = 'device-a'): DeviceRuntimeState {
     deviceId, connection: 'connected', hello: null, lastError: null,
     runtime: {
       connectionState: 'connected', deviceId,
-      providers: [{ provider: 'copilot', available: true, aliases: [] }, { provider: 'codex', available: true, aliases: [] }],
+      providers: [{ provider: 'copilot', available: true, aliases: [] }],
       workspaces: [{ id: 'space-1', name: 'One', status: 'idle' }, { id: 'space-2', name: 'Two', status: 'idle' }],
       agents: [],
     },
@@ -95,32 +96,51 @@ function deferred<T>() {
 }
 
 describe('creation drafts', () => {
+  it('blocks a model removed by a scoped refresh without silently changing the draft', () => {
+    const owner = device();
+    owner.runtime.providers.push({ provider: 'opencode', available: true, aliases: [] });
+    owner.runtime.workspaces[0].cwd = '/work';
+    const draft: NewAgentDraft = {
+      ...newAgentDraft(owner), tuning: { model: 'account/model', effort: null, context: null },
+      modelAvailability: { deviceId: owner.deviceId, workspaceId: 'space-1', cwd: '/work', model: 'account/model', available: false },
+    };
+    expect(agentCreationError(draft, owner)).toContain('not available for this space');
+    expect(draft.tuning.model).toBe('account/model');
+    expect(agentCreationError({ ...draft, tuning: { ...draft.tuning, model: null } }, owner)).toBeNull();
+  });
+  it('resets OpenCode models when project configuration scope changes, but keeps other providers unchanged', () => {
+    const original: NewAgentDraft = {
+      ...newAgentDraft(device()), provider: 'opencode',
+      tuning: { model: 'custom/project-model', effort: null, context: null },
+    };
+    expect(agentDraftForWorkspace(original, original.workspaceId)).toBe(original);
+    expect(agentDraftForWorkspace(original, 'other')).toMatchObject({
+      workspaceId: 'other', tuning: { model: null, effort: null, context: null },
+    });
+    expect(agentDraftForWorkspace({ ...original, provider: 'copilot' }, 'other').tuning).toEqual(original.tuning);
+  });
   it('prefers available OpenCode regardless of manifest order and falls back in launch order', () => {
     const owner = device();
     owner.runtime.providers = [
-      { provider: 'codex', available: true, aliases: [] },
-      { provider: 'claude', available: true, aliases: [] },
       { provider: 'copilot', available: true, aliases: [] },
       { provider: 'opencode', available: true, aliases: [] },
     ];
     expect(newAgentDraft(owner).provider).toBe('opencode');
-    owner.runtime.providers[3].available = false;
-    expect(newAgentDraft(owner).provider).toBe('copilot');
-    owner.runtime.providers[2].available = false;
-    expect(newAgentDraft(owner).provider).toBe('claude');
     owner.runtime.providers[1].available = false;
-    expect(newAgentDraft(owner).provider).toBe('codex');
+    expect(newAgentDraft(owner).provider).toBe('copilot');
+    owner.runtime.providers[0].available = false;
+    expect(newAgentDraft(owner).provider).toBe('opencode');
     owner.runtime.providers = [];
     expect(newAgentDraft(owner).provider).toBe('opencode');
   });
 
   it('keeps an explicit available provider when switching to a device with OpenCode', () => {
-    const draft = agentDraftForProvider(newAgentDraft(device()), 'codex');
+    const draft = newAgentDraft(device());
     const other = device('device-b');
     other.runtime.providers.push({ provider: 'opencode', available: true, aliases: [] });
     expect(newAgentDraft(other).provider).toBe('opencode');
-    expect(agentDraftForDevice(draft, other).provider).toBe('codex');
-    other.runtime.providers.find((manifest) => manifest.provider === 'codex')!.available = false;
+    expect(agentDraftForDevice(draft, other).provider).toBe('copilot');
+    other.runtime.providers.find((manifest) => manifest.provider === 'copilot')!.available = false;
     expect(agentDraftForDevice(draft, other).provider).toBe('opencode');
   });
 
@@ -144,8 +164,9 @@ describe('creation drafts', () => {
   it('chooses the first available provider and never a foreign-device space', () => {
     const owner = device();
     owner.runtime.providers[0].available = false;
+    owner.runtime.providers.push({ provider: 'opencode', available: true, aliases: [] });
     owner.runtime.workspaces[0].deviceId = 'different-device';
-    expect(newAgentDraft(owner, 'space-1')).toMatchObject({ provider: 'codex', workspaceId: 'space-2' });
+    expect(newAgentDraft(owner, 'space-1')).toMatchObject({ provider: 'opencode', workspaceId: 'space-2' });
   });
 
   it('reports invalid defaults instead of quietly submitting when no providers or spaces exist', () => {
@@ -174,8 +195,8 @@ describe('creation drafts', () => {
       tuning: { model: 'future-model', effort: 'max', context: 'long_context' },
     };
     expect(agentDraftForProvider(draft, 'copilot')).toBe(draft);
-    expect(agentDraftForProvider(draft, 'codex')).toMatchObject({
-      name: 'Investigate', bypassPermissions: false, provider: 'codex', tuning: { model: null, effort: null, context: null },
+    expect(agentDraftForProvider(draft, 'opencode')).toMatchObject({
+      name: 'Investigate', bypassPermissions: false, provider: 'opencode', tuning: { model: null, effort: null, context: null },
     });
     expect(agentCreationInput(draft)).toMatchObject({ model: 'future-model', effort: 'max', context: 'long_context' });
   });
@@ -187,8 +208,9 @@ describe('creation drafts', () => {
     };
     const other = device('device-b');
     other.runtime.providers[0].available = false;
+    other.runtime.providers.push({ provider: 'opencode', available: true, aliases: [] });
     expect(agentDraftForDevice(draft, other)).toMatchObject({
-      deviceId: 'device-b', workspaceId: 'space-1', provider: 'codex', name: 'My work', bypassPermissions: false,
+      deviceId: 'device-b', workspaceId: 'space-1', provider: 'opencode', name: 'My work', bypassPermissions: false,
       tuning: { model: null, effort: null, context: null },
     });
     expect(agentDraftForDevice(draft, device())).toBe(draft);
@@ -219,7 +241,7 @@ describe('creation drafts', () => {
     expect(agentCreationInput({ ...newAgentDraft(device()), name: '  Plan  ' }).name).toBe('Plan');
   });
 
-  it.each(['claude', 'codex', 'opencode'] as const)('sends explicit launch models for %s', (provider) => {
+  it.each(['copilot', 'opencode'] as const)('sends explicit launch models for %s', (provider) => {
     expect(agentCreationInput({
       ...newAgentDraft(device()), provider,
       tuning: { model: 'account-model', effort: null, context: null },
@@ -375,7 +397,7 @@ describe('creation pages and folder lifetime', () => {
     owner = {
       ...owner, runtime: {
         ...owner.runtime,
-        providers: [{ provider: 'codex', available: true, aliases: [] }],
+        providers: [{ provider: 'opencode', available: true, aliases: [] }],
         workspaces: [...owner.runtime.workspaces, { id: 'created-space', name: 'Created', status: 'idle' }],
       },
     };
@@ -393,7 +415,7 @@ describe('creation pages and folder lifetime', () => {
     }
     expect(destination.params.flowId).not.toBe(flowId);
     expect(flowDrafts.get(destination.params.flowId)).toMatchObject({
-      kind: 'new-agent', deviceId: 'device-a', workspaceId: 'created-space', provider: 'codex',
+      kind: 'new-agent', deviceId: 'device-a', workspaceId: 'created-space', provider: 'opencode',
     });
     flowDrafts.discard(destination.params.flowId);
     expect(flowDrafts.get(flowId)).toBeDefined();

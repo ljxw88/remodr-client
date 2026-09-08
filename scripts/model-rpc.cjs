@@ -5,10 +5,10 @@ const { tmpdir } = require('node:os');
 const MAX_BYTES = 16 * 1024 * 1024;
 
 // Discovery only: callers must not create sessions or send inference requests.
-function openRpc(command, args, framing = 'lines', timeoutMs = 60000, env = {}) {
+function openRpc(command, args, timeoutMs = 60000) {
   const child = spawn(command, args, {
     cwd: tmpdir(),
-    env: { ...process.env, NO_COLOR: '1', ...env },
+    env: { ...process.env, NO_COLOR: '1' },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   let buffer = Buffer.alloc(0);
@@ -28,16 +28,6 @@ function openRpc(command, args, framing = 'lines', timeoutMs = 60000, env = {}) 
   }
 
   function receive(message) {
-    if (framing === 'claude') {
-      if (message.type === 'control_request') {
-        throw new Error('Unexpected Claude control request during model discovery');
-      }
-      if (message.type !== 'control_response') return;
-      const response = message.response;
-      message = response.subtype === 'success'
-        ? { id: Number(response.request_id), result: response.response }
-        : { id: Number(response.request_id), error: { code: 'initialization-failed' } };
-    }
     const request = pending.get(message.id);
     if (!request) return;
     pending.delete(message.id);
@@ -64,26 +54,16 @@ function openRpc(command, args, framing = 'lines', timeoutMs = 60000, env = {}) 
     try {
       if (buffer.length > MAX_BYTES) throw new Error('Discovery response exceeds 16 MiB');
       while (buffer.length) {
-        let start = 0;
-        let end;
-        let consumed;
-        if (framing === 'headers') {
-          const boundary = buffer.indexOf('\r\n\r\n');
-          if (boundary < 0) break;
-          const match = /^Content-Length:\s*(\d+)$/im.exec(buffer.subarray(0, boundary).toString());
-          if (!match) throw new Error('Missing RPC Content-Length');
-          start = boundary + 4;
-          end = start + Number(match[1]);
-          if (end > MAX_BYTES) throw new Error('Discovery response exceeds 16 MiB');
-          if (buffer.length < end) break;
-          consumed = end;
-        } else {
-          end = buffer.indexOf('\n');
-          if (end < 0) break;
-          consumed = end + 1;
-        }
+        const boundary = buffer.indexOf('\r\n\r\n');
+        if (boundary < 0) break;
+        const match = /^Content-Length:\s*(\d+)$/im.exec(buffer.subarray(0, boundary).toString());
+        if (!match) throw new Error('Missing RPC Content-Length');
+        const start = boundary + 4;
+        const end = start + Number(match[1]);
+        if (end > MAX_BYTES) throw new Error('Discovery response exceeds 16 MiB');
+        if (buffer.length < end) break;
         const text = buffer.subarray(start, end).toString('utf8').trim();
-        buffer = buffer.subarray(consumed);
+        buffer = buffer.subarray(end);
         if (text) receive(JSON.parse(text));
       }
     } catch (error) {
@@ -92,12 +72,8 @@ function openRpc(command, args, framing = 'lines', timeoutMs = 60000, env = {}) 
   });
 
   function send(message) {
-    const body = JSON.stringify(framing === 'claude'
-      ? { type: 'control_request', request_id: String(message.id), request: { subtype: message.method, ...message.params } }
-      : { jsonrpc: '2.0', ...message });
-    child.stdin.write(framing === 'headers'
-      ? `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`
-      : `${body}\n`);
+    const body = JSON.stringify({ jsonrpc: '2.0', ...message });
+    child.stdin.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
   }
 
   return {
@@ -110,7 +86,6 @@ function openRpc(command, args, framing = 'lines', timeoutMs = 60000, env = {}) 
         send({ id, method, params });
       });
     },
-    notify(method, params = {}) { send({ method, params }); },
     close() {
       closing = true;
       for (const request of pending.values()) {

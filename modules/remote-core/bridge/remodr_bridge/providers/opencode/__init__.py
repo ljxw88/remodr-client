@@ -8,10 +8,17 @@ from ..base import ProviderAdapter
 from . import transcript
 from .bootstrap import create_session
 from .settings import SPEC
+from .variants import OpenCodeVariants, retune
 
 
 class OpenCodeAdapter(ProviderAdapter):
     spec = SPEC
+
+    def variant_options(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return OpenCodeVariants(self.host, payload).options()
+
+    def retune(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return retune(self.host, payload)
 
     def prepare_launch(self, label: str, args: list[str], cwd: str | None) -> str:
         if not cwd:
@@ -68,6 +75,12 @@ class OpenCodeAdapter(ProviderAdapter):
     def provider_capabilities(self, installed: bool) -> dict[str, bool]:
         result = super().provider_capabilities(installed)
         result["structuredConversation"] = transcript.database_supported()
+        result["todos"] = transcript.todos_supported()
+        return result
+
+    def agent_capabilities(self, session_id: Any) -> dict[str, bool]:
+        result = super().agent_capabilities(session_id)
+        result["todos"] = result["structuredConversation"] and transcript.todos_supported()
         return result
 
     def session_tuning(self, session_id: Any) -> dict[str, Any]:

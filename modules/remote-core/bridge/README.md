@@ -20,8 +20,6 @@ resolution, and transcript parsing:
 
 - `copilot/`: native process/session discovery, Copilot event parsing, questions,
   TODOs, and Copilot-specific tuning.
-- `codex/`: thread/status-line identity, rollout parsing, and Codex configuration.
-- `claude/`: Claude Code launch settings and transcript handling.
 - `opencode/`: OpenCode launch settings, native session identity and read-only SQLite transcripts.
 
 Shared orchestration, protocol, transport, and durable storage stay outside
@@ -46,8 +44,7 @@ and restrictions below remain unchanged.
 
 Copilot's `processes.py`, `sessions.py`, `transcript.py`, and `tuning.py` separate
 OS process inspection, identity resolution, transcript decoding, and live
-retuning. Codex separates `sessions.py` from `transcript.py`; Claude has its own
-transcript reader. OpenCode reads its exact reported session from SQLite.
+retuning. OpenCode reads its exact reported session from SQLite.
 Runtime publication and Herdr I/O stay with the host. Session state belongs to
 `Bridge.sessions`, whose explicit registry methods replace mutable host
 dictionaries. Durable-command state remains in the ledger.
@@ -73,6 +70,27 @@ New providers need an adapter, registry entry, and provider-level regression
 coverage, plus the corresponding mobile provider/model-catalogue support.
 Keep shared session isolation and durable command preconditions in the runtime
 rather than duplicating them in provider adapters.
+
+## OpenCode model discovery
+
+`opencode.models` accepts `{workspaceId, refresh}` and returns
+`{workspaceId, cwd, models}` with bare `provider/model` selectors only.
+It runs `opencode models` (adding `--refresh` on request) in the verified
+workspace directory using the existing executable resolution. Credentials,
+verbose metadata and raw stderr are not forwarded. An empty native list is
+distinct from a failed discovery.
+
+The adapter verifies the workspace directory and filesystem identity before
+and after discovery. Its 32-second total budget reserves time for the final
+Herdr read; stdout is capped at 2 MiB, selectors at 512 characters, and the
+list at 10,000 entries. Cleanup targets only the owned subprocess group.
+The discovery child does not inherit Herdr pane-reporting variables and does
+not create sessions, send inference, or manipulate existing TUI panes.
+
+OpenCode controls provider authentication, project overrides and catalogue
+caching. Its native refresh can fall back silently, so this endpoint does not
+claim successful upstream refresh or prove every model's account entitlement.
+See [Model catalogues](../../../docs/model-catalogues.md).
 
 ## Session ownership and locks
 
@@ -125,11 +143,11 @@ runtime normalization, and provider readers. It compares entire conversations
 and the runtime agent's session fields and capabilities with the fixtures. No real sessions,
 credentials, Herdr server, or provider CLI are used.
 
-Coverage includes empty Copilot/Claude/Codex semantic sessions, Copilot session
-replacement on the same pane, structured questions and tool activity, explicit
-null session identity in terminal fallback, and durable accepted/uncertain
-responses. Durable fixtures exercise the real SQLite ledger and verify replay
-from a new bridge instance without repeating delivery.
+Coverage includes Copilot session replacement on the same pane, OpenCode
+semantic transcripts, structured questions and tool activity, explicit null
+session identity in terminal fallback, and durable accepted/uncertain responses.
+Durable fixtures exercise the real SQLite ledger and verify replay from a new
+bridge instance without repeating delivery.
 
 Jest reads those same JSON files through the production conversation/response
 schemas and session/capability helpers. Strict parsed equality catches fields silently
@@ -152,8 +170,8 @@ not silently bless changed bridge output.
 
 ## Providers and model settings
 
-The bridge supports **OpenCode, GitHub Copilot, Claude Code, and Codex**, in that
-preferred selection order.
+The bridge supports **OpenCode and GitHub Copilot**, in that preferred selection
+order.
 Availability comes only from Herdr's `server.agent_manifests`, never the bridge
 host's `PATH`. Herdr must advertise the provider and launch its interactive CLI.
 The mobile provider ID and Herdr launch kind for OpenCode are `opencode`.
@@ -167,15 +185,11 @@ does not identify a supported provider.
 | --- | --- | --- | --- | --- |
 | OpenCode | `--model <provider/model>` | Unsupported | Unsupported | `--auto` |
 | Copilot | `--model <id>` | `--effort <value>` | `--context <value>` | `--allow-all-tools` |
-| Claude Code | `--model <id-or-alias>` | `--effort <value>` | Unsupported | `--dangerously-skip-permissions` |
-| Codex | `--model <id>` | `-c 'model_reasoning_effort="<value>"'` | Unsupported | `--dangerously-bypass-approvals-and-sandbox` |
 
-Codex's config assignment is a single argument containing a quoted TOML string;
-the table's surrounding single quotes are shell notation, not part of the
-argument. `bypassPermissions: false` omits the bypass flag for every provider;
-an absent setting retains the existing default of `true`. OpenCode's `--auto`
-approves permissions unless explicitly denied. Omitting it leaves the user's
-OpenCode permission policy in effect; it does not force an ask-every-time policy.
+`bypassPermissions: false` omits the bypass flag for every provider; an absent
+setting retains the existing default of `true`. OpenCode's `--auto` approves
+permissions unless explicitly denied. Omitting it leaves the user's OpenCode
+permission policy in effect; it does not force an ask-every-time policy.
 
 OpenCode creation uses a temporary password-protected loopback server to create
 an empty session in the known workspace cwd, then closes that server and launches
@@ -187,42 +201,59 @@ OpenCode conversations read the exact session's supported SQLite rows through a
 read-only transaction, including WAL data. Missing identity keeps the explicit
 terminal fallback; invalid identifiers, missing exact sessions, unsupported
 schemas and active reverts do not silently select another session. No live API
-question/permission controls, streaming subscription or in-chat retuning is
-advertised. See [OpenCode integration](../../../docs/opencode-integration.md)
+question/permission controls or streaming subscription is advertised.
+In-chat reasoning variants use the verified native TUI chooser described below.
+See [OpenCode integration](../../../docs/opencode-integration.md)
 for storage overrides, installation and account support.
+
+When the native `todo` table is present, the same transaction appends one
+current `todo_update` snapshot for the exact session. Rows are ordered by native
+position; completed maps to `done`, while pending, in-progress and cancelled
+remain distinct. Content, status, priority, position and bounds are validated
+before any plan is published. Empty/replaced lists disappear with the next
+authoritative conversation snapshot. The bridge never parses `# Todos` from
+terminal output or final assistant prose.
 
 Omitted, null, or blank tuning values retain CLI defaults. Non-string values
 fail with `INVALID_MODEL`, `INVALID_EFFORT`, or `INVALID_CONTEXT`; populated
 settings unsupported by that provider fail with `UNSUPPORTED_TUNING` before a
 pane is created. Unknown effort/context values are also rejected, not dropped.
 Copilot accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`;
-Claude accepts `low`, `medium`, `high`, `xhigh`, `max`;
-Codex accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`.
-The Codex-only `ultra` setting is available on models advertising it through
-Codex's `model/list` API.
-Claude's `ultracode` orchestration mode is not a reasoning-effort value in this
-contract.
 Actual model availability and model-specific effort support depend on the
-installed CLI/account. The bridge passes nonempty model IDs through; the app's
-JSON catalogs decide which choices to offer. Only Copilot accepts `default`
-and `long_context` as a separate context setting. Claude/OpenCode context or
-thinking variants must be represented by the CLI's model ID, not invented flags.
+installed CLI/account. The bridge passes nonempty model IDs through; Copilot's
+catalog and OpenCode's native model discovery decide which choices to offer.
+Only Copilot accepts `default` and `long_context` as a separate context setting.
+OpenCode reasoning variants are selected after launch, not passed as an
+unsupported root-TUI flag.
 
-**Live retuning remains Copilot-only.** Both hello
+**Live retuning supports Copilot settings and OpenCode variants.** Both hello
 `capabilities.providerCapabilities[provider].supportsRetuning` and each
 agent's `capabilities.supportsRetuning` report this explicitly. Clients must
 not equate creation tuning with live-retuning support. `agent.retune` rejects
-every other provider with `PROVIDER_NOT_TUNABLE` before issuing CLI input.
+unsupported providers with `PROVIDER_NOT_TUNABLE` before issuing CLI input.
 Copilot retains its existing `/model` and session-restart behavior; its
 `--session-id`, `/exit`, and session-log parsing never apply to other providers.
-Non-Copilot tuning reports only settings remembered from bridge-created agents;
-externally started sessions may have unknown settings. OpenCode's semantic
-read adapter does not imply native HTTP model switching or question controls.
+Creation settings remembered by the bridge override lagging native session
+metadata. OpenCode's semantic read adapter does not imply native HTTP model
+switching or question controls.
+
+For OpenCode, `agent.variant_options` takes `{agentId, providerSessionId}` and
+returns `{modelLabel, modelToken, currentVariant, variants}`. Names come from
+the active chooser, not the last submitted message or an offline model list.
+`currentVariant: null` means Default. To apply, send `agent.retune` with
+`{agentId, providerSessionId, modelToken, variant}`; `variant: null` clears the
+override. Do not include changed generic model/effort/context settings.
+
+Both operations pin the live session and terminal and require an idle,
+recognizable TUI with an empty native prompt. The bridge opens the command
+palette without submitting a prompt, verifies the unique variant command and
+picker, and checks ANSI focus before selecting. It reopens the picker to
+confirm the actual value. Default keybindings and a fully visible picker are
+required; ambiguous layouts, hidden choices, native drafts, busy agents, and
+session/model changes produce explicit errors. Settings operations do not
+write OpenCode's database or user configuration.
 
 Flag references:
-[Claude CLI](https://code.claude.com/docs/en/cli-reference),
-[Codex CLI](https://developers.openai.com/codex/cli/reference/) and
-[configuration](https://developers.openai.com/codex/config-reference/),
 [OpenCode CLI](https://opencode.ai/docs/cli/).
 
 ## Output activity for agent ordering
@@ -233,12 +264,12 @@ Ordinary snapshots and status events reuse observed activity without doing extra
 transcript or terminal reads.
 
 The provider adapter's `output_path()` selects the same session-specific
-transcript used for conversation reading. Copilot, Claude Code and Codex use
-its last-write time without parsing the entire conversation. Terminal-only
-providers use changes in a bounded, ANSI-stripped `recent_unwrapped` text
-sample; their first read establishes a baseline rather than inventing a
-historical output time. Polling, status changes, and tab renames do not themselves
-advance activity. Transcript writes include message and tool/session-log activity;
+transcript used for conversation reading. Copilot uses its last-write time
+without parsing the entire conversation. Providers without a transcript output
+path use changes in a bounded, ANSI-stripped `recent_unwrapped` text sample;
+their first read establishes a baseline rather than inventing a historical
+output time. Polling, status changes, and tab renames do not themselves advance
+activity. Transcript writes include message and tool/session-log activity;
 terminal fallback reflects visible terminal text changes.
 
 Activity is isolated by agent/provider/session/terminal identity and pruned when
@@ -248,18 +279,6 @@ foregrounded, and connected; full transcript polling is not needed for unopened
 agents.
 
 ## Session identity and `/clear`
-
-Codex creation configures a live thread UUID in its status line because current
-Codex defers session hooks until the first turn. Only the exact pane's live footer
-is identity evidence; old `/status` text and UUIDs in messages are not. The
-`session-id` status item is a compatibility alias of `thread-id`.
-
-The live UUID overrides stale hook metadata after `/new`. Missing footer evidence
-reports `SESSION_IDENTITY_UNRESOLVED` on reads; commands fail with
-`COMMAND_PRECONDITION_FAILED` before input, rather than offering a retry of a
-permanent failed receipt. A prior display binding can be retained while a dialog
-hides the footer, but it is not authorization to dispatch. See the
-[Codex integration guide](../../../docs/herdr-mobile-architecture.md#codex-startup-and-thread-identity).
 
 Every `agent.conversation` request refreshes Herdr's `session.snapshot`
 **before** resolving the agent and reading its transcript. For Copilot, native

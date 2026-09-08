@@ -6,6 +6,11 @@ export function retuningUnavailableReason(
   provider: AgentProvider,
   capabilities?: RetuningCapabilities,
 ): string | null {
+  if (provider === 'opencode') {
+    return capabilities?.supportsRetuning === true
+      ? null
+      : 'This device needs an updated bridge to change OpenCode reasoning variants.';
+  }
   if (provider !== 'copilot') {
     return 'This app does not support live model settings for this provider.';
   }

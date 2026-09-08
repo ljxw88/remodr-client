@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Switch, View } from 'react-native';
 
 import { AppButton } from '@/components/ui/app-button';
+import { ThemedText } from '@/components/themed-text';
 import { AnimatedDisclosure } from '@/components/ui/animated-disclosure';
 import { FormError, FormPage, FormSection, MissingFlow, SelectionRow } from '@/components/ui/form-page';
 import { TextField } from '@/components/ui/text-field';
@@ -124,6 +125,11 @@ function NewAgentForm({ flowId, draft }: { flowId: string; draft: NewAgentDraft 
       </FormSection>
       <AnimatedDisclosure open={advanced} active={focused} testID="advanced-options-disclosure">
         <View style={{ paddingTop: Spacing.three, gap: Spacing.three }}>
+          {draft.provider === 'opencode' ? (
+            <ThemedText type="small" themeColor="textSecondary">
+              Choose reasoning variants from Model Settings after the agent starts.
+            </ThemedText>
+          ) : null}
           {tunable ? <View pointerEvents={creating ? 'none' : 'auto'}>
             <TuningFields provider={draft.provider} value={draft.tuning} showModel={false}
               onChooseModel={() => choose('/flows/models')} onChange={(tuning) => update((current) => ({ ...current, tuning }))} />

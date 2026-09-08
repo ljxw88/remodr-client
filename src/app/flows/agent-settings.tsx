@@ -8,6 +8,7 @@ import { FormError, FormPage, MissingFlow } from '@/components/ui/form-page';
 import { supportsRetuning } from '@/domain/agent-capabilities';
 import { agentEditError, tuningChanges } from '@/features/agents/agent-edit-flow';
 import { TuningFields } from '@/features/agents/tuning-fields';
+import { OpenCodeVariantSettings } from '@/features/agents/opencode-variant-settings';
 import { useHerdr } from '@/features/agents/use-herdr';
 import { flowDrafts, useFlowDraft } from '@/features/forms/flow-drafts';
 import { herdrRepository } from '@/services/herdr-repository';
@@ -27,6 +28,9 @@ export default function AgentSettingsPage() {
     return () => { mounted.current = false; };
   }, []);
 
+  if (flowId && draft?.kind === 'agent-settings' && draft.provider === 'opencode') {
+    return <OpenCodeVariantSettings flowId={flowId} draft={draft} />;
+  }
   if (!flowId || !draft || draft.kind !== 'agent-settings' || !supportsRetuning(draft.provider)) {
     return <MissingFlow title="Model Settings Unavailable" />;
   }

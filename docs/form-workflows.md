@@ -68,6 +68,14 @@ The flow stack uses a quiet background. Glass remains on navigation controls,
 the dock, and the chat composer rather than every form section.
 Static page titles use Title Case; user-supplied agent names keep their original casing.
 
+OpenCode creation uses a server-scoped model picker rather than a bundled
+catalogue. It fetches from the draft's device and space on opening and offers
+**Refresh from server** for account/configuration changes. Late results from a
+different space or closed connection are rejected. Failed fetches leave Auto
+available and show the error; they do not substitute maintenance-machine models.
+If a successful refresh removes the selected model, creation is blocked until
+the user explicitly chooses another model or Auto.
+
 ## Drafts and navigation
 
 `RouteStack` applies the shared 200ms, 16dp arrival motion to page changes and Back,
@@ -120,12 +128,12 @@ empty directory; a failed post-mutation listing is not reported as a failed
 mutation.
 
 Model selection only changes the draft. Model/effort/context compatibility comes
-from the [per-provider JSON catalogues](model-catalogues.md), through
-`agent-catalogue.ts`. Model selection at creation is available for Copilot,
-OpenCode, Codex, and Claude Code. OpenCode is the preferred first provider when
+from the [provider model sources](model-catalogues.md), through
+`agent-catalogue.ts`. Model selection at creation is available for Copilot and
+OpenCode. OpenCode is the preferred first provider when
 available; a deliberate user selection is retained when it remains valid.
 Live Model Settings require a client
-implementation (currently Copilot only) and the agent's reported retuning
+implementation (Copilot settings or OpenCode variants) and the agent's reported retuning
 capability. An explicit `false` disables entry and Apply; an omitted field keeps
 legacy Copilot behavior. Availability is read from the current runtime, not
 captured in the form draft, and is checked again when submitting. Draft edits
@@ -174,6 +182,13 @@ truncate without displacing Send; the accessibility label retains the full name.
 Connection status remains a floating indicator with a small retry action.
 Detailed connection state is on the server page; no reconnect sheet opens.
 Structured agent questions remain beside the composer.
+
+OpenCode's Model Settings page reads the live `/variants` choices from its
+owning TUI. It applies only a reasoning variant, with explicit model/session
+guards and no agent restart. Generic effort/context flags are not sent to
+OpenCode; variant names may be model-specific or custom. Live model changes
+remain in the OpenCode terminal. An updated bridge must advertise support
+before the entry is enabled.
 
 Chat uses `use-conversation-scroll.ts` to follow both message updates and
 their later native layout measurements. Sending text or an answer resumes

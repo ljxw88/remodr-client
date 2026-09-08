@@ -6,9 +6,6 @@ import {
   type ModelSpec,
 } from '@/domain/model-catalogue-schema';
 import copilot from '@/domain/model-catalogues/copilot.json';
-import codex from '@/domain/model-catalogues/codex.json';
-import claude from '@/domain/model-catalogues/claude.json';
-import opencode from '@/domain/model-catalogues/opencode.json';
 
 export const REASONING_EFFORTS = reasoningEffortSchema.options;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
@@ -18,12 +15,10 @@ export type ContextOption = ModelSpec['contexts'][number];
 export type { ModelSpec } from '@/domain/model-catalogue-schema';
 export { supportsRetuning } from '@/domain/agent-capabilities';
 
-const CATALOGUES = { opencode, copilot, claude, codex };
+const CATALOGUES = { copilot };
 const UNAVAILABLE: Partial<Record<AgentProvider, string>> = {};
 const CATALOGUE: Record<AgentProvider, ModelSpec[]> = {
   copilot: [],
-  codex: [],
-  claude: [],
   opencode: [],
   unknown: [],
 };
@@ -45,7 +40,7 @@ export function modelsFor(provider: AgentProvider): ModelSpec[] {
 }
 
 export function supportsTuning(provider: AgentProvider): boolean {
-  return Object.hasOwn(CATALOGUES, provider);
+  return provider === 'opencode' || Object.hasOwn(CATALOGUES, provider);
 }
 
 export function findModel(
@@ -105,7 +100,6 @@ export const EFFORT_LABELS: Record<ReasoningEffort, string> = {
   high: 'High',
   xhigh: 'Extra high',
   max: 'Max',
-  ultra: 'Ultra',
 };
 
 export function contextLabel(option: ContextOption): string {

@@ -15,20 +15,21 @@ import {
 
 describe('Herdr mobile protocol', () => {
   it('launches OpenCode first instead of Cursor Agent', () => {
-    expect(launchableAgentProviderSchema.options).toEqual(['opencode', 'copilot', 'claude', 'codex']);
+    expect(launchableAgentProviderSchema.options).toEqual(['opencode', 'copilot']);
     expect(launchableAgentProviderSchema.parse('opencode')).toBe('opencode');
     expect(providerLabel('opencode')).toBe('OpenCode');
     expect(launchableAgentProviderSchema.safeParse('cursor').success).toBe(false);
   });
 
-  it.each(['cursor', 'cursor-agent', 'Cursor', 'Cursor Agent', 'future-provider'])('tolerates %s in incoming snapshots without making it launchable', (provider) => {
+  it.each(['claude', 'codex', 'cursor', 'cursor-agent', 'Cursor', 'Cursor Agent', 'future-provider'])(
+    'tolerates removed/unknown %s in incoming snapshots without making it launchable',
+    (provider) => {
     const snapshot = {
       connectionState: 'connected',
       workspaces: [],
       providers: [
+        { provider: 'opencode', available: true },
         { provider: 'copilot', available: true },
-        { provider: 'claude', available: true },
-        { provider: 'codex', available: true },
         { provider, available: true },
       ],
       agents: [{
@@ -38,14 +39,15 @@ describe('Herdr mobile protocol', () => {
       }],
     };
     const parsed = runtimeStateSchema.parse(snapshot);
-    expect(parsed.providers.slice(0, 3).map((manifest) => manifest.provider))
-      .toEqual(['copilot', 'claude', 'codex']);
-    expect(parsed.providers[3]).toMatchObject({
+    expect(parsed.providers.slice(0, 2).map((manifest) => manifest.provider))
+      .toEqual(['opencode', 'copilot']);
+    expect(parsed.providers[2]).toMatchObject({
       provider: 'unknown', available: false,
       unavailableReason: expect.stringContaining(provider),
-    });
+      },
+    );
     expect(parsed.agents[0]).toMatchObject({ id: 'legacy-agent', provider: 'unknown' });
-    expect(parsed.providers.some((manifest) => manifest.provider === 'opencode')).toBe(false);
+    expect(parsed.providers.some((manifest) => manifest.provider === 'opencode')).toBe(true);
     expect(createAgentInputSchema.safeParse({ provider, workspaceId: 'w1' }).success).toBe(false);
     expect(createSpaceResultSchema.parse({ workspaceId: 'w1', runtime: snapshot }).runtime).toEqual(parsed);
     expect(runtimeStateSchema.parse(parsed)).toEqual(parsed);
@@ -175,17 +177,17 @@ describe('Herdr mobile protocol', () => {
     const result = createAgentResultSchema.parse({
       paneId: 'p2',
       agentId: 'agent-2',
-      name: 'codex',
+      name: 'copilot',
       runtime: {
         connectionState: 'connected',
         deviceId: 'device-1',
         workspaces: [],
         agents: [],
-        providers: [{ provider: 'codex', available: true }],
+        providers: [{ provider: 'copilot', available: true }],
       },
     });
 
-    expect(result.runtime.providers[0].provider).toBe('codex');
+    expect(result.runtime.providers[0].provider).toBe('copilot');
   });
 
   it('parses a created space with its refreshed runtime', () => {

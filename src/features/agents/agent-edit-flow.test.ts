@@ -77,7 +77,7 @@ describe('agent edit drafts', () => {
     expect(agentEditError({
       'device-a': { ...device, runtime: { ...EMPTY_RUNTIME, agents: [] } },
     }, draft)).toContain('agent is no longer');
-    live.provider = 'claude';
+    live.provider = 'unknown';
     expect(agentEditError({ 'device-a': device }, draft)).toContain('provider has changed');
     live.provider = 'copilot';
     live.providerSessionId = 'replacement';
@@ -122,7 +122,7 @@ describe('agent edit drafts', () => {
   it('rejects settings entry for an unimplemented provider even with remote support', () => {
     const live = agent();
     expect(() => beginAgentSettingsFlow({
-      ...live, provider: 'codex', capabilities: { ...live.capabilities, supportsRetuning: true },
+      ...live, provider: 'unknown', capabilities: { ...live.capabilities, supportsRetuning: true },
     })).toThrow('This app does not support');
   });
 });

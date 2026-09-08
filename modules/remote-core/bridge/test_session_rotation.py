@@ -17,9 +17,6 @@ class SessionRotationTest(unittest.TestCase):
         home = patch.object(Path, "home", return_value=self.home)
         home.start()
         self.addCleanup(home.stop)
-        environment = patch.dict("os.environ", {"CODEX_HOME": str(self.home / ".codex")})
-        environment.start()
-        self.addCleanup(environment.stop)
         self.bridge = Bridge()
         self.bridge.agent_catalog = [{"provider": "copilot", "available": True}]
         self.bridge._ensure_pane_subscriptions = Mock()
@@ -185,30 +182,6 @@ class SessionRotationTest(unittest.TestCase):
             for call in self.bridge._herdr_request.call_args_list
         ))
 
-    def test_other_empty_semantic_transcripts_keep_their_session_identity(self):
-        for provider, directory in (
-            ("claude", ".claude/projects/project"),
-            ("codex", ".codex/sessions"),
-        ):
-            with self.subTest(provider=provider):
-                folder = self.home / directory
-                folder.mkdir(parents=True)
-                session_id = str(uuid.uuid4()) if provider == "codex" else "empty-session"
-                path = folder / f"{session_id}.jsonl"
-                path.write_text(
-                    json.dumps({"type": "session_meta", "payload": {"id": session_id}}) + "\n"
-                    if provider == "codex" else ""
-                )
-                self.snapshot = self.make_snapshot(session_id, provider)
-                with patch.object(
-                    self.bridge.providers["codex"], "resolve_session", return_value=session_id
-                ):
-                    conversation = self.poll()
-                self.assertEqual(conversation["provider"], provider)
-                self.assertEqual(conversation["providerSessionId"], session_id)
-                self.assertTrue(conversation["semantic"])
-                self.assertEqual(conversation["items"], [])
-
     def test_terminal_fallback_always_carries_explicit_session_identity(self):
         for session in (None, "ses_rotation"):
             with self.subTest(session=session):
@@ -257,11 +230,11 @@ class SessionRotationTest(unittest.TestCase):
         self.assertNotIn("old-question", self.bridge.sessions.question_ids())
 
     def test_first_native_identity_does_not_erase_creation_settings(self):
-        self.snapshot = self.make_snapshot(None, "claude")
+        self.snapshot = self.make_snapshot(None, "opencode")
         self.poll()
-        tuning = {"model": "sonnet", "effort": "high", "context": None}
+        tuning = {"model": "provider/model", "effort": None, "context": None}
         self.bridge.sessions.set_tuning("p1", tuning)
-        self.snapshot = self.make_snapshot("first-claude-session", "claude")
+        self.snapshot = self.make_snapshot("ses_first", "opencode")
         self.poll()
         self.assertEqual(self.bridge.sessions.tuning("p1"), tuning)
         self.assertEqual(self.bridge.runtime["agents"][0]["tuning"], tuning)

@@ -15,6 +15,7 @@ from .ledger import CommandLedger
 from .session_registry import SessionKey, SessionRegistry
 from .providers.base import ProviderAdapter
 from .providers import SUPPORTED_PROVIDERS, create_registry, provider_type, normalize_provider, provider_label
+from .providers.opencode.models import list_models
 
 class Bridge:
     def __init__(self) -> None:
@@ -187,11 +188,20 @@ class Bridge:
             else:
                 self._refresh_runtime()
             return self.runtime
+        if action == "opencode.models":
+            return list_models(self, payload)
         if action == "agent.conversation":
             with self.refresh_lock:
                 self._refresh_runtime_and_publish()
                 agent = self._require_agent(payload)
                 return self._load_conversation(agent)
+        if action == "agent.variant_options":
+            with self.refresh_lock:
+                self._refresh_runtime_and_publish()
+                agent = self._require_agent(payload)
+                if agent.get("provider") != "opencode":
+                    raise BridgeError("UNSUPPORTED_TUNING", "Live variant options are only available for OpenCode.")
+                return self.providers["opencode"].variant_options(payload)
         if action == "agent.send_message":
             agent = self._require_agent(payload)
             text = payload.get("text")
@@ -333,9 +343,8 @@ class Bridge:
         agent will use next: the log can be a moment behind a change made from
         here.
 
-        For Copilot, everything not set from here comes from its session log.
-        Other providers' session formats are not read for tuning, so settings
-        not remembered from creation remain unknown.
+        Settings not set from here come from the adapter's authoritative
+        session metadata when that provider exposes it.
         """
         ours = self.sessions.tuning(pane_id)
         logged = self.provider_adapter(provider).session_tuning(provider_session_id)

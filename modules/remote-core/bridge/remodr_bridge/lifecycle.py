@@ -249,10 +249,7 @@ def create_agent(host: Bridge, payload: dict[str, Any]) -> dict[str, Any]:
                 pane_id, session_id, host._tuning_of(payload), bypass_permissions,
             )
         for _ in range(20):
-            if adapter.spec.wait_for_session:
-                host._refresh_runtime(inspect_copilot=False)
-            else:
-                host._refresh_runtime()
+            host._refresh_runtime()
             agent = next(
                 (
                     item
@@ -261,7 +258,7 @@ def create_agent(host: Bridge, payload: dict[str, Any]) -> dict[str, Any]:
                 ),
                 None,
             )
-            if agent and (not adapter.spec.wait_for_session or agent.get("providerSessionId")):
+            if agent:
                 break
             time.sleep(0.1)
         if not agent:

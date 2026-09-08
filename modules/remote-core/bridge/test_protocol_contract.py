@@ -13,8 +13,6 @@ from herdr_mobile_bridge import Bridge
 FIXTURES = Path(__file__).parent / "fixtures" / "protocol"
 CONVERSATIONS = (
     "copilot-session-replacement.json",
-    "claude-empty-session.json",
-    "codex-empty-session.json",
     "unknown-null-session-fallback.json",
     "opencode-semantic-session.json",
 )
@@ -34,7 +32,6 @@ class ProtocolContractTest(unittest.TestCase):
         self.addCleanup(home.stop)
         environment = patch.dict("os.environ", {
             "HOME": str(self.home),
-            "CODEX_HOME": str(self.home / ".codex"),
             "REMODR_OPENCODE_DB": str(self.home / "opencode.db"),
             "HERDR_SOCKET": str(self.home / "herdr.sock"),
             "HERDR_SESSION": "contract-session",
@@ -88,8 +85,6 @@ class ProtocolContractTest(unittest.TestCase):
         session_id = session["providerSessionId"]
         paths = {
             "copilot": self.home / ".copilot" / "session-state" / str(session_id) / "events.jsonl",
-            "claude": self.home / ".claude" / "projects" / "synthetic" / f"{session_id}.jsonl",
-            "codex": self.home / ".codex" / "sessions" / f"{session_id}.jsonl",
         }
         path = paths.get(session["provider"])
         if session["provider"] == "opencode" and session_id:
@@ -98,12 +93,26 @@ class ProtocolContractTest(unittest.TestCase):
                     CREATE TABLE IF NOT EXISTS session (id TEXT PRIMARY KEY, revert TEXT, model TEXT);
                     CREATE TABLE IF NOT EXISTS session_message
                     (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER, data TEXT);
+                    CREATE TABLE IF NOT EXISTS todo
+                    (session_id TEXT NOT NULL, content TEXT NOT NULL, status TEXT NOT NULL,
+                     priority TEXT NOT NULL, position INTEGER NOT NULL, time_created INTEGER NOT NULL,
+                     time_updated INTEGER NOT NULL, PRIMARY KEY (session_id, position));
                 """)
                 connection.execute("INSERT OR REPLACE INTO session (id) VALUES (?)", (session_id,))
                 connection.executemany(
                     "INSERT OR REPLACE INTO session_message VALUES (?, ?, ?, ?, ?)",
                     [(row["id"], session_id, row["type"], row["seq"], json.dumps(row["data"]))
                      for row in frame["databaseMessages"]],
+                )
+                connection.executemany(
+                    "INSERT OR REPLACE INTO todo VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        (
+                            session_id, row["content"], row["status"], row["priority"],
+                            position, row.get("time", 0), row.get("time", 0),
+                        )
+                        for position, row in enumerate(frame.get("databaseTodos", []))
+                    ],
                 )
         if path:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -127,7 +136,7 @@ class ProtocolContractTest(unittest.TestCase):
                     self.assertEqual(
                         {key: agent[key] for key in frame["session"]}, frame["session"]
                     )
-                    if actual["semantic"] and actual["provider"] != "codex":
+                    if actual["semantic"]:
                         self.assertFalse(any(
                             call.args[0] == "agent.read"
                             for call in self.bridge._herdr_request.call_args_list

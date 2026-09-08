@@ -53,7 +53,6 @@ class ProviderSpec:
     tool_activity: bool = False
     questions: bool = False
     todos: bool = False
-    wait_for_session: bool = False
 
     def matches(self, normalized: str) -> bool:
         return (
@@ -156,8 +155,6 @@ class ProviderAdapter:
         }
 
     def agent_capabilities(self, session_id: Any) -> dict[str, bool]:
-        # Preserve the wire contract: only Copilot advertises per-session
-        # semantic capabilities; Claude/Codex can still return semantic reads.
         semantic = self.has_semantic_session(session_id)
         return {
             "supportsRetuning": self.spec.retunable,

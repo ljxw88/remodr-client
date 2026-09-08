@@ -50,6 +50,14 @@ export function agentDraftForDevice(draft: NewAgentDraft, device: DeviceRuntimeS
   return { ...draft, deviceId: device.deviceId, workspaceId: defaults.workspaceId, provider, tuning: defaults.tuning };
 }
 
+export function agentDraftForWorkspace(draft: NewAgentDraft, workspaceId: string): NewAgentDraft {
+  if (workspaceId === draft.workspaceId) return draft;
+  return {
+    ...draft, workspaceId,
+    tuning: draft.provider === 'opencode' ? tuningForModel('opencode', null, draft.tuning) : draft.tuning,
+  };
+}
+
 export function spaceDraftForDevice(draft: NewSpaceDraft, deviceId: string): NewSpaceDraft {
   return draft.deviceId === deviceId ? draft : { ...draft, deviceId, cwd: '~/' };
 }
@@ -75,6 +83,12 @@ export function agentCreationError(draft: NewAgentDraft, device: DeviceRuntimeSt
   )) return 'Choose an available space on this device.';
   const provider = device.runtime.providers.find((manifest) => manifest.provider === draft.provider);
   if (!provider?.available) return provider?.unavailableReason || 'This provider is unavailable on this device. Choose another provider.';
+  const availability = draft.modelAvailability;
+  if (draft.provider === 'opencode' && draft.tuning.model && availability?.model === draft.tuning.model
+    && (!availability.available || availability.deviceId !== draft.deviceId || availability.workspaceId !== draft.workspaceId
+      || availability.cwd !== device.runtime.workspaces.find((space) => space.id === draft.workspaceId)?.cwd)) {
+    return 'The selected OpenCode model is not available for this space. Choose another model or Auto.';
+  }
   if (draft.name.trim().length > 60) return 'Agent names must be 60 characters or fewer.';
   return null;
 }

@@ -12,10 +12,12 @@ files, monitoring, Docker, and tunnels. There is no interactive terminal.
 Provider adapters return semantic messages where supported; raw output is an
 explicit compatibility view.
 
-Supported providers are **OpenCode** (preferred), **GitHub Copilot**,
-**Claude Code**, and **Codex**. OpenCode manages its upstream model accounts on
-the remote host; see [OpenCode integration](docs/opencode-integration.md) for
-setup, supported behavior, and the native API integration direction.
+Supported agent providers are **OpenCode** (preferred) and **GitHub Copilot**.
+To use ChatGPT/OpenAI or Anthropic models, authenticate those accounts through
+OpenCode on each remote host using its `/connect` workflow. Remodr does not
+launch the standalone Codex or Claude Code CLIs. See
+[OpenCode integration](docs/opencode-integration.md) for setup and supported
+behavior.
 
 Each enabled device has its own supervised connection and cached runtime.
 Dropped connections retain transcripts and durable pending sends, with a floating

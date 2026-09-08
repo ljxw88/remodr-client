@@ -2,14 +2,12 @@
 from typing import Any
 
 from .base import ProviderAdapter, ProviderHost
-from .claude import ClaudeAdapter
-from .codex import CodexAdapter
 from .copilot import CopilotAdapter
 from .opencode import OpenCodeAdapter
 
 ADAPTER_TYPES = {
     adapter.spec.name: adapter
-    for adapter in (OpenCodeAdapter, CopilotAdapter, ClaudeAdapter, CodexAdapter)
+    for adapter in (OpenCodeAdapter, CopilotAdapter)
 }
 SUPPORTED_PROVIDERS = tuple(ADAPTER_TYPES)
 BYPASS_ARGUMENTS = {

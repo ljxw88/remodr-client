@@ -146,7 +146,7 @@ class PackagedRuntimeTest(unittest.TestCase):
             self.assertTrue(response["ok"])
             self.assertEqual(response["payload"], {"alive": True})
 
-    def test_real_package_imports_all_providers_in_isolation(self):
+    def test_real_package_imports_supported_providers_in_isolation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             home = root / "home"
@@ -159,7 +159,7 @@ class PackagedRuntimeTest(unittest.TestCase):
             )
             version = json.loads(result.stdout)
             self.assertEqual(version["protocol"], 1)
-            self.assertEqual(version["providers"], ["opencode", "copilot", "claude", "codex"])
+            self.assertEqual(version["providers"], ["opencode", "copilot"])
             self.assertTrue(version["bridgeVersion"])
             self.assertEqual(result.stderr, "")
             self.assertEqual(set(root.iterdir()), {output, home})

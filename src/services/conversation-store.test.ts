@@ -281,7 +281,7 @@ describe('ConversationStore ownership', () => {
 
   it.each([
     transcript('another-agent'),
-    { ...transcript(), provider: 'codex' },
+    { ...transcript(), provider: 'unknown' },
   ])('rejects a response from another agent/provider before publication', async (response) => {
     const { store, read, storage, onRead } = setup();
     read.mockResolvedValue(response);

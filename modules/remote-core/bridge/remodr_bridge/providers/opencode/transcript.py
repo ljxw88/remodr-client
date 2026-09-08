@@ -21,6 +21,14 @@ from typing import Any, Iterator
 from ...formatting import tool_detail, tool_title
 
 MAX_MESSAGES = 200
+MAX_TODOS = 1_000
+MAX_TODO_CONTENT = 10_000
+TODO_STATUSES = {
+    "pending": "pending",
+    "in_progress": "in_progress",
+    "completed": "done",
+    "cancelled": "cancelled",
+}
 
 
 class TranscriptError(ValueError):
@@ -76,6 +84,10 @@ def schema(connection: sqlite3.Connection) -> set[str]:
         "session_message": {"id", "session_id", "type", "seq", "data"},
         "message": {"id", "session_id", "time_created", "data"},
         "part": {"id", "session_id", "message_id", "data"},
+        "todo": {
+            "session_id", "content", "status", "priority", "position",
+            "time_created", "time_updated",
+        },
     }
     if "session" not in tables or not (
         "session_message" in tables or {"message", "part"} <= tables
@@ -100,6 +112,16 @@ def database_supported() -> bool:
         return False
 
 
+def todos_supported() -> bool:
+    try:
+        with database() as connection:
+            if connection is None:
+                return False
+            return "todo" in schema(connection)
+    except (TranscriptError, OSError):
+        return False
+
+
 def object_data(value: Any) -> dict[str, Any]:
     try:
         result = json.loads(value)
@@ -114,6 +136,14 @@ def text(value: Any) -> str:
     if not isinstance(value, str):
         raise TranscriptError("Invalid OpenCode text field.")
     return value
+
+
+def todo_field(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) <= 128
+        and not any(ord(char) < 32 or ord(char) == 127 for char in value)
+    )
 
 
 def visible(part: dict[str, Any]) -> bool:
@@ -156,6 +186,53 @@ def project_part(key: str, role: str, part: dict[str, Any]) -> dict[str, Any] | 
         "title": tool_title(name),
         "detail": tool_detail(state.get("input")),
         "state": status,
+    }
+
+
+def project_todos(
+    connection: sqlite3.Connection, identifier: str,
+) -> dict[str, Any] | None:
+    rows = connection.execute(
+        """
+        SELECT content, status, priority, position, time_updated
+        FROM todo
+        WHERE session_id = ?
+        ORDER BY position
+        LIMIT ?
+        """,
+        (identifier, MAX_TODOS + 1),
+    ).fetchall()
+    if not rows:
+        return None
+    if len(rows) > MAX_TODOS:
+        raise TranscriptError("OpenCode returned too many todo items.")
+    todos = []
+    updated = 0
+    for position, row in enumerate(rows):
+        content = row["content"]
+        status = row["status"]
+        priority = row["priority"]
+        if (
+            row["position"] != position
+            or not isinstance(content, str)
+            or len(content) > MAX_TODO_CONTENT
+            or not todo_field(status)
+            or not todo_field(priority)
+            or not isinstance(row["time_updated"], int)
+            or row["time_updated"] < 0
+        ):
+            raise TranscriptError("Invalid OpenCode todo data.")
+        todos.append({
+            "id": f"opencode:{identifier}:todo:{position}",
+            "text": content,
+            "state": TODO_STATUSES.get(status, "unknown"),
+        })
+        updated = max(updated, row["time_updated"])
+    return {
+        "id": f"opencode:{identifier}:todos",
+        "kind": "todo_update",
+        "timestamp": updated,
+        "todos": todos,
     }
 
 
@@ -226,6 +303,10 @@ def read_session(identifier: Any) -> dict[str, Any] | None:
                     )
                     if item:
                         items.append(item)
+        if "todo" in tables:
+            todo_item = project_todos(connection, identifier)
+            if todo_item:
+                items.append(todo_item)
         return {"items": items}
 
 
