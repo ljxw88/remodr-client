@@ -1191,6 +1191,11 @@ class HumanQuestionTest(unittest.TestCase):
 class AgentManagementTest(unittest.TestCase):
     """Naming, tuning, renaming and closing a single agent."""
 
+    def setUp(self):
+        trust = patch("remodr_bridge.providers.copilot.trust.trust_workspace")
+        self.trust_workspace = trust.start()
+        self.addCleanup(trust.stop)
+
     def test_a_model_and_effort_become_command_line_arguments(self):
         self.assertEqual(
             Bridge._tuning_arguments("copilot", {"model": "gpt-5.4", "effort": "high"}),

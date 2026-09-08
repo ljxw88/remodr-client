@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from ..base import ProviderHost
 from .settings import SPEC, SESSION_STATE_EVENTS, SESSION_CHANGE_EVENTS, NO_MODEL
+from . import trust
 from ...constants import SHELL_READY_TIMEOUT
 from ...errors import BridgeError
 
@@ -78,8 +79,15 @@ class CopilotTuning:
         host = self.host
         provider = str(agent.get("provider"))
         # Preserve launch permissions and settings through a same-session restart.
-        bypass = host.sessions.bypass(pane_id)
+        # A bridge reconnect can lose launch bookkeeping. Unknown permissions
+        # must not turn workspace trust into automatic tool approval.
+        bypass = host.sessions.bypass(pane_id, default=False)
         previous = host.sessions.tuning(pane_id)
+        cwd = agent.get("cwd")
+        if isinstance(cwd, str) and cwd:
+            # Establish workspace trust before stopping the existing process;
+            # a config failure must not strand the running conversation.
+            trust.trust_workspace(cwd)
 
         host._herdr_request("agent.prompt", {"target": pane_id, "text": "/exit"})
         deadline = time.monotonic() + SHELL_READY_TIMEOUT

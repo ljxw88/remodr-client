@@ -53,6 +53,28 @@ the mobile app confirms every destructive tool action.
 App-level confirmations for deleting a saved server or closing an agent/space
 are separate from provider tool approval.
 
+### Copilot workspace trust
+
+Starting Copilot in a workspace selected through Remodr remembers that exact
+canonical project directory in Copilot's `trustedFolders` configuration. This
+is equivalent to trusting that folder for future Copilot sessions; only choose
+projects whose contents and local instructions you trust. Automatic trust of
+the filesystem root is refused. The configuration location follows
+`COPILOT_HOME`, or defaults to `~/.copilot/config.json`.
+
+Trust updates preserve other configuration fields and JSONC comments, serialize bridge writers,
+check for external edits and publish privately with an atomic rename.
+Malformed or unsafe configuration is reported rather than overwritten.
+Workspace trust does not change the separate tool-permission toggle, SSH host
+key verification, or unrestricted-path access. Arbitrary terminal approval
+dialogs are never automatically answered.
+
+If a bridge reconnect has lost an agent's launch-permission setting, a
+Copilot restart defaults to tool prompts rather than granting tool bypass.
+Avoid simultaneously editing Copilot configuration while launching agents:
+Copilot's own writers do not share the bridge lock, so the external-edit
+check cannot provide a cross-process atomic merge.
+
 ## Delivery and recovery safety
 
 Durable send/answer commands bind their IDs to payload and session identity.

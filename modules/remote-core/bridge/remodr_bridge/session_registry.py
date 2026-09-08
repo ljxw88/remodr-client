@@ -164,10 +164,10 @@ class SessionRegistry:
             state = self._panes.get(pane_id)
             return deepcopy(state.tuning) if state else {}
 
-    def bypass(self, pane_id: str) -> bool:
+    def bypass(self, pane_id: str, *, default: bool = True) -> bool:
         with self._lock:
             state = self._panes.get(pane_id)
-            return state.bypass if state and state.bypass is not None else True
+            return state.bypass if state and state.bypass is not None else default
 
     def cached_tuning(self, session_id: str) -> tuple[int, dict[str, Any]] | None:
         with self._lock:

@@ -5,6 +5,7 @@ import os
 import re
 import select
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -15,6 +16,7 @@ from ..base import ProviderHost
 PROCESS_INSPECTION_TIMEOUT = 2.0
 PROCESS_INSPECTION_MAX_BYTES = 512 * 1024
 PROCESS_INSPECTION_MAX_FDS = 4096
+SESSION_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
 
 class CopilotProcesses:
     def __init__(self, host: ProviderHost) -> None:
@@ -233,7 +235,55 @@ class CopilotProcesses:
             if (
                 path.is_absolute() and path.name == "session.db"
                 and path.parent.parent == root
-                and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", path.parent.name)
+                and SESSION_ID_PATTERN.fullmatch(path.parent.name)
             ):
                 sessions.add(path.parent.name)
+        return sessions
+
+    def process_start_time(self, pid: int) -> float:
+        if sys.platform.startswith("linux"):
+            fields = (Path("/proc") / str(pid) / "stat").read_text().rsplit(")", 1)[1].split()
+            with Path("/proc/stat").open() as system:
+                boot = next((line.split()[1] for line in system if line.startswith("btime ")), None)
+            if boot is None:
+                raise OSError("process boot time is unavailable")
+            return int(boot) + int(fields[19]) / os.sysconf("SC_CLK_TCK")
+        if sys.platform == "darwin":
+            output = self.bounded_process_output([
+                "/usr/bin/env", "LC_ALL=C", "/bin/ps", "-p", str(pid), "-o", "lstart=",
+            ]).decode("ascii").strip()
+            return time.mktime(time.strptime(output, "%a %b %d %H:%M:%S %Y"))
+        raise OSError("process start time is unsupported on this platform")
+
+    def locked_session_ids(self, pid: int) -> set[str]:
+        """Copilot creates a PID-scoped marker before it writes the first turn.
+
+        Inspect only markers for the verified foreground runtime. Old markers
+        from a reused PID cannot bind a new process to a previous conversation.
+        """
+        started = self.process_start_time(pid)
+        root = (Path.home() / ".copilot" / "session-state").resolve()
+        if not root.is_dir():
+            return set()
+        deadline = time.monotonic() + PROCESS_INSPECTION_TIMEOUT
+        sessions = set()
+        with os.scandir(root) as entries:
+            for index, entry in enumerate(entries):
+                if index >= PROCESS_INSPECTION_MAX_FDS or time.monotonic() >= deadline:
+                    raise OSError("session marker inspection exceeds its limit")
+                if not SESSION_ID_PATTERN.fullmatch(entry.name) or not entry.is_dir(follow_symlinks=False):
+                    continue
+                marker = Path(entry.path) / f"inuse.{pid}.lock"
+                try:
+                    fd = os.open(marker, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                except FileNotFoundError:
+                    continue
+                with os.fdopen(fd, "rb") as handle:
+                    info = os.fstat(handle.fileno())
+                    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+                        continue
+                    if info.st_mtime < started or info.st_size > 32:
+                        continue
+                    if handle.read(33).strip() == str(pid).encode("ascii"):
+                        sessions.add(entry.name)
         return sessions

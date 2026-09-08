@@ -144,6 +144,36 @@ Structured Copilot questions are normalized from both supported `ask_user`
 shapes. See [ADR 014](adr/014-answering-agent-questions.md) for composer/bar
 placement and delivery constraints.
 
+### Copilot startup identity and workspace trust
+
+Copilot can be ready for input before it writes `events.jsonl`, opens
+`session.db`, or reports its session to Herdr. Depending only on the open
+database deadlocked the first mobile message, especially after reconnecting
+the bridge or restarting an agent to change reasoning settings.
+
+The adapter first verifies the foreground Copilot process. An open session
+database remains authoritative; otherwise it reads that exact process's
+`inuse.<pid>.lock` markers under `~/.copilot/session-state/`. Marker content,
+ownership and modification time must match the live process, and the pane's
+foreground binding is checked again after inspection. Markers older than the
+process cannot revive a session from a reused PID. Multiple candidate sessions
+remain an explicit unresolved identity, not a reason to pick the newest folder.
+Messages still require exact provider/session/pane preconditions and durable
+command IDs. No synthetic first prompt or provider transcript is created.
+
+For Copilot launched from Remodr, the selected workspace is remembered as
+trusted before startup, using Copilot's documented `config.json.trustedFolders`
+setting. The same preparation runs before a same-session restart. Only the
+canonical project directory is added; existing settings and JSONC comments are preserved, and
+configuration errors stop the launch rather than silently replacing the file.
+This is separate from **Allow tools automatically** and does not grant
+`--allow-all-paths` or automatically approve tool requests. It prevents the
+startup trust question on future launches; it does not send blind keystrokes
+to dialogs in already-running external agents.
+
+Bridge changes require rebuilding and reinstalling the Android app so its
+content-addressed remote deployment contains the updated adapter.
+
 ### Codex startup and thread identity
 
 Codex 0.153.4 allocates a real thread UUID before the first prompt, but defers

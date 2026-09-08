@@ -6,7 +6,7 @@ from typing import Any
 import uuid
 
 from ..base import ProviderAdapter, ProviderHost
-from . import sessions, transcript
+from . import sessions, transcript, trust
 from .processes import CopilotProcesses
 from .settings import SPEC
 from .tuning import CopilotTuning
@@ -28,6 +28,11 @@ class CopilotAdapter(ProviderAdapter):
         if label:
             args.extend(["--name", label])
         return session_id
+
+    def prepare_launch(self, label: str, args: list[str], cwd: str | None) -> str:
+        if cwd:
+            trust.trust_workspace(cwd)
+        return self.new_session_arguments(label, args)
 
     def resolve_session(
         self, raw: dict[str, Any], native_session_id: str | None, *, inspect: bool
