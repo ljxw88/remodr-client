@@ -12,23 +12,27 @@ def effective_session(
     status = "unavailable"
     reason = ""
     session_id = None
+    source = "database"
     inspected = False
     try:
         binding = processes.foreground_process(pane_id)
         sessions = processes.open_session_ids(binding[0])
+        if not sessions:
+            sessions = processes.locked_session_ids(binding[0])
+            source = "marker"
         inspected = True
         # Recheck the live pane binding after inspection. Session results are
         # never cached by PID, so clears and process/PID reuse are re-inspected.
         if processes.foreground_process(pane_id) != binding:
             raise ValueError("foreground process changed during descriptor inspection")
         if len(sessions) > 1:
-            raise ValueError("foreground Copilot has multiple open session databases")
+            raise ValueError(f"foreground Copilot has multiple active session {source}s")
         if sessions:
             session_id = next(iter(sessions))
             status = "verified"
         else:
             # Idle/new CLIs need not have opened the optional session database.
-            reason = "foreground Copilot does not expose an open session database"
+            reason = "foreground Copilot does not expose an active session database or marker"
     except ValueError as error:
         status, reason = "unresolved", str(error)
     except (OSError, BridgeError, subprocess.SubprocessError) as error:
@@ -42,7 +46,7 @@ def effective_session(
     if status == "verified":
         process_bound = True
         diagnostic = (
-            "Using the foreground Copilot session database; native session reference differs."
+            f"Using the foreground Copilot session {source}; native session reference differs."
             if session_id != native_session_id else ""
         )
     elif status == "unresolved" or host.sessions.is_process_bound(pane_id):

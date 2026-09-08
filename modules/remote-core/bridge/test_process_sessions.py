@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 import uuid
 from pathlib import Path
@@ -45,6 +46,10 @@ class ProcessSessionTest(unittest.TestCase):
         )
         self.open_sessions = self.inspection.start()
         self.addCleanup(self.inspection.stop)
+        locks = patch.object(self.bridge.providers["copilot"].processes, "locked_session_ids", return_value=set())
+        self.locked_sessions = locks.start()
+        self.addCleanup(locks.stop)
+        self.lock_patch = locks
         metadata = patch.object(self.bridge.providers["copilot"].processes, "linux_process_metadata", side_effect=self.process_metadata)
         metadata.start()
         self.addCleanup(metadata.stop)
@@ -227,6 +232,116 @@ class ProcessSessionTest(unittest.TestCase):
         self.assertEqual(self.poll()["providerSessionId"], "native-stale")
         self.assertFalse(self.bridge.sessions.is_process_bound("p1"))
         self.assertIn("unverified native identity", self.bridge._diagnostic.call_args.args[1])
+
+    def test_first_message_binds_to_live_marker_without_native_id_or_database(self):
+        self.open_sessions.return_value = set()
+        self.locked_sessions.return_value = {"new-before-first-turn"}
+        self.snapshot["agents"][0].pop("agent_session")
+        conversation = self.poll()
+        self.assertEqual(conversation["providerSessionId"], "new-before-first-turn")
+        self.assertEqual(self.bridge.runtime["agents"][0]["providerSessionId"], "new-before-first-turn")
+        self.assertTrue(self.bridge.sessions.is_process_bound("p1"))
+        self.assertIsNone(self.bridge.sessions.identity_error("p1"))
+
+    def test_marker_recovers_identity_after_bridge_reconnect_without_launch_hints(self):
+        self.open_sessions.return_value = set()
+        self.locked_sessions.return_value = {"active-session"}
+        self.assertIsNone(self.bridge.sessions.launched_session("p1"))
+        self.assertEqual(self.poll()["items"][0]["text"], "current history")
+        self.assertEqual(self.poll()["providerSessionId"], "active-session")
+
+    def test_first_message_with_marker_identity_keeps_durable_preconditions(self):
+        self.open_sessions.return_value = set()
+        self.locked_sessions.return_value = {"new-before-first-turn"}
+        self.snapshot["agents"][0].pop("agent_session")
+        envelope = {
+            "protocol": 1, "type": "request", "id": "first-send",
+            "commandId": str(uuid.uuid4()), "action": "agent.send_message",
+            "payload": {
+                "agentId": self.agent_id, "text": "hello",
+                "precondition": {
+                    "provider": "copilot", "paneId": "p1",
+                    "providerSessionId": "new-before-first-turn",
+                },
+            },
+        }
+        self.bridge._handle_request_line(json.dumps(envelope))
+        self.assertTrue(self.bridge.write.call_args.args[0]["ok"])
+        prompts = [call for call in self.bridge._herdr_request.call_args_list if call.args[0] == "agent.prompt"]
+        self.assertEqual(len(prompts), 1)
+        self.bridge._handle_request_line(json.dumps(envelope))
+        self.assertEqual(len([call for call in self.bridge._herdr_request.call_args_list if call.args[0] == "agent.prompt"]), 1)
+        self.locked_sessions.return_value = {"rotated-session"}
+        envelope["commandId"] = str(uuid.uuid4())
+        self.bridge._handle_request_line(json.dumps(envelope))
+        self.assertEqual(self.bridge.write.call_args.args[0]["error"]["code"], "COMMAND_PRECONDITION_FAILED")
+        self.assertEqual(len([call for call in self.bridge._herdr_request.call_args_list if call.args[0] == "agent.prompt"]), 1)
+
+    def test_new_marker_overrides_stale_launch_and_native_id_after_clear(self):
+        self.poll()
+        self.open_sessions.return_value = set()
+        self.locked_sessions.return_value = {"after-clear"}
+        self.assertEqual(self.poll()["providerSessionId"], "after-clear")
+        self.locked_sessions.return_value = set()
+        with self.assertRaises(BridgeError) as caught:
+            self.poll()
+        self.assertEqual(caught.exception.code, "SESSION_IDENTITY_UNRESOLVED")
+
+    def test_multiple_active_markers_fail_closed(self):
+        self.open_sessions.return_value = set()
+        self.locked_sessions.return_value = {"first", "second"}
+        with self.assertRaises(BridgeError) as caught:
+            self.poll()
+        self.assertEqual(caught.exception.code, "SESSION_IDENTITY_UNRESOLVED")
+
+    def test_database_remains_authoritative_when_available(self):
+        self.locked_sessions.return_value = {"stale-marker"}
+        self.assertEqual(self.poll()["providerSessionId"], "active-session")
+        self.locked_sessions.assert_not_called()
+
+    def test_marker_inspection_rejects_stale_pid_mismatched_content_and_symlinked_directories(self):
+        self.lock_patch.stop()
+        root = self.home / ".copilot" / "session-state"
+        for name, content, modified in [
+            ("live", "100\n", 200), ("reused-pid", "100\n", 90),
+            ("wrong-pid", "101\n", 200), ("oversized", "100" * 20, 200),
+        ]:
+            folder = root / name
+            folder.mkdir()
+            marker = folder / "inuse.100.lock"
+            marker.write_text(content)
+            os.utime(marker, (modified, modified))
+        (root / "linked").symlink_to(root / "live", target_is_directory=True)
+        with patch.object(self.bridge.providers["copilot"].processes, "process_start_time", return_value=100):
+            self.assertEqual(self.bridge.providers["copilot"].processes.locked_session_ids(100), {"live"})
+
+    def test_marker_inspection_is_bounded_and_checks_owner(self):
+        self.lock_patch.stop()
+        root = self.home / ".copilot" / "session-state" / "marker-session"
+        root.mkdir()
+        (root / "inuse.100.lock").write_text("100\n")
+        processes = self.bridge.providers["copilot"].processes
+        with (
+            patch.object(processes, "process_start_time", return_value=0),
+            patch("remodr_bridge.providers.copilot.processes.PROCESS_INSPECTION_MAX_FDS", 0),
+        ):
+            with self.assertRaisesRegex(OSError, "exceeds its limit"):
+                processes.locked_session_ids(100)
+        with (
+            patch.object(processes, "process_start_time", return_value=0),
+            patch("remodr_bridge.providers.copilot.processes.os.getuid", return_value=os.getuid() + 1),
+        ):
+            self.assertEqual(processes.locked_session_ids(100), set())
+
+    def test_macos_marker_start_time_uses_locale_independent_process_metadata(self):
+        processes = self.bridge.providers["copilot"].processes
+        value = "Tue Sep  8 12:30:07 2026"
+        with (
+            patch("remodr_bridge.providers.copilot.processes.sys.platform", "darwin"),
+            patch.object(processes, "bounded_process_output", return_value=(value + "\n").encode()) as read,
+        ):
+            self.assertEqual(processes.process_start_time(100), time.mktime(time.strptime(value, "%a %b %d %H:%M:%S %Y")))
+        self.assertEqual(read.call_args.args[0], ["/usr/bin/env", "LC_ALL=C", "/bin/ps", "-p", "100", "-o", "lstart="])
 
     def test_missing_database_cannot_restore_native_identity_after_process_binding(self):
         self.poll()
