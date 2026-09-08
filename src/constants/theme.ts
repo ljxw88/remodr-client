@@ -19,7 +19,7 @@ export const Colors = {
   success: '#7DD3A7',
   warning: '#F5C66A',
   onAccent: '#171717',
-  onAccentSecondary: '#171717',
+  onAccentSecondary: '#FFFFFF',
   // Sheets and menus render in their own window, so use an opaque-feeling
   // neutral veil rather than a hue borrowed from the old canvas.
   fog: 'rgba(10,10,10,0.72)',

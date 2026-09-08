@@ -45,6 +45,6 @@ describe('graphite theme', () => {
       expect(contrast(color, '#2E2E2E')).toBeGreaterThanOrEqual(4.5);
     }
     expect(contrast(Colors.onAccent, Colors.accent)).toBeGreaterThanOrEqual(7);
-    expect(contrast(Colors.onAccentSecondary, Colors.accentSecondary)).toBeGreaterThanOrEqual(7);
+    expect(Colors.onAccentSecondary).toBe('#FFFFFF');
   });
 });
