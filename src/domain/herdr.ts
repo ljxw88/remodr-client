@@ -124,6 +124,11 @@ export const herdrConnectionStateSchema = z.enum([
 ]);
 export type HerdrConnectionState = z.infer<typeof herdrConnectionStateSchema>;
 
+export function isRuntimeLoading(connection: HerdrConnectionState): boolean {
+  return connection === 'connecting' || connection === 'authenticating' ||
+    connection === 'starting_bridge' || connection === 'synchronizing' || connection === 'reconnecting';
+}
+
 export const runtimeStateSchema = z.object({
   connectionState: herdrConnectionStateSchema,
   deviceId: z.string().optional(),

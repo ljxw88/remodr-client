@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
@@ -6,6 +6,7 @@ import {
   ScrollView,
   StyleSheet,
   View,
+  useWindowDimensions,
   type LayoutChangeEvent,
   type StyleProp,
   type TextStyle,
@@ -15,9 +16,13 @@ import {
 import { ThemedText, type ThemedTextProps } from '@/components/themed-text';
 import type { ThemeColor } from '@/constants/theme';
 import { useAppSettings } from '@/hooks/use-app-settings';
+import { Motion } from '@/constants/motion';
+import { useForeground } from '@/hooks/use-foreground';
+import { useReducedMotion } from '@/hooks/use-reduce-motion';
+import { ScrollViewportContext } from '@/components/ui/scroll-viewport-context';
 
 export type MarqueeTextProps = {
-  children: string;
+  children?: string;
   type?: ThemedTextProps['type'];
   themeColor?: ThemeColor;
   style?: StyleProp<TextStyle>;
@@ -26,10 +31,11 @@ export type MarqueeTextProps = {
   startDelay?: number; // ms to pause at start
   endDelay?: number; // ms to pause at end
   enabled?: boolean; // override global setting
+  active?: boolean;
 };
 
 export function MarqueeText({
-  children,
+  children = '',
   type = 'default',
   themeColor,
   style,
@@ -38,59 +44,99 @@ export function MarqueeText({
   startDelay = 1500,
   endDelay = 1200,
   enabled: propEnabled,
+  active = true,
 }: MarqueeTextProps) {
   const { marqueeEnabled: globalEnabled } = useAppSettings();
   const enabled = propEnabled ?? globalEnabled;
+  const foreground = useForeground();
+  const reducedMotion = useReducedMotion();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const viewport = useContext(ScrollViewportContext);
+  const container = useRef<View | null>(null);
+  const scroller = useRef<ScrollView | null>(null);
 
   const [containerWidth, setContainerWidth] = useState(0);
   const [contentWidth, setContentWidth] = useState(0);
   const [translateX] = useState(() => new Animated.Value(0));
   const animationRef = useRef<Animated.CompositeAnimation | null>(null);
+  const monitor = useRef<ReturnType<typeof setInterval> | null>(null);
+  const playedText = useRef<string | null>(null);
 
   const overflow = enabled && contentWidth > containerWidth + 2 && containerWidth > 0;
   const distance = overflow ? contentWidth - containerWidth + 16 : 0;
 
+  const stop = useCallback(() => {
+    const animation = animationRef.current;
+    animationRef.current = null;
+    if (monitor.current != null) clearInterval(monitor.current);
+    monitor.current = null;
+    animation?.stop();
+  }, []);
+
   useEffect(() => {
-    if (animationRef.current) {
-      animationRef.current.stop();
-      animationRef.current = null;
-    }
+    scroller.current?.scrollTo({ x: 0, animated: false });
+  }, [children]);
+
+  useEffect(() => {
+    stop();
     translateX.setValue(0);
 
-    if (!overflow || distance <= 0) {
-      return;
-    }
+    if (!overflow || !active || !foreground || reducedMotion || playedText.current === children) return;
+    let cancelled = false;
 
     const duration = (distance / speed) * 1000;
     const useNative = Platform.OS !== 'web';
 
-    const loopAnimation = Animated.loop(
-      Animated.sequence([
+    const animation = Animated.sequence([
         Animated.delay(startDelay),
         Animated.timing(translateX, {
           toValue: -distance,
           duration,
           easing: Easing.linear,
           useNativeDriver: useNative,
+          isInteraction: false,
         }),
         Animated.delay(endDelay),
         Animated.timing(translateX, {
           toValue: 0,
-          duration: Math.min(800, duration * 0.5),
-          easing: Easing.inOut(Easing.ease),
+          duration: Motion.duration.disclosure,
+          easing: Motion.easing.standard,
           useNativeDriver: useNative,
+          isInteraction: false,
         }),
-        Animated.delay(800),
-      ]),
-    );
+      ]);
 
-    animationRef.current = loopAnimation;
-    loopAnimation.start();
+    const checkVisibility = (start: boolean) => {
+      container.current?.measureInWindow((x, y, width, height) => {
+        if (cancelled || (start && playedText.current === children)) return;
+        const bounds = viewport?.current;
+        const left = Math.max(0, bounds?.x ?? 0);
+        const top = Math.max(0, bounds?.y ?? 0);
+        const right = Math.min(windowWidth, bounds ? bounds.x + bounds.width : windowWidth);
+        const bottom = Math.min(windowHeight, bounds ? bounds.y + bounds.height : windowHeight);
+        const visible = width > 0 && height > 0 && x < right && x + width > left
+          && y < bottom && y + height > top;
+        if (!visible) {
+          stop();
+          translateX.setValue(0);
+        } else if (start) {
+          playedText.current = children;
+          animationRef.current = animation;
+          // Only a running, visible title needs monitoring; hidden rows never start a loop.
+          monitor.current = setInterval(() => checkVisibility(false), 250);
+          animation.start(() => {
+            if (!cancelled && animationRef.current === animation) stop();
+          });
+        }
+      });
+    };
+    checkVisibility(true);
 
     return () => {
-      loopAnimation.stop();
+      cancelled = true;
+      stop();
     };
-  }, [children, distance, enabled, endDelay, overflow, speed, startDelay, translateX]);
+  }, [active, children, distance, endDelay, foreground, overflow, reducedMotion, speed, startDelay, stop, translateX, viewport, windowHeight, windowWidth]);
 
   const handleContainerLayout = (event: LayoutChangeEvent) => {
     const width = event.nativeEvent.layout.width;
@@ -107,11 +153,24 @@ export function MarqueeText({
 
   return (
     <View
+      ref={container}
+      collapsable={false}
       onLayout={handleContainerLayout}
       style={[styles.container, containerStyle]}>
       <ScrollView
+        ref={scroller}
         horizontal
-        scrollEnabled={false}
+        scrollEnabled
+        onScrollBeginDrag={() => {
+          playedText.current = children;
+          if (!animationRef.current) return;
+          stop();
+          translateX.stopAnimation((offset) => {
+            if (!scroller.current) return;
+            translateX.setValue(0);
+            scroller.current.scrollTo({ x: Math.max(0, -offset), animated: false });
+          });
+        }}
         showsHorizontalScrollIndicator={false}
         bounces={false}
         style={styles.scrollView}

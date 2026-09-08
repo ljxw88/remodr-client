@@ -69,7 +69,7 @@ export function HeaderRoundButton({
           transform: [{ scale: pressed && !disabled ? 0.96 : 1 }],
         },
       ]}>
-      <LiquidGlassRim active={!disabled} />
+      <LiquidGlassRim />
       {/*
         A layer of its own, so it can be lifted above the rim. Being declared
         after the canvas is not enough on Android — the canvas composited its

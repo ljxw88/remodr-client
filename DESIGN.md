@@ -31,9 +31,9 @@ the normal user flow.
   downward scroll, animate to a narrower 54dp icon-only dock.
 - Restore the expanded dock when the user scrolls upward, returns to the top, or
   changes tabs.
-- Tab changes use a short directional fade/slide while the selected dock
-  capsule scales and fades between destinations. Keep the motion under 220ms
-  and disable it when reduced motion is enabled.
+- Tab changes retain the short directional content settle. The selected dock
+  indicator fades without scaling the icon again; compact/expanded geometry uses
+  productive standard easing, never overshoot. Reduced motion settles immediately.
 - Blur only content beneath the dock. Android uses the SDK 31+ RenderNode blur
   path and a translucent fallback on older devices.
 - Scrollable regions use short, non-interactive top and bottom edge fades so
@@ -148,6 +148,10 @@ logs. Do not add marketing subtitles to mobile headers.
 
 - Creation, folder browsing, model settings and rename use full pages through
   `FormPage`, with quiet content surfaces and one primary footer action.
+- New Space and Server Files use one explorer interface: the same editable
+  address field, Up/Go buttons and selection-style rows. File management adds
+  create-folder and long-press delete actions; it does not introduce a second
+  card or navigation style.
 - Long choices use searchable lists. Keep optional settings collapsed until
   needed instead of showing every model and option at once.
 - Selectors share a draft with their parent through a flow ID. Back preserves
@@ -289,10 +293,27 @@ chromatic orb.
 - Keep distortion strongest at the rim and near zero in the centre, so the
   label stays readable.
 - Stop the animation when the control is disabled, the screen loses focus, or
-  the app is backgrounded. A shader that animates forever keeps the GPU awake.
+  the app is backgrounded, and when reduced motion is enabled. Ordinary filter
+  and header rims are static; the hero's shader is not a template for every control.
 
 ## Conversation
 
+- Show layout-matched skeletons immediately while initial content loads, not a
+  full-screen spinner. Keep known agent controls and cached messages visible.
+  Reuse real bubble/card styles, line heights, icon footprints and list spacing;
+  assistant placeholders remain unboxed just like assistant messages.
+- Skeletons are static, non-interactive shapes with one accessible loading
+  label per region. Replace each loading region as soon as its data is available,
+  without a minimum duration. A 150ms ease-out reveal takes newly available
+  list content from 35% to full opacity; it never fades the whole page, blur
+  backdrop or floating controls. Cached arrivals and retained refreshes do not
+  replay it. Reduced motion disables the reveal and stops one already running. Empty,
+  offline and failed results are not loading states.
+
+  This follows the local loading/progressive disclosure approach in
+  [MUI Skeleton](https://mui.com/material-ui/react-skeleton/) and the short,
+  productive motion guidance in
+  [Carbon motion](https://carbondesignsystem.com/elements/motion/overview/).
 - Assistant content sits directly on the canvas for maximum reading space.
 - User messages use compact right-aligned dark bubbles.
 - Open at the newest item and follow sent messages, received reply updates, tool
@@ -372,7 +393,42 @@ chromatic orb.
 
 ## Motion, feedback, and accessibility
 
-- Use subtle press-scale and opacity feedback; avoid decorative animation.
+[Carbon's productive motion guidance](https://carbondesignsystem.com/elements/motion/overview/)
+governs behavior; it does not replace Remodr's Liquid Glass visual material.
+Use `src/constants/motion.ts`, not per-component easing or duration guesses.
+
+| Role | Duration | Curve |
+|---|---:|---|
+| Immediate feedback / short exit | 70ms | Exit |
+| Local status or selection feedback | 110ms | Entrance |
+| Newly loaded content | 150ms | Entrance |
+| Disclosure and persistent geometry | 240ms | Standard |
+| Existing in-page navigation settle | 200ms | Entrance |
+
+Standard is `cubic-bezier(0.2, 0, 0.38, 0.9)`, entrance is
+`cubic-bezier(0, 0, 0.38, 0.9)`, and exit is
+`cubic-bezier(0.2, 0, 1, 0.9)`. Do not introduce bounce or overshoot.
+
+- Motion explains a user action or a meaningful state change. It must not delay
+  dispatching actions, confirming delivery, showing errors, or making loaded data available.
+- Plan/Tools keep their 38dp heading and typography fixed. The panel reveals a
+  fixed-size, bottom-anchored list by clipping, not by scaling or reflowing rows.
+  Reserve the final transcript clearance once; do not update it every animation frame.
+  Closing removes body hit/accessibility targets immediately, while the heading can reverse
+  the motion. Viewport/session changes cancel the disclosure rather than replay it.
+- Device/Space filters and Advanced options use the same measured disclosure primitive.
+  Initially open content has a natural first layout; fully closed content leaves no
+  hidden controls or extra layout gap.
+- Long titles get at most one automatic pass per text while visible and active.
+  Off-viewport, backgrounded and reduced-motion titles stay still. Manual horizontal
+  reading remains available even when automatic motion is off. Travel uses constant
+  speed for readability rather than a transition curve; the return uses standard easing.
+- Connection and delivery labels transition only on semantic changes, not countdown
+  ticks. Cached labels appear directly; failure and uncertain-delivery warnings are immediate.
+- Anchored menus animate their own opaque surface, never the transparent backdrop.
+  Selecting an action must not wait for an exit animation or leave a modal over the next page.
+- Reduced motion is assumed until its initial asynchronous query completes. Long-running
+  effects subscribe to changes and stop immediately; an older query cannot undo a newer setting.
 - A push replaces what it covers outright, with no transition — the same thing
   the dock does when it swaps tabs. A cross-fade draws both screens at once,
   and ours share a canvas at the same brightness, so it reads as the screen
@@ -410,9 +466,9 @@ chromatic orb.
   screen starts animating away, so its contents blink out while the screen is
   still visible; chrome outside the target keeps drawing, and the screen reads
   as having thrown its content away. A pushed route was disqualified outright
-  until pushes became cuts — with `animation: 'none'` the blank lasts one
-  frame, which is why the chat can carry a target again. Reintroducing a stack
-  animation brings the bug back with it.
+  until pushes became cuts. Even with `animation: 'none'`, the native tree can
+  outlive the target; `RouteStack` retires its native root before child teardown.
+  Preserve that guard rather than reintroducing an animated native dismissal.
 - Do not add `zIndex` where declaration order already gives the required
   ordering. The scroll edge fade belongs above the rows and below floating
   controls. React Native's Android `setZIndex` updates view-group drawing order;

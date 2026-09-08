@@ -74,7 +74,7 @@ export default function SettingsScreen() {
             <SettingsGroup title="Developer">
               <SettingSwitchRow
                 icon={{ ios: 'arrow.left.and.right', android: 'swap_horiz', web: 'swap_horiz' }}
-                label="MarqueeText animation"
+                label="Scroll long titles once"
                 value={marqueeEnabled}
                 onValueChange={(enabled) => void setMarqueeEnabled(enabled)}
               />

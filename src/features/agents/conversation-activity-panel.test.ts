@@ -1,6 +1,6 @@
 import { createElement, type ComponentProps } from 'react';
 import TestRenderer from 'react-test-renderer';
-import { ActivityIndicator, BackHandler, FlatList, Modal, ScrollView, StyleSheet } from 'react-native';
+import { ActivityIndicator, Animated, BackHandler, FlatList, Modal, ScrollView, StyleSheet } from 'react-native';
 
 import { GlassSurface } from '@/components/ui/glass-surface';
 import { AppIcon } from '@/components/ui/app-icon';
@@ -12,6 +12,9 @@ import { ActivityLayout } from './conversation-activity-layout';
 import { PlanStep, ToolActivityRow } from './conversation-activity-rows';
 
 let mockDimensions = { width: 390, height: 844, scale: 1, fontScale: 1 };
+let mockReducedMotion = true;
+jest.mock('@/hooks/use-reduce-motion', () => ({ useReducedMotion: () => mockReducedMotion }));
+jest.mock('@/hooks/use-foreground', () => ({ useForeground: () => true }));
 jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => ({
   __esModule: true, default: () => mockDimensions,
 }));
@@ -59,8 +62,12 @@ describe('separate glass activity section', () => {
   function close() {
     TestRenderer.act(() => node('activity-collapse').props.onPress());
   }
+  function expandedClearance() {
+    return Math.min(260, (mockDimensions.height - 44 - Math.max(34, props.keyboardInset)) * 0.32) + 14;
+  }
   beforeEach(() => {
     mockDimensions = { width: 390, height: 844, scale: 1, fontScale: 1 };
+    mockReducedMotion = true;
     props = { items: [tool, plan], sessionKey: 'a:session-a', active: true, keyboardInset: 0 };
     remove = jest.fn();
     back = jest.spyOn(BackHandler, 'addEventListener').mockReturnValue({ remove });
@@ -122,11 +129,12 @@ describe('separate glass activity section', () => {
       paddingHorizontal: 12, paddingVertical: 0,
     });
     expect(StyleSheet.flatten(node('activity-viewport').props.style)).toMatchObject({
-      marginBottom: 8, overflow: 'hidden',
+      overflow: 'hidden',
     });
+    expect(node('activity-bottom-space')).toBeDefined();
     expect(node('activity-footer')).toBeUndefined();
     expect(node('activity-heading').props.children.props.testID).toBe('activity-collapse');
-    expect(node('activity-heading-leading').props.children[0].props.name.ios).toBe('chevron.up');
+    expect(node('activity-disclosure-chevron').props.children.props.name.ios).toBe('chevron.down');
     const collapseArea = StyleSheet.flatten(node('activity-collapse').props.style({ pressed: false }));
     expect(collapseArea.position).toBeUndefined();
     expect(collapseArea.minHeight).toBeUndefined();
@@ -184,7 +192,7 @@ describe('separate glass activity section', () => {
     expect(StyleSheet.flatten(expandedLabel.props.style).textAlign).toBe('center');
     expect(StyleSheet.flatten(node('activity-heading-leading').props.style)).toMatchObject({ flex: 1, minWidth: 0 });
     expect(StyleSheet.flatten(node('activity-heading-trailing').props.style)).toMatchObject({ flex: 1, minWidth: 0 });
-    expect(node('activity-heading-leading').props.children[0].props.size).toBe(children[0].props.size);
+    expect(node('activity-disclosure-chevron').props.children.props.size).toBe(children[0].props.size);
     expect(node('activity-heading-leading').props.children[1].props.size).toBe(children[1].props.size);
     expect(node('activity-heading').props.style).toBeUndefined();
     expect(node('activity-viewport').findAllByProps({ testID: 'activity-collapse' })).toHaveLength(0);
@@ -245,7 +253,7 @@ describe('separate glass activity section', () => {
     });
     open('plan');
     TestRenderer.act(() => node('activity-section').props.onLayout({ nativeEvent: { layout: { height: 260 } } }));
-    expect(onHeightChange).toHaveBeenLastCalledWith(268);
+    expect(onHeightChange).toHaveBeenLastCalledWith(expandedClearance());
     expect(StyleSheet.flatten(node('activity-panel-shadow').props.style).boxShadow).toBeDefined();
   });
 
@@ -255,7 +263,7 @@ describe('separate glass activity section', () => {
       render({ onHeightChange });
       open('plan');
       TestRenderer.act(() => node('activity-section').props.onLayout({ nativeEvent: { layout: { height: 266 } } }));
-      expect(onHeightChange).toHaveBeenLastCalledWith(274);
+      expect(onHeightChange).toHaveBeenLastCalledWith(expandedClearance());
       if (change === 'session') render({ sessionKey: 'new-session' });
       else if (change === 'visibility') render({ active: false });
       else if (change === 'keyboard') render({ keyboardInset: 250 });
@@ -340,8 +348,35 @@ describe('separate glass activity section', () => {
     expect(node('activity-plan-chip')).toBeUndefined();
     open('tools');
     const style = StyleSheet.flatten(node('activity-panel').props.style);
-    expect(style.height).toBeGreaterThan(0);
-    expect(style.height).toBeLessThanOrEqual((568 - 44 - 200) * 0.32);
+    const panelHeight = StyleSheet.flatten(node('activity-section').props.style).height - 6;
+    expect(panelHeight).toBeGreaterThan(0);
+    expect(panelHeight).toBeLessThanOrEqual((568 - 44 - 200) * 0.32);
     expect(style.position).toBeUndefined();
+  });
+
+  it('retires body hit targets immediately and ignores stale close completions on rapid reopen', () => {
+    mockReducedMotion = false;
+    const completions: ((result: { finished: boolean }) => void)[] = [];
+    jest.spyOn(Animated, 'timing').mockImplementation(() => ({
+      start: (callback) => { if (callback) completions.push(callback); }, stop: jest.fn(), reset: jest.fn(),
+    }));
+    const onHeightChange = jest.fn();
+    render({ onHeightChange });
+    open('tools');
+    const list = node('activity-content').instance;
+    close();
+    expect(node('activity-viewport').props.pointerEvents).toBe('none');
+    expect(node('activity-viewport').props.accessibilityElementsHidden).toBe(true);
+    expect(node('activity-collapse').props.accessibilityState.expanded).toBe(false);
+    expect(onHeightChange).toHaveBeenLastCalledWith(expandedClearance());
+    const closing = completions.at(-1)!;
+    close();
+    TestRenderer.act(() => closing({ finished: true }));
+    expect(node('activity-content').instance).toBe(list);
+    expect(node('activity-viewport').props.pointerEvents).toBe('auto');
+    close();
+    TestRenderer.act(() => completions.at(-1)!({ finished: true }));
+    expect(node('activity-strip')).toBeDefined();
+    expect(onHeightChange).toHaveBeenLastCalledWith(52);
   });
 });

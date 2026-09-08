@@ -2,6 +2,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppIcon } from '@/components/ui/app-icon';
 import { MarqueeText } from '@/components/ui/marquee-text';
+import { SkeletonBlock, SkeletonGroup, SkeletonLine } from '@/components/ui/skeleton';
 import { ThemedText } from '@/components/themed-text';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import type { HostProfile } from '@/domain/hosts';
@@ -11,9 +12,10 @@ import { useTheme } from '@/hooks/use-theme';
 type Props = {
   host: HostProfile;
   onPress: () => void;
+  active?: boolean;
 };
 
-export function HostRow({ host, onPress }: Props) {
+export function HostRow({ host, onPress, active = true }: Props) {
   const theme = useTheme();
   const session = useHostSession(host.id);
   const connected = session?.status === 'connected';
@@ -51,6 +53,7 @@ export function HostRow({ host, onPress }: Props) {
       <View style={styles.content}>
         <View style={styles.top}>
           <MarqueeText
+            active={active}
             type="caption"
             style={styles.name}
             containerStyle={styles.nameContainer}>
@@ -87,6 +90,37 @@ export function HostRow({ host, onPress }: Props) {
         fallback="›"
       />
     </Pressable>
+  );
+}
+
+export function HostRowSkeleton({ label = 'Loading servers' }: { label?: string }) {
+  const theme = useTheme();
+
+  return (
+    <SkeletonGroup
+      label={label}
+      style={[
+        styles.row,
+        {
+          backgroundColor: theme.glassStrong,
+          borderColor: theme.glassBorder,
+          shadowColor: theme.glassShadow,
+        },
+      ]}>
+      <View style={[styles.iconFrame, { backgroundColor: theme.accentSoft }]}>
+        <SkeletonBlock width={22} height={22} radius={6} />
+      </View>
+      <View style={styles.content}>
+        <View style={styles.top}>
+          <View style={styles.nameContainer}>
+            <SkeletonLine width="62%" />
+          </View>
+          <SkeletonBlock width={7} height={7} radius={3.5} />
+        </View>
+        <SkeletonLine width="76%" />
+      </View>
+      <SkeletonBlock width={18} height={18} radius={9} />
+    </SkeletonGroup>
   );
 }
 

@@ -98,8 +98,12 @@ the agent step does not delete the space.
 Folder selection uses only a successfully loaded path. Editing the address disables
 selection until Go opens it, so a stale listing cannot select the wrong folder.
 
-The picker and file manager share
-[`useRemoteDirectory`](../src/features/files/use-remote-directory.ts). Entries,
+The picker and file manager render the same
+[`RemoteFileExplorer`](../src/features/files/remote-file-explorer.tsx), using the
+New Space form interface for the path field, Up/Go controls, rows, skeletons and
+errors. Folder selection is an optional footer; creation and long-press deletion
+are file-manager capabilities supplied by its route adapter, not a second explorer.
+Both use [`useRemoteDirectory`](../src/features/files/use-remote-directory.ts). Entries,
 loading and errors belong to one host/session/path request. Navigation and retry
 invalidate the previous request immediately; blur/unmount discards late results,
 and refocus/reconnection starts a fresh read. Both successful and failed responses

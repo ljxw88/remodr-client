@@ -5,6 +5,7 @@ import {
   Platform,
   StyleSheet,
   View,
+  type LayoutRectangle,
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -16,6 +17,7 @@ import {
   useBlurBackdrop,
   useInsideBlurTarget,
 } from '@/components/ui/blur-backdrop';
+import { ScrollViewportContext } from '@/components/ui/scroll-viewport-context';
 
 type ScrollHandler = (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
 
@@ -60,6 +62,8 @@ export function ScrollEdgeFrame({
   bottomHeight: bottomReach = bottomHeight,
 }: Props) {
   const blurTarget = useRef<View | null>(null);
+  const frame = useRef<View | null>(null);
+  const viewport = useRef<LayoutRectangle | null>(null);
   const [topOpacity] = useState(() => new Animated.Value(0));
   const [bottomOpacity] = useState(() => new Animated.Value(0));
   /**
@@ -150,7 +154,12 @@ export function ScrollEdgeFrame({
   );
 
   return (
-    <View style={styles.frame}>
+    <ScrollViewportContext.Provider value={viewport}>
+    <View ref={frame} collapsable={false} style={styles.frame} onLayout={() => {
+      frame.current?.measureInWindow((x, y, width, height) => {
+        viewport.current = { x, y, width, height };
+      });
+    }}>
       {content}
       {top ? (
         <Animated.View
@@ -191,6 +200,7 @@ export function ScrollEdgeFrame({
         </Animated.View>
       ) : null}
     </View>
+    </ScrollViewportContext.Provider>
   );
 }
 

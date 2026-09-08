@@ -57,6 +57,7 @@ describe('conversation lifecycle controller', () => {
     jest.useFakeTimers();
     warning = jest.spyOn(console, 'warn').mockImplementation(() => {});
     reader = {
+      hydrate: jest.fn().mockResolvedValue(undefined),
       restoreConversation: jest.fn().mockResolvedValue(undefined),
       loadConversation: jest.fn().mockResolvedValue(conversation),
       getCompletion: jest.fn(),
@@ -91,6 +92,51 @@ describe('conversation lifecycle controller', () => {
     await update({ connected: true });
     expect(reader.loadConversation).toHaveBeenCalledWith('a');
     expect(reader.loadConversation).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports restoration immediately, completes offline, and ignores an older route settling late', async () => {
+    const first = deferred<void>();
+    const second = deferred<void>();
+    reader.restoreConversation.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    await mount({ connected: false });
+    expect(controller.restoring).toBe(true);
+    await update({ conversationId: 'b', agent: { ...agent(), id: 'b' } });
+    expect(controller.restoring).toBe(true);
+    await TestRenderer.act(async () => { second.resolve(); });
+    expect(controller.restoring).toBe(false);
+    await TestRenderer.act(async () => { first.resolve(); });
+    expect(controller.restoring).toBe(false);
+    expect(reader.loadConversation).not.toHaveBeenCalled();
+  });
+
+  it('finishes the loading state on cache failure instead of leaving an endless skeleton', async () => {
+    const restore = deferred<void>();
+    reader.restoreConversation.mockReturnValueOnce(restore.promise);
+    await mount({ connected: false });
+    expect(controller.restoring).toBe(true);
+    await TestRenderer.act(async () => { restore.reject(new Error('Storage unavailable')); });
+    expect(controller.restoring).toBe(false);
+    expect(controller.error).toBe('Storage unavailable');
+  });
+
+  it('does not declare metadata unavailable while runtime restoration is still pending', async () => {
+    const hydrate = deferred<void>();
+    reader.hydrate.mockReturnValueOnce(hydrate.promise);
+    await mount({ agent: undefined, connected: false });
+    expect(reader.restoreConversation).toHaveBeenCalledWith('a');
+    expect(controller.restoring).toBe(true);
+    await TestRenderer.act(async () => { hydrate.resolve(); });
+    expect(controller.restoring).toBe(false);
+  });
+
+  it('does not make online reading wait for runtime or outbox restoration', async () => {
+    const hydrate = deferred<void>();
+    reader.hydrate.mockReturnValueOnce(hydrate.promise);
+    await mount();
+    expect(controller.restoring).toBe(true);
+    expect(reader.loadConversation).toHaveBeenCalledTimes(1);
+    await TestRenderer.act(async () => { hydrate.resolve(); });
+    expect(controller.restoring).toBe(false);
   });
 
   it.each([

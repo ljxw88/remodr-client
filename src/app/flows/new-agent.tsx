@@ -1,8 +1,9 @@
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useIsFocused, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Switch, View } from 'react-native';
 
 import { AppButton } from '@/components/ui/app-button';
+import { AnimatedDisclosure } from '@/components/ui/animated-disclosure';
 import { FormError, FormPage, FormSection, MissingFlow, SelectionRow } from '@/components/ui/form-page';
 import { TextField } from '@/components/ui/text-field';
 import { modelLabel, supportsTuning } from '@/domain/agent-catalogue';
@@ -15,6 +16,7 @@ import { useHostSession } from '@/features/connection/use-host-session';
 import { flowDrafts, useFlowDraft, type NewAgentDraft } from '@/features/forms/flow-drafts';
 import { useHosts } from '@/features/hosts/use-hosts';
 import { useTheme } from '@/hooks/use-theme';
+import { Spacing } from '@/constants/theme';
 import { herdrRepository } from '@/services/herdr-repository';
 import { remoteClient } from '@/services/native-remote-client';
 import { toUserMessage } from '@/utils/user-error';
@@ -28,6 +30,7 @@ export default function NewAgentPage() {
 }
 
 function NewAgentForm({ flowId, draft }: { flowId: string; draft: NewAgentDraft }) {
+  const focused = useIsFocused();
   const theme = useTheme();
   const { devices } = useHerdr();
   const { hosts } = useHosts();
@@ -114,12 +117,13 @@ function NewAgentForm({ flowId, draft }: { flowId: string; draft: NewAgentDraft 
           description={tunable ? undefined : 'Managed by this provider'}
           disabled={creating || !tunable} onPress={() => choose('/flows/models')} />
       </FormSection>
+      <View>
       <FormSection>
         <SelectionRow label="Advanced options" value={advanced ? 'Hide' : 'Show'} disabled={creating}
           onPress={() => setAdvanced((value) => !value)} />
       </FormSection>
-      {advanced ? (
-        <>
+      <AnimatedDisclosure open={advanced} active={focused} testID="advanced-options-disclosure">
+        <View style={{ paddingTop: Spacing.three, gap: Spacing.three }}>
           {tunable ? <View pointerEvents={creating ? 'none' : 'auto'}>
             <TuningFields provider={draft.provider} value={draft.tuning} showModel={false}
               onChooseModel={() => choose('/flows/models')} onChange={(tuning) => update((current) => ({ ...current, tuning }))} />
@@ -130,8 +134,9 @@ function NewAgentForm({ flowId, draft }: { flowId: string; draft: NewAgentDraft 
                 trackColor={{ false: theme.border, true: theme.accent }}
                 onValueChange={(bypassPermissions) => update((current) => ({ ...current, bypassPermissions }))} />} />
           </FormSection>
-        </>
-      ) : null}
+        </View>
+      </AnimatedDisclosure>
+      </View>
     </FormPage>
   );
 }

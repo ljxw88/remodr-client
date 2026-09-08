@@ -8,6 +8,7 @@ import { AppButton } from '@/components/ui/app-button';
 import { AppIcon } from '@/components/ui/app-icon';
 import { FormKeyboardContext } from '@/components/ui/form-keyboard-context';
 import { glassRim } from '@/components/ui/glass-surface';
+import { SkeletonBlock, SkeletonGroup, SkeletonLine } from '@/components/ui/skeleton';
 import { Colors, ControlHeight, MaxFormWidth, Radius, Spacing } from '@/constants/theme';
 import { fieldScrollOffset, useKeyboardOverlap } from '@/hooks/use-keyboard-overlap';
 
@@ -144,12 +145,14 @@ export function FormSection({ title, description, children, fill = false }: { ti
 }
 
 export function SelectionRow({
-  label, value, description, onPress, disabled = false, selected, accessory,
+  label, value, description, onPress, onLongPress, accessibilityHint, disabled = false, selected, accessory,
 }: {
   label: string;
   value?: string;
   description?: string;
   onPress?: () => void;
+  onLongPress?: () => void;
+  accessibilityHint?: string;
   disabled?: boolean;
   selected?: boolean;
   accessory?: ReactNode;
@@ -166,17 +169,31 @@ export function SelectionRow({
         : onPress && selected == null ? <AppIcon name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }} size={19} tintColor={Colors.textMuted} fallback="›" /> : null}
     </>
   );
-  return onPress ? (
+  return onPress || onLongPress ? (
     <Pressable
       accessibilityRole={selected == null ? 'button' : 'radio'}
       accessibilityLabel={[label, value, description].filter(Boolean).join(', ')}
+      accessibilityHint={accessibilityHint}
       accessibilityState={{ disabled, selected, checked: selected }}
       disabled={disabled}
-      onPress={() => { Keyboard.dismiss(); onPress(); }}
+      onPress={onPress ? () => { Keyboard.dismiss(); onPress(); } : undefined}
+      onLongPress={onLongPress ? () => { Keyboard.dismiss(); onLongPress(); } : undefined}
       style={({ pressed }) => [styles.row, { opacity: disabled ? 0.45 : 1, backgroundColor: pressed ? Colors.backgroundSelected : 'transparent' }]}>
       {content}
     </Pressable>
   ) : <View style={styles.row}>{content}</View>;
+}
+
+export function SelectionRowSkeleton({ label = 'Loading options' }: { label?: string }) {
+  return (
+    <SkeletonGroup label={label} style={styles.row}>
+      <View style={styles.rowCopy}>
+        <SkeletonLine width="58%" lineHeight={20} />
+        <SkeletonLine width="76%" lineHeight={18} />
+      </View>
+      <SkeletonBlock width={19} height={19} radius={9.5} />
+    </SkeletonGroup>
+  );
 }
 
 export function FormError({ message }: { message?: string | null }) {

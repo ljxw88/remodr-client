@@ -1,8 +1,7 @@
-import { router } from 'expo-router';
+import { router, useIsFocused } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  FlatList,
+  Animated,
   Pressable,
   StyleSheet,
   TextInput,
@@ -11,6 +10,7 @@ import {
 
 import { EmptyState } from '@/components/ui/empty-state';
 import { GlassSurface } from '@/components/ui/glass-surface';
+import { SkeletonGroup, SkeletonLine } from '@/components/ui/skeleton';
 import { AppIcon } from '@/components/ui/app-icon';
 import { Screen } from '@/components/ui/screen';
 import { ScrollEdgeFrame } from '@/components/ui/scroll-edge-frame';
@@ -20,16 +20,22 @@ import {
   useDockContentInset,
   useDockScrollHandler,
 } from '@/features/navigation/floating-dock';
-import { HostRow } from '@/features/hosts/HostRow';
+import { HostRow, HostRowSkeleton } from '@/features/hosts/HostRow';
 import { useHosts } from '@/features/hosts/use-hosts';
 import { useTheme } from '@/hooks/use-theme';
+import { useContentReveal } from '@/hooks/use-content-reveal';
+
+const SKELETON_ROWS = ['0', '1', '2', '3', '4'];
 
 export default function HostsScreen() {
+  const focused = useIsFocused();
   const theme = useTheme();
   const { hosts, loading, error, reload } = useHosts();
   const onDockScroll = useDockScrollHandler();
   const dockContentInset = useDockContentInset();
   const [query, setQuery] = useState('');
+  const initialLoading = loading && hosts.length === 0 && !error;
+  const revealStyle = useContentReveal(initialLoading);
   const visibleHosts = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) {
@@ -71,7 +77,7 @@ export default function HostsScreen() {
         </View>
       </View>
 
-      {!loading && !error && hosts.length > 0 ? (
+      {loading || hosts.length > 0 ? (
         <View style={styles.controls}>
           <GlassSurface strength="strong" style={styles.search}>
             <AppIcon
@@ -91,20 +97,15 @@ export default function HostsScreen() {
               style={[styles.searchInput, { color: theme.text }]}
             />
           </GlassSurface>
-          <ThemedText type="caption" themeColor="textMuted">
-            {hosts.length} {hosts.length === 1 ? 'server' : 'servers'}
-          </ThemedText>
+          {!loading || hosts.length > 0 ? (
+            <ThemedText type="caption" themeColor="textMuted">
+              {hosts.length} {hosts.length === 1 ? 'server' : 'servers'}
+            </ThemedText>
+          ) : <SkeletonGroup label="Loading server count"><SkeletonLine width={64} /></SkeletonGroup>}
         </View>
       ) : null}
 
-      {loading ? (
-        <View style={styles.centerState}>
-          <ActivityIndicator color={theme.accent} />
-          <ThemedText type="small" themeColor="textSecondary">
-            Loading servers
-          </ThemedText>
-        </View>
-      ) : error ? (
+      {error ? (
         <GlassSurface style={styles.errorState}>
           <ThemedText type="section">Couldn’t load your servers</ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
@@ -119,6 +120,21 @@ export default function HostsScreen() {
             </ThemedText>
           </Pressable>
         </GlassSurface>
+      ) : null}
+      {error && hosts.length === 0 ? null : initialLoading ? (
+        <ScrollEdgeFrame onScroll={onDockScroll}>
+          {(edge) => (
+            <Animated.FlatList
+              {...edge}
+              style={revealStyle}
+              data={SKELETON_ROWS}
+              keyExtractor={(item) => item}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={[styles.list, { paddingBottom: dockContentInset }]}
+              renderItem={() => <HostRowSkeleton />}
+            />
+          )}
+        </ScrollEdgeFrame>
       ) : hosts.length === 0 ? (
         <EmptyState message="No servers" />
       ) : visibleHosts.length === 0 ? (
@@ -126,14 +142,16 @@ export default function HostsScreen() {
       ) : (
         <ScrollEdgeFrame onScroll={onDockScroll}>
           {(edge) => (
-            <FlatList
+            <Animated.FlatList
               {...edge}
+              style={revealStyle}
               data={visibleHosts}
               keyExtractor={(host) => host.id}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={[styles.list, { paddingBottom: dockContentInset }]}
               renderItem={({ item }) => (
                 <HostRow
+                  active={focused}
                   host={item}
                   onPress={() =>
                     router.push({
