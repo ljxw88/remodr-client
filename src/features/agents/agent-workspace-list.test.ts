@@ -4,6 +4,7 @@ import { Pressable, StyleSheet } from 'react-native';
 
 import { FinishDot } from '@/components/ui/finish-dot';
 import { remoteAgentSchema, type AgentWorkspace } from '@/domain/herdr';
+import { AgentProviderIcon } from './agent-provider-icon';
 import { AgentWorkspaceList, AgentWorkspaceSkeleton, type AgentWorkspaceSection } from './agent-workspace-list';
 import { SkeletonBlock, SkeletonGroup } from '@/components/ui/skeleton';
 
@@ -41,7 +42,7 @@ describe('AgentWorkspaceList unread finish dots', () => {
     const realStyle = StyleSheet.flatten(row.props.style({ pressed: false }));
     TestRenderer.act(() => renderer.update(createElement(AgentWorkspaceSkeleton)));
     const placeholders = renderer.root.findAll((node) =>
-      typeof node.props.style !== 'function' && StyleSheet.flatten(node.props.style)?.minHeight === 68,
+      typeof node.props.style !== 'function' && StyleSheet.flatten(node.props.style)?.minHeight === 56,
     { deep: false });
     expect(placeholders).toHaveLength(3);
     for (const placeholder of placeholders) {
@@ -51,8 +52,15 @@ describe('AgentWorkspaceList unread finish dots', () => {
     }
     expect(renderer.root.findByType(SkeletonGroup).props.label).toBe('Loading agents');
     expect(renderer.root.findAllByType(SkeletonBlock).filter((node) =>
-      node.props.width === 44 && node.props.height === 44 && node.props.radius === 14)).toHaveLength(3);
+      node.props.width === 12 && node.props.height === 12 && node.props.radius === 3)).toHaveLength(3);
     expect(renderer.root.findAllByType(Pressable)).toHaveLength(0);
+  });
+
+  it('places the provider icon in the subtitle instead of a leading tile', () => {
+    render([section([agent('a', false)])]);
+    const icon = renderer.root.findByType(AgentProviderIcon);
+    expect(icon.props).toMatchObject({ provider: 'copilot', size: 12 });
+    expect(JSON.stringify(renderer.toJSON())).toContain('GitHub Copilot');
   });
 
   it('draws a row dot only for agents with an unread completion receipt', () => {

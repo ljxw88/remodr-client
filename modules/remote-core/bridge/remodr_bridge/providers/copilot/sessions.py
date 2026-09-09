@@ -6,6 +6,26 @@ from ..base import ProviderHost
 from ...errors import BridgeError
 from .processes import CopilotProcesses
 
+
+def _bound_session(host: ProviderHost, pane_id: str) -> str | None:
+    previous = host.raw_agents.get(host._stable_agent_id(pane_id))
+    session_id = previous.get("providerSessionId") if previous else None
+    return session_id if isinstance(session_id, str) and session_id else None
+
+
+def _unique_live_session(
+    host: ProviderHost, pane_id: str, sessions: set[str], source: str,
+) -> set[str]:
+    """Drop a leftover post-clear marker; never pick newest folder or a stale native ID."""
+    if source != "marker":
+        raise ValueError(f"foreground Copilot has multiple active session {source}s")
+    bound = _bound_session(host, pane_id)
+    remainder = sessions - {bound} if bound in sessions else sessions
+    if len(remainder) == 1:
+        return remainder
+    raise ValueError(f"foreground Copilot has multiple active session {source}s")
+
+
 def effective_session(
     host: ProviderHost, processes: CopilotProcesses, pane_id: str, native_session_id: str | None
 ) -> str | None:
@@ -26,7 +46,7 @@ def effective_session(
         if processes.foreground_process(pane_id) != binding:
             raise ValueError("foreground process changed during descriptor inspection")
         if len(sessions) > 1:
-            raise ValueError(f"foreground Copilot has multiple active session {source}s")
+            sessions = _unique_live_session(host, pane_id, sessions, source)
         if sessions:
             session_id = next(iter(sessions))
             status = "verified"

@@ -294,6 +294,34 @@ class ProcessSessionTest(unittest.TestCase):
             self.poll()
         self.assertEqual(caught.exception.code, "SESSION_IDENTITY_UNRESOLVED")
 
+    def test_clear_drops_bound_marker_when_one_live_marker_remains(self):
+        self.open_sessions.return_value = set()
+        self.locked_sessions.return_value = {"native-stale"}
+        self.assertEqual(self.poll()["providerSessionId"], "native-stale")
+        self.write_session("after-clear", "new conversation")
+        self.locked_sessions.return_value = {"native-stale", "after-clear"}
+        conversation = self.poll()
+        self.assertEqual(conversation["providerSessionId"], "after-clear")
+        self.assertEqual(conversation["items"][0]["text"], "new conversation")
+
+    def test_clear_follows_live_marker_when_herdr_native_id_catches_up(self):
+        self.open_sessions.return_value = set()
+        self.locked_sessions.return_value = {"native-stale"}
+        self.poll()
+        self.write_session("after-clear", "new conversation")
+        self.snapshot["agents"][0]["agent_session"] = {"value": "after-clear"}
+        self.locked_sessions.return_value = {"native-stale", "after-clear"}
+        self.assertEqual(self.poll()["providerSessionId"], "after-clear")
+
+    def test_multiple_unrelated_markers_still_fail_closed(self):
+        self.open_sessions.return_value = set()
+        for markers in ({"first", "second"}, {"native-stale", "after-clear"}):
+            with self.subTest(markers=markers):
+                self.locked_sessions.return_value = markers
+                with self.assertRaises(BridgeError) as caught:
+                    self.poll()
+                self.assertEqual(caught.exception.code, "SESSION_IDENTITY_UNRESOLVED")
+
     def test_database_remains_authoritative_when_available(self):
         self.locked_sessions.return_value = {"stale-marker"}
         self.assertEqual(self.poll()["providerSessionId"], "active-session")
@@ -352,7 +380,7 @@ class ProcessSessionTest(unittest.TestCase):
         self.assertIsNone(self.bridge.raw_agents[self.agent_id]["providerSessionId"])
 
     def test_multiple_candidates_fail_closed_even_with_native_id(self):
-        for candidates in ({"first", "second"}, {"first", "second", "third"}):
+        for candidates in ({"first", "second"}, {"first", "second", "third"}, {"native-stale", "second"}):
             with self.subTest(candidates=candidates):
                 self.open_sessions.return_value = candidates
                 with self.assertRaises(BridgeError) as caught:

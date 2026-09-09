@@ -6,7 +6,7 @@
         "supportsRetuning": true,
         "structuredConversation": true,
         "streamingConversation": false,
-        "structuredQuestions": false,
+        "structuredQuestions": true,
         "toolActivity": true,
         "todos": true,
         "fallback": true
@@ -19,7 +19,7 @@
           {"type": "reasoning", "id": "reasoning", "text": "Synthetic private reasoning."},
           {"type": "text", "id": "text", "text": "I inspected the fixture."},
           {"type": "tool", "id": "read", "name": "read", "state": {"status": "completed", "input": {"path": "fixture.txt"}}},
-          {"type": "tool", "id": "question", "name": "question", "state": {"status": "running", "input": {}}}
+          {"type": "tool", "id": "question", "name": "question", "state": {"status": "running", "input": {"questions": [{"question": "Which path should I use?", "header": "Path", "options": [{"label": "Keep current", "description": "Leave the workspace as-is"}, {"label": "Create folder", "description": "Make a new directory"}]}]}}}
         ]}}
       ],
       "databaseTodos": [
@@ -36,13 +36,33 @@
           {"id": "opencode:ses_contract:msg_user", "kind": "user_message", "text": "Inspect the synthetic fixture."},
           {"id": "opencode:ses_contract:msg_assistant:text", "kind": "assistant_message", "markdown": "I inspected the fixture."},
           {"id": "opencode:ses_contract:msg_assistant:read", "kind": "tool_activity", "tool": "read", "title": "Reading", "detail": "fixture.txt", "state": "completed"},
-          {"id": "opencode:ses_contract:msg_assistant:question", "kind": "tool_activity", "tool": "question", "title": "Question", "detail": null, "state": "running"},
+          {"id": "opencode:ses_contract:msg_assistant:question", "kind": "human_request", "request": {
+            "id": "opencode:ses_contract:msg_assistant:question",
+            "kind": "choice",
+            "question": "Which path should I use?",
+            "options": [
+              {"id": "Keep current", "label": "Keep current", "description": "Leave the workspace as-is"},
+              {"id": "Create folder", "label": "Create folder", "description": "Make a new directory"}
+            ],
+            "allowCustomAnswer": true,
+            "multiSelect": false
+          }},
           {"id": "opencode:ses_contract:todos", "kind": "todo_update", "timestamp": 11, "todos": [
             {"id": "opencode:ses_contract:todo:0", "text": "Inspect the fixture", "state": "done"},
             {"id": "opencode:ses_contract:todo:1", "text": "Verify the projection", "state": "in_progress"}
           ]}
         ],
-        "activeHumanRequest": null
+        "activeHumanRequest": {
+          "id": "opencode:ses_contract:msg_assistant:question",
+          "kind": "choice",
+          "question": "Which path should I use?",
+          "options": [
+            {"id": "Keep current", "label": "Keep current", "description": "Leave the workspace as-is"},
+            {"id": "Create folder", "label": "Create folder", "description": "Make a new directory"}
+          ],
+          "allowCustomAnswer": true,
+          "multiSelect": false
+        }
       }
     },
     {
@@ -51,7 +71,7 @@
         "supportsRetuning": true,
         "structuredConversation": true,
         "streamingConversation": false,
-        "structuredQuestions": false,
+        "structuredQuestions": true,
         "toolActivity": true,
         "todos": true,
         "fallback": true
