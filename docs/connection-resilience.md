@@ -197,8 +197,9 @@ session ID: its native session-replacement allowlist omits Copilot. Polling that
 same stale value is not sufficient. For Copilot, the bridge therefore also uses
 the exact pane's foreground process and its open session database to identify
 the active conversation. This is process-bound evidence, not a guess from the
-newest transcript in a directory shared by several agents. Other providers still
-depend on their native Herdr integrations for session identity.
+newest transcript in a directory shared by several agents. After `/clear`, a leftover current-PID lock marker for the previously bound
+session is dropped when exactly one other live marker remains. Other providers
+still depend on their native Herdr integrations for session identity.
 
 Rebuild/reinstall the app to deploy changes to its bundled Python bridge; a
 JavaScript reload alone does not replace that native asset. When diagnosing an

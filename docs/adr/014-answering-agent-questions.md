@@ -39,9 +39,14 @@ and input conversion live in the bridge and
 [`human-request.ts`](../../src/features/agents/human-request.ts).
 
 The earlier Cursor fallback integration has been superseded by the OpenCode
-adapter. OpenCode's native question and permission replies are separate API
-operations and are not implemented by this Copilot-specific dialog decision.
-Do not infer controls from unstructured terminal text.
+adapter. OpenCode `question` tools are normalized into the same
+`activeHumanRequest` shape as Copilot `ask_user`. Answers always drive the TUI
+dialog, even when Herdr is not yet `blocked`. This TUI path is temporary:
+Herdr 0.9.0 still has no structured question-reply API. Movement is one
+verified arrow at a time from the highlighted row; Enter is a later batch. A
+typed answer enters the freeform row before sending characters. Unverified
+focus fails closed instead of submitting a guess. Native permission APIs
+remain unimplemented. Do not infer controls from unstructured terminal text.
 
 ## Durable queue behavior
 

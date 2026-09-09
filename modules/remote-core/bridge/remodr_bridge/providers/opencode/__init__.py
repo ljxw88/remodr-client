@@ -5,7 +5,7 @@ from typing import Any
 
 from ...errors import BridgeError
 from ..base import ProviderAdapter
-from . import transcript
+from . import questions, transcript
 from .bootstrap import create_session
 from .settings import SPEC
 from .variants import OpenCodeVariants, retune
@@ -55,13 +55,31 @@ class OpenCodeAdapter(ProviderAdapter):
         snapshot = transcript.read_session(agent.get("providerSessionId"))
         if snapshot is None:
             return None
+        items = snapshot["items"]
+        request = None
+        for item in items:
+            if item.get("kind") != "human_request":
+                continue
+            current = item.get("request")
+            if not isinstance(current, dict) or not isinstance(current.get("id"), str):
+                continue
+            if item.get("resolved"):
+                self.host.sessions.forget_question(current["id"])
+                continue
+            request = current
+        if request is None:
+            request = questions.live_question(self.host, agent)
+        if request:
+            self.host._remember_human_request(request, agent)
+            if not any(item.get("kind") == "human_request" and item.get("request", {}).get("id") == request["id"] for item in items):
+                items = [*items, {"id": "human:" + request["id"], "kind": "human_request", "request": request}]
         return {
             "agentId": agent["id"],
             "provider": self.spec.name,
             "providerSessionId": agent["providerSessionId"],
             "semantic": True,
-            "items": snapshot["items"],
-            "activeHumanRequest": None,
+            "items": items,
+            "activeHumanRequest": request,
         }
 
     def has_semantic_session(self, session_id: Any) -> bool:

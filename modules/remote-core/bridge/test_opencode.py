@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 from remodr_bridge.bridge import Bridge
 from remodr_bridge.errors import BridgeError
 from remodr_bridge.providers.opencode import OpenCodeAdapter
-from remodr_bridge.providers.opencode import transcript
+from remodr_bridge.providers.opencode import questions, transcript
 
 
 SCHEMA = """
@@ -129,6 +129,263 @@ class OpenCodeTest(unittest.TestCase):
         self.assertNotIn("private", json.dumps(conversation))
         self.assertNotIn("legacy duplicate", json.dumps(conversation))
         self.assertEqual(self.bridge.sessions.question_ids(), frozenset())
+
+    def test_running_question_tools_become_copilot_style_needs_input(self):
+        self.v2("user", "user", {"text": "Choose a path.", "files": [], "agents": []})
+        self.v2("assistant", "assistant", {"content": [
+            {"type": "text", "id": "text1", "text": "I need a choice."},
+            {"type": "tool", "id": "ask1", "name": "question", "state": {
+                "status": "running",
+                "input": {"questions": [{
+                    "question": "Which path should I use?",
+                    "header": "Path",
+                    "multiple": False,
+                    "options": [
+                        {"label": "Keep current", "description": "Leave the workspace as-is"},
+                        {"label": "Create folder", "description": "Make a new directory"},
+                    ],
+                }]},
+            }},
+        ]}, seq=2)
+        conversation = self.load()
+        request = {
+            "id": "opencode:ses_root:assistant:ask1",
+            "kind": "choice",
+            "question": "Which path should I use?",
+            "options": [
+                {"id": "Keep current", "label": "Keep current", "description": "Leave the workspace as-is"},
+                {"id": "Create folder", "label": "Create folder", "description": "Make a new directory"},
+            ],
+            "allowCustomAnswer": True,
+            "multiSelect": False,
+        }
+        self.assertEqual(conversation["items"][-1], {
+            "id": request["id"], "kind": "human_request", "request": request,
+        })
+        self.assertEqual(conversation["activeHumanRequest"], request)
+        self.assertEqual(self.bridge.sessions.question_ids(), frozenset({request["id"]}))
+        self.connection.execute(
+            "UPDATE session_message SET data = ? WHERE id = 'assistant'",
+            (json.dumps({"content": [
+                {"type": "text", "id": "text1", "text": "I need a choice."},
+                {"type": "tool", "id": "ask1", "name": "question", "state": {
+                    "status": "completed",
+                    "input": {"questions": [{"question": "Which path should I use?", "options": [{"label": "Keep current"}]}]},
+                }},
+            ]}),),
+        )
+        self.connection.commit()
+        resolved = self.load()
+        self.assertIsNone(resolved["activeHumanRequest"])
+        self.assertTrue(resolved["items"][-1]["resolved"])
+        self.assertEqual(self.bridge.sessions.question_ids(), frozenset())
+
+    def test_pending_json_string_input_still_creates_needs_input(self):
+        self.v2("assistant", "assistant", {"content": [
+            {"type": "tool", "id": "ask2", "name": "question", "state": {
+                "status": "pending",
+                "input": json.dumps({"questions": [{
+                    "question": "Which host?",
+                    "options": [{"label": "Alpha"}, {"label": "Beta"}],
+                }]}),
+            }},
+        ]})
+        conversation = self.load()
+        self.assertEqual(conversation["activeHumanRequest"]["question"], "Which host?")
+        self.assertEqual(
+            [option["label"] for option in conversation["activeHumanRequest"]["options"]],
+            ["Alpha", "Beta"],
+        )
+        self.assertEqual(conversation["items"][-1]["kind"], "human_request")
+
+    def test_blocked_tui_dialog_becomes_needs_input_when_sqlite_has_no_question(self):
+        self.agent["status"] = "blocked"
+        self.bridge._herdr_request.return_value = {"read": {"text": "\n".join([
+            "  Which product?                                      esc",
+            "",
+            "  Which one should I research?",
+            "",
+            "  Remodlr.ai",
+            "  construction Scope Ledger",
+            "  Remodel AI",
+            "  home design",
+            "  Type your own answer",
+            "  ┃",
+        ])}}
+        conversation = self.load()
+        request = conversation["activeHumanRequest"]
+        self.assertEqual(request["question"], "Which one should I research?")
+        self.assertEqual([option["label"] for option in request["options"]], ["Remodlr.ai", "Remodel AI"])
+        self.assertTrue(request["id"].startswith("opencode:tui:"))
+        self.assertEqual(conversation["items"][-1]["kind"], "human_request")
+        self.assertEqual(self.bridge.sessions.question_ids(), frozenset({request["id"]}))
+
+    def test_blocked_status_still_surfaces_needs_input_when_the_dialog_cannot_be_read(self):
+        self.agent["status"] = "blocked"
+        self.bridge._herdr_request.side_effect = BridgeError("INVALID_HERDR_RESPONSE", "unavailable")
+        conversation = self.load()
+        request = conversation["activeHumanRequest"]
+        self.assertEqual(request["kind"], "text")
+        self.assertEqual(request["question"], "OpenCode is waiting for input.")
+        self.assertEqual(conversation["items"][-1]["kind"], "human_request")
+
+    def test_focused_choice_reads_reverse_video_and_ignores_descriptions(self):
+        names = ("Alpha", "Beta", "Gamma")
+        screen = "\n".join([
+            "  Which host?                                      esc",
+            "",
+            "  Alpha",
+            "  first host",
+            "\x1b[7m  Beta\x1b[0m",
+            "  second host",
+            "  Gamma",
+        ])
+        self.assertEqual(questions.focused_choice(screen, names), 1)
+        self.assertEqual(
+            questions.focused_choice("\n".join(["  Alpha", "\x1b[1;48;5;12m  Beta\x1b[0m", "  Gamma"]), names),
+            1,
+        )
+        self.assertIsNone(questions.focused_choice("  Alpha\n  Beta\n", names))
+
+    def _drive_dialog(self, names, focus=0):
+        sent = []
+        state = {"focus": focus}
+
+        def screen():
+            rows = ["  Which?                                      esc", ""]
+            for index, name in enumerate(names):
+                row = f"  {name}"
+                rows.append(f"\x1b[7m{row}\x1b[0m" if index == state["focus"] else row)
+            return "\n".join(rows)
+
+        def request(method, params):
+            sent.append((method, params))
+            if method == "agent.read":
+                return {"read": {"text": screen()}}
+            if method == "agent.send_keys":
+                keys = params["keys"]
+                if keys == ["down"]:
+                    state["focus"] += 1
+                elif keys == ["up"]:
+                    state["focus"] -= 1
+            return {}
+
+        self.bridge.dialog_settle_seconds = 0
+        self.bridge._herdr_request = request
+        return sent, state
+
+    def test_answering_a_later_choice_steps_from_verified_focus(self):
+        # Batched downs wrap on OpenCode. One verified step at a time does not.
+        sent, state = self._drive_dialog(("Remodlr.ai", "Remodel AI", "home design"))
+        request = {
+            "options": [
+                {"id": "Remodlr.ai", "label": "Remodlr.ai"},
+                {"id": "Remodel AI", "label": "Remodel AI"},
+                {"id": "home design", "label": "home design"},
+            ]
+        }
+        self.bridge._answer_blocked_dialog(
+            {**self.agent, "provider": "opencode"}, request, ["home design"], "home design",
+        )
+        self.assertEqual(
+            [params["keys"] for method, params in sent if method == "agent.send_keys"],
+            [["down"], ["down"], ["enter"]],
+        )
+        self.assertEqual(state["focus"], 2)
+
+    def test_the_first_opencode_choice_is_enter_without_movement(self):
+        sent, _ = self._drive_dialog(("A", "B"))
+        request = {"options": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}]}
+        self.bridge._answer_blocked_dialog(
+            {**self.agent, "provider": "opencode"}, request, ["a"], "A",
+        )
+        self.assertEqual(
+            [params["keys"] for method, params in sent if method == "agent.send_keys"],
+            [["enter"]],
+        )
+
+    def test_a_typed_opencode_answer_reaches_the_freeform_row(self):
+        sent, state = self._drive_dialog(("A", "B", "Type your own answer"))
+        request = {"options": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}]}
+        self.bridge._answer_blocked_dialog(
+            {**self.agent, "provider": "opencode"}, request, [], "custom host",
+        )
+        self.assertEqual(
+            [params["keys"] for method, params in sent if method == "agent.send_keys"],
+            [
+                ["down"],
+                ["down"],
+                ["enter"],
+                ["c", "u", "s", "t", "o", "m", "space", "h", "o", "s", "t"],
+                ["enter"],
+            ],
+        )
+        self.assertEqual(state["focus"], 2)
+
+    def test_unhighlighted_dialog_still_steps_from_the_first_row(self):
+        # OpenCode often styles focus with color, not reverse video. If no row
+        # is uniquely marked, assume the first choice and step from there.
+        sent = []
+        self.bridge.dialog_settle_seconds = 0
+
+        def request(method, params):
+            sent.append((method, params))
+            if method == "agent.read":
+                return {"read": {"text": "  Which?  esc\n  A\n  B\n"}}
+            return {}
+
+        self.bridge._herdr_request = request
+        self.bridge._answer_blocked_dialog(
+            {**self.agent, "provider": "opencode"},
+            {"options": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}]},
+            ["b"],
+            "B",
+        )
+        self.assertEqual(
+            [params["keys"] for method, params in sent if method == "agent.send_keys"],
+            [["down"], ["enter"]],
+        )
+
+    def test_opencode_answers_drive_the_dialog_even_when_not_blocked(self):
+        # SQLite can expose the question while Herdr still reports working.
+        # Prompting then types into the focused first row and Enter submits it.
+        sent, _ = self._drive_dialog(("Keep current", "Create folder"))
+        agent = {**self.agent, "agent_status": "working"}
+        self.bridge.raw_agents = {"a1": agent}
+        self.bridge._remember_human_request(
+            {
+                "id": "req-1",
+                "options": [
+                    {"id": "Keep current", "label": "Keep current"},
+                    {"id": "Create folder", "label": "Create folder"},
+                ],
+            },
+            agent,
+        )
+        self.bridge._answer_human_request(
+            {"agentId": "a1", "requestId": "req-1", "answer": {"selectedOptionIds": ["Create folder"]}}
+        )
+        self.assertEqual(
+            [params["keys"] for method, params in sent if method == "agent.send_keys"],
+            [["down"], ["enter"]],
+        )
+
+    def test_a_text_only_opencode_question_types_then_enters(self):
+        sent, _ = self._drive_dialog(())
+        self.bridge._answer_blocked_dialog(
+            {**self.agent, "provider": "opencode"}, {"options": []}, [], "Yes",
+        )
+        self.assertEqual(
+            [params["keys"] for method, params in sent if method == "agent.send_keys"],
+            [["Y", "e", "s"], ["enter"]],
+        )
+
+    def test_variant_and_idle_screens_are_not_treated_as_questions(self):
+        self.assertIsNone(questions.parse_dialog("ses_root", "         Select variant                      esc\n         Search\n         Default\n"))
+        self.agent["status"] = "idle"
+        self.bridge._herdr_request.return_value = {"read": {"text": "  Which product?  esc\n  Remodlr.ai\n"}}
+        self.assertIsNone(self.load()["activeHumanRequest"])
+        self.bridge._herdr_request.assert_not_called()
 
     def test_empty_v1_and_v2_sessions_remain_semantic(self):
         self.assertEqual(self.load()["items"], [])
@@ -281,7 +538,8 @@ class OpenCodeTest(unittest.TestCase):
         self.assertTrue(capabilities["structuredConversation"])
         self.assertTrue(capabilities["toolActivity"])
         self.assertTrue(capabilities["supportsRetuning"])
-        for key in ("streamingConversation", "structuredQuestions", "todos"):
+        self.assertTrue(capabilities["structuredQuestions"])
+        for key in ("streamingConversation", "todos"):
             self.assertFalse(capabilities[key])
         self.assertIsNone(self.adapter.output_path(self.agent))
         self.assertTrue(self.adapter.provider_capabilities(True)["structuredConversation"])

@@ -51,14 +51,15 @@ export function AgentWorkspaceSkeleton() {
         {[0, 1, 2].map((row) => (
           <View key={row}>
             <View style={styles.agent}>
-              <SkeletonBlock width={styles.providerIcon.width} height={styles.providerIcon.height}
-                radius={styles.providerIcon.borderRadius} />
               <View style={styles.agentCopy}>
                 <View style={styles.agentTitle}>
                   <View style={styles.providerName}><SkeletonLine width={row === 1 ? '60%' : '80%'} /></View>
                   <SkeletonBlock width={7} height={7} radius={3.5} />
                 </View>
-                <SkeletonLine width="92%" />
+                <View style={styles.subtitle}>
+                  <SkeletonBlock width={12} height={12} radius={3} />
+                  <SkeletonLine width={row === 1 ? '54%' : '78%'} />
+                </View>
               </View>
               <SkeletonBlock width={18} height={12} />
             </View>
@@ -132,9 +133,6 @@ function AgentRow({ agent, active }: Readonly<{ agent: RemoteAgent; active: bool
         // Scale belongs to controls that stand alone on the canvas.
         { backgroundColor: pressed ? theme.backgroundSelected : 'transparent' },
       ]}>
-      <GlassSurface highlight={false} style={[styles.providerIcon, { backgroundColor: theme.accentSoft }]}>
-        <AgentProviderIcon provider={agent.provider} tintColor={theme.accent} />
-      </GlassSurface>
       <View style={styles.agentCopy}>
         <View style={styles.agentTitle}>
           <MarqueeText
@@ -149,11 +147,13 @@ function AgentRow({ agent, active }: Readonly<{ agent: RemoteAgent; active: bool
           ) : null}
           <StatusBadge status={agent.status} />
         </View>
-        <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1}>
-          {agent.title === providerLabel(agent.provider)
-            ? agent.cwd ?? agent.workspaceName
-            : `${providerLabel(agent.provider)}${agent.cwd ? ` · ${agent.cwd}` : ''}`}
-        </ThemedText>
+        <View style={styles.subtitle}>
+          <AgentProviderIcon provider={agent.provider} size={12} tintColor={theme.textMuted} />
+          <ThemedText type="caption" themeColor="textSecondary" numberOfLines={1} style={styles.subtitleText}>
+            {providerLabel(agent.provider)}
+            {agent.cwd ? ` · ${agent.cwd}` : agent.title === providerLabel(agent.provider) ? ` · ${agent.workspaceName}` : ''}
+          </ThemedText>
+        </View>
       </View>
       <AppIcon
         name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
@@ -215,27 +215,20 @@ const styles = StyleSheet.create({
   },
   workspaceCard: {},
   agent: {
-    minHeight: 68,
+    minHeight: 56,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
     paddingHorizontal: Spacing.two,
-  },
-  providerIcon: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 14,
-    overflow: 'hidden',
+    paddingVertical: Spacing.one,
   },
   divider: {
     height: StyleSheet.hairlineWidth,
-    marginLeft: 76,
+    marginLeft: Spacing.two,
   },
   agentCopy: {
     flex: 1,
-    gap: 4,
+    gap: 2,
   },
   agentTitle: {
     flexDirection: 'row',
@@ -249,6 +242,16 @@ const styles = StyleSheet.create({
   sessionTitle: {
     fontFamily: Fonts.semibold,
     fontWeight: 600,
+  },
+  subtitle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.half,
+    minWidth: 0,
+  },
+  subtitleText: {
+    flex: 1,
+    minWidth: 0,
   },
   statusDot: {
     width: 7,

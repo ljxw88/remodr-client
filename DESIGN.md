@@ -267,7 +267,7 @@ Status must remain understandable without color alone.
 - Show provider, working directory, and explicit status.
 - Preserve last-known content during reconnect and show a compact floating
   connection indicator.
-- A neutral-soft icon tile gives each row a stable visual anchor.
+- A small provider icon sits in the subtitle, beside the provider name and path.
 - Tapping a row opens its conversation at the newest content.
 - Keep **New agent** as the only primary action. Its page chooses one
   of the server-advertised providers, a required space, and an explicit

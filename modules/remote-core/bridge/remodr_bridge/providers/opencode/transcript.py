@@ -179,6 +179,15 @@ def project_part(key: str, role: str, part: dict[str, Any]) -> dict[str, Any] | 
     if status is None:
         raise TranscriptError("Unsupported OpenCode tool state.")
     name = text(part.get("name", part.get("tool")))
+    if name == "question":
+        request = normalize_question(key, state.get("input")) or normalize_question(
+            key, state.get("structured"),
+        )
+        if request:
+            item = {"id": key, "kind": "human_request", "request": request}
+            if status in ("completed", "failed"):
+                item["resolved"] = True
+            return item
     return {
         "id": key,
         "kind": "tool_activity",
@@ -186,6 +195,66 @@ def project_part(key: str, role: str, part: dict[str, Any]) -> dict[str, Any] | 
         "title": tool_title(name),
         "detail": tool_detail(state.get("input")),
         "state": status,
+    }
+
+
+def question_payload(value: Any) -> Any:
+    if isinstance(value, str) and value.strip():
+        try:
+            return json.loads(value)
+        except (ValueError, TypeError):
+            return None
+    return value
+
+
+def question_options(value: Any) -> list[dict[str, str]]:
+    options: list[dict[str, str]] = []
+    if not isinstance(value, list):
+        return options
+    for option in value:
+        if isinstance(option, dict):
+            label = option.get("label") or option.get("id") or option.get("const")
+            if not isinstance(label, str) or not label.strip():
+                continue
+            item = {"id": str(option.get("id") or label), "label": label}
+            description = option.get("description") or option.get("title")
+            if isinstance(description, str) and description.strip() and description != label:
+                item["description"] = description
+            options.append(item)
+        elif isinstance(option, (str, int, float)):
+            options.append({"id": str(option), "label": str(option)})
+    return options
+
+
+def normalize_question(request_id: str, arguments: Any) -> dict[str, Any] | None:
+    """Map OpenCode's question tool to Copilot's activeHumanRequest shape.
+
+    Pending tools persist `input` as JSON text; running tools use an object.
+    """
+    payload = question_payload(arguments)
+    first: dict[str, Any] | None = None
+    if isinstance(payload, dict):
+        questions = payload.get("questions")
+        if isinstance(questions, list) and questions and isinstance(questions[0], dict):
+            first = questions[0]
+        elif isinstance(payload.get("question"), str):
+            first = payload
+    elif isinstance(payload, list) and payload and isinstance(payload[0], dict):
+        first = payload[0]
+    if first is None:
+        return None
+    question = first.get("question") or first.get("header") or first.get("message")
+    if not isinstance(question, str) or not question.strip():
+        return None
+    options = question_options(first.get("options") or first.get("choices"))
+    custom = first.get("custom")
+    return {
+        "id": request_id,
+        "kind": "choice" if options else "text",
+        "question": question,
+        "options": options,
+        "allowCustomAnswer": True if custom is None else custom is True,
+        "multiSelect": first.get("multiple") is True,
     }
 
 

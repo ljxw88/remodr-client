@@ -12,5 +12,6 @@ SPEC = ProviderSpec(
     retunable=True,
     structured_conversation=True,
     tool_activity=True,
+    questions=True,
     todos=True,
 )

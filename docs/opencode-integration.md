@@ -91,7 +91,8 @@ it does not force every tool to ask. Remodr does not change the user's global
 OpenCode configuration or install plugins automatically.
 
 The read adapter supports the pinned SQLite `message`/`part` layout and newer
-`session_message` layout, including empty sessions, tool activity, and the
+`session_message` layout, including empty sessions, tool activity, running
+`question` tools as Copilot-style needs-input, and the
 native `todo` table. Reads are transactional and read-only, including live WAL
 commits; they never migrate or edit OpenCode's database. Each projection
 includes the newest 200 stored messages and the current ordered todo snapshot
@@ -120,23 +121,27 @@ and does not yet use the session-specific API abort endpoint.
 ## Feature parity boundary
 
 The Herdr-backed adapter now covers agent creation, account-scoped remote model
-discovery, exact-session messages, tool activity, the current live plan/todo
-snapshot, stop, and model-specific reasoning variants. Todos come from durable
-SQLite state and therefore work with the default internal-worker TUI.
+discovery, exact-session messages, tool activity, Copilot-style needs-input for
+persisted `question` tools, the current live plan/todo snapshot, stop, and
+model-specific reasoning variants. Todos come from durable SQLite state and
+therefore work with the default internal-worker TUI.
 
-Pending questions and permission approvals are different: OpenCode stores their
-request IDs and queues in the live process, not durably in the session database.
-The default TUI talks to an internal worker at `opencode.internal`; it does not
-provide a discoverable authenticated localhost port. Parsing terminal text or
-sending guessed keystrokes would risk answering the wrong request and is not
-feature parity.
+Pending permission approvals remain live-process state, not durable SQLite.
+Question tools that persist their prompt in the session database become
+Copilot-style `activeHumanRequest` controls. If Herdr reports the agent
+blocked and SQLite has no question, the bridge reads the visible TUI dialog
+and surfaces that prompt. Answers always drive that TUI dialog, even when Herdr
+is not `blocked`. This is a temporary path until Remodr owns OpenCode's
+session-bound HTTP/SSE reply API. Movement is one verified arrow at a time
+from the highlighted row; a typed answer enters the freeform row before
+characters. Unverified focus fails closed.
+Native permission APIs still require an owned authenticated loopback
+server.
 
-Full interactive parity therefore requires Remodr to launch and own an
-authenticated loopback OpenCode server/TUI pair, bind that server to the exact
-Herdr pane and session, and use the native question, permission, abort and event
-APIs with durable-command semantics. An unrelated temporary server cannot answer
-requests owned by the existing TUI. This is the next architectural phase, not a
-safe fallback for the read-only adapter.
+Native permission, abort, and event APIs still require Remodr to own an
+authenticated loopback OpenCode server bound to the exact Herdr pane and
+session. An unrelated temporary server cannot answer requests owned by the
+existing TUI. That remains the next architectural phase for those APIs.
 
 ## Native API integration is the next boundary
 

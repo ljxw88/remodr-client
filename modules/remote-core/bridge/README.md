@@ -200,8 +200,9 @@ does not rewrite user credentials or plugin configuration.
 OpenCode conversations read the exact session's supported SQLite rows through a
 read-only transaction, including WAL data. Missing identity keeps the explicit
 terminal fallback; invalid identifiers, missing exact sessions, unsupported
-schemas and active reverts do not silently select another session. No live API
-question/permission controls or streaming subscription is advertised.
+schemas and active reverts do not silently select another session. Running
+`question` tools become Copilot-style `activeHumanRequest` items. No live API
+permission controls or streaming subscription is advertised.
 In-chat reasoning variants use the verified native TUI chooser described below.
 See [OpenCode integration](../../../docs/opencode-integration.md)
 for storage overrides, installation and account support.
@@ -365,7 +366,11 @@ send or choose the transcript to read.
 
 Multiple candidates or a process change during inspection fail closed:
 runtime identity becomes `null`, and conversation/retune requests return
-`SESSION_IDENTITY_UNRESOLVED`, rather than selecting an old transcript. If
+`SESSION_IDENTITY_UNRESOLVED`, rather than selecting an old transcript.
+After `/clear`, a leftover current-PID lock marker for the previously bound
+session is dropped when exactly one other live marker remains. Herdr's
+Copilot native ID is not a tie-break. Multiple open session databases
+still fail closed. If
 process metadata or inspection is unavailable, or an idle/new CLI has not opened
 its optional session database, on an installation that has not
 established process-bound identity, the bridge retains native/launch-ID behavior

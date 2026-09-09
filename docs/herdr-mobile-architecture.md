@@ -122,7 +122,7 @@ foreground launcher chain to the native runtime.
 
 | Provider | Current conversation source | Limits |
 | --- | --- | --- |
-| OpenCode | Read-only SQLite session/message/todo storage, scoped by Herdr's native session ID | Semantic text, tool activity, current ordered plan and verified TUI reasoning-variant selection; native question/permission APIs and live model switching are not yet wired |
+| OpenCode | Read-only SQLite session/message/todo storage, scoped by Herdr's native session ID | Semantic text, tool activity, current ordered plan, `question` tools and blocked TUI dialogs as Copilot-style needs-input, and verified TUI reasoning-variant selection; native permission APIs and live model switching are not yet wired |
 | Copilot | `~/.copilot/session-state/<id>/events.jsonl`, plus session database TODOs | Structured messages, tool activity and `ask_user` questions; requires a known provider session |
 | Unknown or unreadable adapter | Herdr `agent.read` | Explicit raw-output compatibility view |
 
@@ -150,9 +150,13 @@ The adapter first verifies the foreground Copilot process. An open session
 database remains authoritative; otherwise it reads that exact process's
 `inuse.<pid>.lock` markers under `~/.copilot/session-state/`. Marker content,
 ownership and modification time must match the live process, and the pane's
-foreground binding is checked again after inspection. Markers older than the
+foreground binding is checked again after inspection.         Markers older than the
 process cannot revive a session from a reused PID. Multiple candidate sessions
 remain an explicit unresolved identity, not a reason to pick the newest folder.
+After `/clear`, a leftover current-PID marker for the previously bound
+session is dropped when exactly one other live marker remains. Herdr's
+Copilot native ID is not a tie-break; it can stay stale. Multiple open
+session databases still fail closed.
 Messages still require exact provider/session/pane preconditions and durable
 command IDs. No synthetic first prompt or provider transcript is created.
 

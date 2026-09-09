@@ -39,12 +39,12 @@ def answer_human_request(host: Bridge, payload: dict[str, Any]) -> dict[str, Any
         )
     if not text:
         raise BridgeError("INVALID_ANSWER", "An answer is required.")
-    # A question puts the agent's own selection UI on screen, and Herdr
-    # refuses `agent.prompt` while that is up — it answers with
-    # `agent_blocked` before sending anything. The dialog has to be driven
-    # the way a person would drive it. The status can be a moment stale, so
-    # a refusal is also taken as proof the dialog is up.
-    if host._agent_is_blocked(agent):
+    # OpenCode's question lives in the TUI even when Herdr still reports
+    # idle/working. Prompting then types into the focused first row and
+    # Enter submits that instead of the chosen answer. Copilot only needs
+    # the dialog path while blocked; a stale idle status still refuses
+    # `agent.prompt` with `agent_blocked`.
+    if agent.get("provider") == "opencode" or host._agent_is_blocked(agent):
         host._answer_blocked_dialog(agent, request, selected_ids, text)
     else:
         try:
@@ -78,13 +78,25 @@ def answer_blocked_dialog(
     selected_ids: list[Any],
     text: str,
 ) -> None:
-    """Drive the agent's own question dialog.
+    """Drive the agent's own question dialog."""
+    if agent.get("provider") == "opencode":
+        from .providers.opencode.questions import answer_dialog
+        answer_dialog(host, agent, request, selected_ids, text)
+        return
+    _answer_copilot_dialog(host, agent, request, selected_ids, text)
 
-    The dialog is a list of the offered answers followed by a synthesised
-    "Other (type your answer)" row, and the cursor opens on the schema's
-    default rather than the top. Both ends of the list clamp, so moving
-    further than the list is long is what makes a position certain without
-    having to read the screen back.
+
+def _answer_copilot_dialog(
+    host: Bridge,
+    agent: dict[str, Any],
+    request: dict[str, Any] | None,
+    selected_ids: list[Any],
+    text: str,
+) -> None:
+    """Copilot's list clamps at both ends and opens on the schema default.
+
+    Over-travelling past the first row makes the position certain without
+    reading the screen back. Enter stays in the same batch as the move.
     """
     options = list(request.get("options", [])) if request else []
     span = len(options) + 2

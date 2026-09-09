@@ -60,18 +60,21 @@ export function MarqueeText({
   const [translateX] = useState(() => new Animated.Value(0));
   const animationRef = useRef<Animated.CompositeAnimation | null>(null);
   const monitor = useRef<ReturnType<typeof setInterval> | null>(null);
-  const playedText = useRef<string | null>(null);
 
   const overflow = enabled && contentWidth > containerWidth + 2 && containerWidth > 0;
   const distance = overflow ? contentWidth - containerWidth + 16 : 0;
 
-  const stop = useCallback(() => {
+  const stopAnimation = useCallback(() => {
     const animation = animationRef.current;
     animationRef.current = null;
-    if (monitor.current != null) clearInterval(monitor.current);
-    monitor.current = null;
     animation?.stop();
   }, []);
+
+  const stop = useCallback(() => {
+    stopAnimation();
+    if (monitor.current != null) clearInterval(monitor.current);
+    monitor.current = null;
+  }, [stopAnimation]);
 
   useEffect(() => {
     scroller.current?.scrollTo({ x: 0, animated: false });
@@ -81,13 +84,13 @@ export function MarqueeText({
     stop();
     translateX.setValue(0);
 
-    if (!overflow || !active || !foreground || reducedMotion || playedText.current === children) return;
+    if (!overflow || !active || !foreground || reducedMotion) return;
     let cancelled = false;
 
     const duration = (distance / speed) * 1000;
     const useNative = Platform.OS !== 'web';
 
-    const animation = Animated.sequence([
+    const createAnimation = () => Animated.loop(Animated.sequence([
         Animated.delay(startDelay),
         Animated.timing(translateX, {
           toValue: -distance,
@@ -104,11 +107,11 @@ export function MarqueeText({
           useNativeDriver: useNative,
           isInteraction: false,
         }),
-      ]);
+      ]));
 
-    const checkVisibility = (start: boolean) => {
+    const checkVisibility = () => {
       container.current?.measureInWindow((x, y, width, height) => {
-        if (cancelled || (start && playedText.current === children)) return;
+        if (cancelled) return;
         const bounds = viewport?.current;
         const left = Math.max(0, bounds?.x ?? 0);
         const top = Math.max(0, bounds?.y ?? 0);
@@ -117,26 +120,29 @@ export function MarqueeText({
         const visible = width > 0 && height > 0 && x < right && x + width > left
           && y < bottom && y + height > top;
         if (!visible) {
-          stop();
+          stopAnimation();
           translateX.setValue(0);
-        } else if (start) {
-          playedText.current = children;
+        } else if (!animationRef.current) {
+          const animation = createAnimation();
           animationRef.current = animation;
-          // Only a running, visible title needs monitoring; hidden rows never start a loop.
-          monitor.current = setInterval(() => checkVisibility(false), 250);
           animation.start(() => {
-            if (!cancelled && animationRef.current === animation) stop();
+            if (!cancelled && animationRef.current === animation) {
+              animationRef.current = null;
+            }
           });
         }
       });
     };
-    checkVisibility(true);
+    checkVisibility();
+    // Overflowing rows that enter the viewport later can start; visible rows
+    // stop promptly when scrolled away.
+    monitor.current = setInterval(checkVisibility, 250);
 
     return () => {
       cancelled = true;
       stop();
     };
-  }, [active, children, distance, endDelay, foreground, overflow, reducedMotion, speed, startDelay, stop, translateX, viewport, windowHeight, windowWidth]);
+  }, [active, children, distance, endDelay, foreground, overflow, reducedMotion, speed, startDelay, stop, stopAnimation, translateX, viewport, windowHeight, windowWidth]);
 
   const handleContainerLayout = (event: LayoutChangeEvent) => {
     const width = event.nativeEvent.layout.width;
@@ -162,7 +168,6 @@ export function MarqueeText({
         horizontal
         scrollEnabled
         onScrollBeginDrag={() => {
-          playedText.current = children;
           if (!animationRef.current) return;
           stop();
           translateX.stopAnimation((offset) => {

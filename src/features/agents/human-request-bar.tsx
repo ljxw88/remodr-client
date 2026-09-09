@@ -60,6 +60,7 @@ export function HumanRequestBar({ agentId, session, request, enqueueing = false,
 
   const options = answerOptions(request);
   const locked = sending || enqueueing || sent || command != null;
+  const promptOnly = options.length === 0;
 
   useEffect(() => {
     const observe = () => {
@@ -112,10 +113,6 @@ export function HumanRequestBar({ agentId, session, request, enqueueing = false,
     void answer([optionId]);
   }
 
-  if (options.length === 0) {
-    return null;
-  }
-
   return (
     <View style={styles.wrapper}>
       {/* A surface of its own rather than bare text over the composer. The
@@ -153,6 +150,12 @@ export function HumanRequestBar({ agentId, session, request, enqueueing = false,
               {request.question}
             </ThemedText>
           </Pressable>
+
+          {promptOnly ? (
+            <ThemedText type="caption" themeColor="textMuted">
+              Type an answer below.
+            </ThemedText>
+          ) : null}
 
           <View style={styles.options}>
             {options.map((option) => {

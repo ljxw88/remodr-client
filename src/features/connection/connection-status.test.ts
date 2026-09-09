@@ -408,6 +408,21 @@ describe('queued human answers', () => {
       expect(JSON.stringify(renderer.toJSON())).not.toContain('ANSWER SENT');
       TestRenderer.act(() => renderer.unmount());
     });
+
+    it('keeps a prompt-only OpenCode question visible above the composer', async () => {
+      let renderer!: TestRenderer.ReactTestRenderer;
+      await TestRenderer.act(async () => {
+        renderer = TestRenderer.create(createElement(HumanRequestBar, {
+          agentId: 'agent-a',
+          session,
+          request: { ...request, kind: 'text', options: [] },
+        }));
+      });
+      expect(JSON.stringify(renderer.toJSON())).toContain('Continue?');
+      expect(JSON.stringify(renderer.toJSON())).toContain('Type an answer below.');
+      expect(renderer.root.findAll((node) => node.props.accessibilityLabel === 'Yes')).toHaveLength(0);
+      TestRenderer.act(() => renderer.unmount());
+    });
 });
 
 describe('connection lifecycle', () => {

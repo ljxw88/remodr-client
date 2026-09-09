@@ -39,7 +39,7 @@ jest.mock('react-native/Libraries/Components/ScrollView/ScrollView', () => {
   }) };
 });
 
-describe('quiet one-pass titles', () => {
+describe('continuous marquee titles', () => {
   let renderer: TestRenderer.ReactTestRenderer | undefined;
   let finish: ((result: { finished: boolean }) => void) | undefined;
   const start = jest.fn((callback) => { finish = callback; });
@@ -67,7 +67,7 @@ describe('quiet one-pass titles', () => {
     jest.spyOn(global, 'setInterval');
     jest.spyOn(global, 'clearInterval');
     jest.spyOn(Animated, 'sequence').mockReturnValue({ start, stop, reset: jest.fn() });
-    jest.spyOn(Animated, 'loop');
+    jest.spyOn(Animated, 'loop').mockReturnValue({ start, stop, reset: jest.fn() });
   });
   afterEach(() => {
     TestRenderer.act(() => renderer?.unmount()); renderer = undefined;
@@ -78,27 +78,30 @@ describe('quiet one-pass titles', () => {
     jest.useRealTimers(); jest.restoreAllMocks();
   });
 
-  it('plays once, cleans up its monitor, and keeps manual horizontal reading available', () => {
+  it('loops while visible, cleans up its monitor, and keeps manual horizontal reading available', () => {
     render(); measure();
     expect(start).toHaveBeenCalledTimes(1);
-    expect(Animated.loop).not.toHaveBeenCalled();
-    TestRenderer.act(() => finish?.({ finished: true }));
+    expect(Animated.loop).toHaveBeenCalledTimes(1);
     render(); measure();
     expect(start).toHaveBeenCalledTimes(1);
     expect(renderer!.root.findByType(ScrollView).props.scrollEnabled).toBe(true);
+    TestRenderer.act(() => renderer!.root.findByType(ScrollView).props.onScrollBeginDrag());
     expect(clearInterval).toHaveBeenCalledWith(jest.mocked(setInterval).mock.results[0].value);
   });
 
   it('does not start offscreen and stops when a running title scrolls out of view', () => {
     mockY = 1000; render(); measure();
     expect(start).not.toHaveBeenCalled();
-    expect(setInterval).not.toHaveBeenCalled();
-    mockY = 100; render(true, 'Another long title');
+    mockY = 100;
+    TestRenderer.act(() => jest.advanceTimersByTime(250));
     expect(start).toHaveBeenCalledTimes(1);
     mockY = 1000;
     TestRenderer.act(() => jest.advanceTimersByTime(250));
     expect(stop).toHaveBeenCalled();
-    expect(clearInterval).toHaveBeenCalledWith(jest.mocked(setInterval).mock.results[0].value);
+    expect(clearInterval).not.toHaveBeenCalled();
+    mockY = 100;
+    TestRenderer.act(() => jest.advanceTimersByTime(250));
+    expect(start).toHaveBeenCalledTimes(2);
   });
 
   it('never runs while reduced, backgrounded or unfocused', () => {
@@ -113,6 +116,16 @@ describe('quiet one-pass titles', () => {
     mockReduced = true; render();
     expect(stop).toHaveBeenCalled();
     expect(clearInterval).toHaveBeenCalledWith(jest.mocked(setInterval).mock.results[0].value);
+  });
+
+  it('restarts when a retained screen becomes active on return', () => {
+    render(); measure();
+    expect(start).toHaveBeenCalledTimes(1);
+
+    render(false);
+    expect(start).toHaveBeenCalledTimes(1);
+    render(true);
+    expect(start).toHaveBeenCalledTimes(2);
   });
 
   it('uses the scroll viewport rather than mistaking clipped rows for visible window content', () => {
