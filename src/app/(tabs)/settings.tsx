@@ -22,9 +22,10 @@ type SettingRowProps = {
       | 'checkmark.shield'
       | 'info.circle'
       | 'stethoscope'
+      | 'heart.fill'
       | 'arrow.left.and.right';
-    android: 'key' | 'security' | 'info' | 'troubleshoot' | 'swap_horiz';
-    web: 'key' | 'security' | 'info' | 'troubleshoot' | 'swap_horiz';
+    android: 'key' | 'security' | 'info' | 'troubleshoot' | 'favorite' | 'swap_horiz';
+    web: 'key' | 'security' | 'info' | 'troubleshoot' | 'favorite' | 'swap_horiz';
   };
   label: string;
   value: string;
@@ -68,6 +69,15 @@ export default function SettingsScreen() {
                 icon={{ ios: 'info.circle', android: 'info', web: 'info' }}
                 label="Version"
                 value={versionDisplay}
+              />
+            </SettingsGroup>
+
+            <SettingsGroup title="Support">
+              <SettingRow
+                icon={{ ios: 'heart.fill', android: 'favorite', web: 'favorite' }}
+                label="Support Remodr"
+                value="Open →"
+                onPress={() => router.push('/flows/support')}
               />
             </SettingsGroup>
 

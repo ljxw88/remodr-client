@@ -58,6 +58,7 @@ describe('SettingsScreen', () => {
     expect(allText).toContain('Version');
     expect(allText).toContain('v0.1.0 (1)');
     expect(allText).toContain('Diagnostics');
+    expect(allText).toContain('Support Remodr');
   });
 
   it('toggles marquee animation setting', async () => {
@@ -88,5 +89,21 @@ describe('SettingsScreen', () => {
     });
 
     expect(router.push).toHaveBeenCalledWith('/diagnostics');
+  });
+
+  it('navigates to support screen when pressed', () => {
+    TestRenderer.act(() => {
+      renderer = TestRenderer.create(createElement(SettingsScreen));
+    });
+
+    const supportRow = renderer.root.findByProps({
+      accessibilityLabel: 'Support Remodr, Open →',
+    });
+
+    TestRenderer.act(() => {
+      supportRow.props.onPress();
+    });
+
+    expect(router.push).toHaveBeenCalledWith('/flows/support');
   });
 });
