@@ -9,6 +9,7 @@ import { supportsRetuning } from '@/domain/agent-capabilities';
 import { agentEditError, tuningChanges } from '@/features/agents/agent-edit-flow';
 import { TuningFields } from '@/features/agents/tuning-fields';
 import { OpenCodeVariantSettings } from '@/features/agents/opencode-variant-settings';
+import { OpenCodeApiVariantFields } from '@/features/agents/opencode-api-variant-fields';
 import { useHerdr } from '@/features/agents/use-herdr';
 import { flowDrafts, useFlowDraft } from '@/features/forms/flow-drafts';
 import { herdrRepository } from '@/services/herdr-repository';
@@ -45,7 +46,10 @@ export default function AgentSettingsPage() {
     return <MissingFlow title="Model Settings Unavailable" />;
   }
   const availabilityError = agentEditError(devices, draft);
-  const { changed, restarts } = tuningChanges(draft.initialTuning, draft.tuning);
+  const { changed: tuningChanged, restarts } = tuningChanges(draft.initialTuning, draft.tuning);
+  const variantChanged = draft.variantSelection?.modelToken === draft.tuning.model
+    && draft.variantSelection?.initial !== draft.variantSelection?.selected;
+  const changed = tuningChanged || variantChanged;
 
   async function apply() {
     if (busyRef.current) return;
@@ -53,7 +57,8 @@ export default function AgentSettingsPage() {
     if (!current || current.kind !== 'agent-settings') return;
     const unavailable = agentEditError(herdrRepository.getSnapshot().devices, current);
     if (unavailable) { setError(unavailable); return; }
-    if (!tuningChanges(current.initialTuning, current.tuning).changed) return;
+    const selection = current.variantSelection?.modelToken === current.tuning.model ? current.variantSelection : undefined;
+    if (!tuningChanges(current.initialTuning, current.tuning).changed && selection?.initial === selection?.selected) return;
     busyRef.current = true;
     setBusy(true);
     setError(null);
@@ -64,6 +69,8 @@ export default function AgentSettingsPage() {
           ? { providerSessionId: current.providerSessionId ?? undefined }
           : {}),
         ...current.tuning,
+        ...(current.apiVariantSelection && selection
+          ? { variant: selection.selected, modelToken: selection.modelToken } : {}),
       });
       if (mounted.current) router.back();
     } catch (cause) {
@@ -99,14 +106,20 @@ export default function AgentSettingsPage() {
             if (busyRef.current) return;
             setError(null);
             flowDrafts.update(flowId, (current) =>
-              current.kind === 'agent-settings' ? { ...current, tuning } : current,
+              current.kind === 'agent-settings' ? {
+                ...current, tuning,
+                ...(current.tuning.model !== tuning.model ? { variantSelection: undefined } : {}),
+              } : current,
             );
           }}
         />
+        {draft.apiVariantSelection ? <OpenCodeApiVariantFields
+          key={draft.tuning.model ?? 'auto'} flowId={flowId} draft={draft} busy={busy} unavailable={availabilityError}
+        /> : null}
       </View>
       <ThemedText type="small" themeColor="textSecondary">
         {draft.provider === 'opencode'
-          ? 'The selected model is used for prompts sent from this app. It does not change a turn already in progress.'
+          ? 'The selected model and variant are used for prompts sent from this app. They do not change a turn already in progress.'
           : 'Changes stay here until you apply them.'}
       </ThemedText>
       {restarts ? (

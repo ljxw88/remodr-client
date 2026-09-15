@@ -261,8 +261,21 @@ unsupported providers with `PROVIDER_NOT_TUNABLE` before issuing CLI input.
 Copilot retains its existing `/model` and session-restart behavior; its
 `--session-id`, `/exit`, and session-log parsing never apply to other providers.
 Creation settings remembered by the bridge override lagging native session
-metadata. A verified OpenCode API binding selects the model for future prompts
+metadata. A verified OpenCode API binding selects the model and variant for future prompts
 sent from Remodr; compatibility sessions retain the TUI variant flow.
+
+For managed API sessions advertising `apiVariantSelection: true`,
+`agent.variant_options` accepts `{agentId, providerSessionId, model}` with an
+explicit `provider/model` selector and returns
+`{modelLabel, modelToken, currentVariant, variants}`. The bridge reads the owned
+server's `/provider` endpoint, excludes disabled variants, and forwards only
+labels and IDs, never provider credentials or variant option values.
+`modelToken` is the exact model selector. Apply with `agent.retune` and
+`{agentId, providerSessionId, model, modelToken, variant}`. Non-default choices
+are revalidated against the provider metadata before storing session-scoped
+prompt settings. `variant: null` clears the override; changing models without
+specifying a variant also clears it. Future mobile prompts carry both model and
+variant. No inference or TUI input is issued when applying these settings.
 
 For compatibility-mode OpenCode sessions, `agent.variant_options` takes
 `{agentId, providerSessionId}` and

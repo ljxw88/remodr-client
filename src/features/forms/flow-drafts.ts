@@ -42,9 +42,10 @@ export type AgentSettingsDraft = {
   providerSessionId?: string | null;
   /** Keeps the settings workflow stable if the live API binding later drops. */
   apiModelSelection?: boolean;
+  apiVariantSelection?: boolean;
   initialTuning: Tuning;
   tuning: Tuning;
-  /** Read from the active OpenCode chooser, not its last submitted message. */
+  /** Read from the live TUI chooser or the API model's available variants. */
   variantSelection?: {
     modelToken: string;
     initial: string | null;

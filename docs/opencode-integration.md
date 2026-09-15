@@ -216,12 +216,20 @@ tested 1.18.30 TUI reflects it. Different sessions retain their own recorded
 models. There is currently no supported TUI model setter that would make the
 footer update before a turn.
 
+Managed API sessions also expose **Reasoning variant** in Model Settings. Choose
+a specific model, then choose one of its configured variants or **Default** to
+remove the app override. Choices are read from the owned server's `GET /provider`;
+only the model label and variant IDs cross the bridge. Disabled variants are
+excluded and the selection is revalidated when applied. Changing models clears
+the previous variant choice. Model and variant are sent together on future
+mobile prompts, without restarting the agent. Auto model selection delegates to
+OpenCode and does not expose model-specific variants. API variant settings
+currently live for the bridge session; reselect them after reconnecting if needed.
+
 Compatibility-mode sessions retain the verified TUI reasoning-variant picker.
 Its reasoning choices are read from the live TUI and changes are reflected
-immediately. Managed API sessions currently expose model selection but not a
-separate reasoning-effort picker; adding one requires sanitizing model-specific
-variant metadata from OpenCode's provider API. The API-backed path does not open
-the command palette or parse its ANSI layout.
+immediately. The API-backed path does not open the command palette or parse its
+ANSI layout.
 
 ## Compatibility mode
 

@@ -449,15 +449,18 @@ export class HerdrRepository {
     return this.mutateAgent(input.agentId, 'agent.retune', request);
   }
 
-  async agentVariantOptions(agentId: string, providerSessionId: string) {
+  async agentVariantOptions(agentId: string, providerSessionId: string, model?: string) {
     const agent = this.currentAgent(agentId);
     if (!agent || agent.provider !== 'opencode' || agent.providerSessionId !== providerSessionId) {
       throw new Error('This OpenCode session has changed. Reopen its model settings.');
     }
     const unavailable = retuningUnavailableReason(agent.provider, agent.capabilities);
     if (unavailable) throw new Error(unavailable);
+    if (model !== undefined && agent.capabilities.apiVariantSelection !== true) {
+      throw new Error('Reconnect with an updated bridge to choose OpenCode API variants.');
+    }
     return agentVariantOptionsSchema.parse(await this.requestForAgent(
-      agentId, 'agent.variant_options', { agentId, providerSessionId },
+      agentId, 'agent.variant_options', { agentId, providerSessionId, ...(model !== undefined ? { model } : {}) },
     ));
   }
 
