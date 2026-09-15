@@ -158,6 +158,8 @@ class OpenCodeTest(unittest.TestCase):
             ],
             "allowCustomAnswer": True,
             "multiSelect": False,
+            "origin": "sqlite",
+            "providerSessionId": "ses_root",
         }
         self.assertEqual(conversation["items"][-1], {
             "id": request["id"], "kind": "human_request", "request": request,
@@ -369,6 +371,29 @@ class OpenCodeTest(unittest.TestCase):
             [params["keys"] for method, params in sent if method == "agent.send_keys"],
             [["down"], ["enter"]],
         )
+
+    def test_answer_transport_must_match_the_active_request(self):
+        agent = {**self.agent, "agent_status": "working"}
+        self.bridge.raw_agents = {"a1": agent}
+        self.bridge._remember_human_request(
+            {
+                "id": "req-api",
+                "origin": "api",
+                "options": [{"id": "Keep current", "label": "Keep current"}],
+            },
+            agent,
+        )
+        with self.assertRaises(BridgeError) as caught:
+            self.bridge._answer_human_request({
+                "agentId": "a1",
+                "requestId": "req-api",
+                "answer": {
+                    "requestOrigin": "tui",
+                    "selectedOptionIds": ["Keep current"],
+                },
+            })
+        self.assertEqual(caught.exception.code, "COMMAND_PRECONDITION_FAILED")
+        self.bridge._herdr_request.assert_not_called()
 
     def test_a_text_only_opencode_question_types_then_enters(self):
         sent, _ = self._drive_dialog(())

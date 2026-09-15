@@ -60,7 +60,7 @@ def normalize_snapshot(
             host.output_activity.invalidate(agent_id)
         adapter.remember_session(pane_id, reported_session_id)
         workspace_id = str(raw.get("workspace_id") or "")
-        capabilities = host._agent_capabilities(provider, provider_session_id)
+        capabilities = host._agent_capabilities(provider, provider_session_id, pane_id)
         agent = {
             "id": agent_id,
             "deviceId": host.device_id,
@@ -125,6 +125,15 @@ def normalize_snapshot(
         }
 
     host.sessions.prune(live_pane_ids, live_sessions, set(raw_agents))
+    # A snapshot that reported no pane list at all says nothing about which
+    # panes exist, so it is never treated as proof that an agent has gone.
+    panes_reported = isinstance(panes, list) and bool(live_pane_ids)
+    for adapter in host.providers.values():
+        # A pruned or replaced pane must not keep a cached verification alive;
+        # the stored record stays, and stays unusable without re-verification.
+        adapter.prune_bindings(live_pane_ids)
+        if panes_reported:
+            adapter.prune_launches(live_pane_ids)
     host.output_activity.prune(set(raw_agents))
     with host.state_lock:
         host.raw_agents = raw_agents

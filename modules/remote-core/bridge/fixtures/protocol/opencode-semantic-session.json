@@ -45,7 +45,9 @@
               {"id": "Create folder", "label": "Create folder", "description": "Make a new directory"}
             ],
             "allowCustomAnswer": true,
-            "multiSelect": false
+            "multiSelect": false,
+            "origin": "sqlite",
+            "providerSessionId": "ses_contract"
           }},
           {"id": "opencode:ses_contract:todos", "kind": "todo_update", "timestamp": 11, "todos": [
             {"id": "opencode:ses_contract:todo:0", "text": "Inspect the fixture", "state": "done"},
@@ -61,7 +63,9 @@
             {"id": "Create folder", "label": "Create folder", "description": "Make a new directory"}
           ],
           "allowCustomAnswer": true,
-          "multiSelect": false
+          "multiSelect": false,
+          "origin": "sqlite",
+          "providerSessionId": "ses_contract"
         }
       }
     },

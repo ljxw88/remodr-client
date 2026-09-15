@@ -16,6 +16,7 @@ type Props = {
   answerPending: boolean;
   error: string | null;
   hasOpenRequest: boolean;
+  requestUsesForm?: boolean;
   requestBar?: ReactNode;
   onHeightChange: (height: number) => void;
   modelName: string;
@@ -60,6 +61,7 @@ export function ConversationComposer({
   answerPending,
   error,
   hasOpenRequest,
+  requestUsesForm = false,
   requestBar,
   onHeightChange,
   modelName,
@@ -123,14 +125,25 @@ export function ConversationComposer({
             </View>
 
             <TextInput
-              accessibilityLabel={hasOpenRequest ? 'Write an answer' : 'Build anything'}
+              accessibilityLabel={
+                requestUsesForm
+                  ? 'Complete the questions above'
+                  : hasOpenRequest ? 'Write an answer' : 'Build anything'
+              }
               multiline
               blurOnSubmit={false}
+              editable={!requestUsesForm}
               textAlignVertical="top"
               maxLength={20_000}
               value={value}
               onChangeText={onChangeText}
-              placeholder={answerPending ? 'Answer queued…' : hasOpenRequest ? 'Write another answer…' : 'Build anything…'}
+              placeholder={
+                answerPending
+                  ? 'Answer queued…'
+                  : requestUsesForm
+                    ? 'Complete the questions above…'
+                    : hasOpenRequest ? 'Write another answer…' : 'Build anything…'
+              }
               placeholderTextColor={theme.placeholder}
               style={[styles.input, { color: theme.text }]}
             />
@@ -146,20 +159,28 @@ export function ConversationComposer({
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Send"
-                accessibilityState={{ disabled: !value.trim() || sending || answerPending }}
-                disabled={!value.trim() || sending || answerPending}
+                accessibilityState={{
+                  disabled: !value.trim() || sending || answerPending || requestUsesForm,
+                }}
+                disabled={!value.trim() || sending || answerPending || requestUsesForm}
                 onPress={onSend}
                 style={({ pressed }) => [
                   styles.send,
                   {
-                    backgroundColor: value.trim() && !sending && !answerPending ? theme.accent : 'rgba(255, 255, 255, 0.08)',
+                    backgroundColor: value.trim() && !sending && !answerPending && !requestUsesForm
+                      ? theme.accent
+                      : 'rgba(255, 255, 255, 0.08)',
                     opacity: pressed ? 0.75 : 1,
                   },
                 ]}>
                 <AppIcon
                   name={{ ios: 'arrow.up', android: 'arrow_upward', web: 'arrow_upward' }}
                   size={18}
-                  tintColor={value.trim() && !sending && !answerPending ? theme.onAccent : theme.textMuted}
+                  tintColor={
+                    value.trim() && !sending && !answerPending && !requestUsesForm
+                      ? theme.onAccent
+                      : theme.textMuted
+                  }
                   fallback="↑"
                 />
               </Pressable>

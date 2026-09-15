@@ -1,13 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { AppIcon } from '@/components/ui/app-icon';
 import { GlassSurface, glassRim } from '@/components/ui/glass-surface';
-import { Radius, Spacing } from '@/constants/theme';
+import { Fonts, Radius, Spacing } from '@/constants/theme';
 import type { HumanRequest } from '@/domain/herdr';
 import { commandSession, sameAgentSession, type AgentSession } from '@/domain/agent-session';
-import { answerBodyFor, answerOptions } from '@/features/agents/human-request';
+import {
+  answerBodyFor,
+  answerOptions,
+  multiQuestionAnswerBody,
+  type AnswerBody,
+  type QuestionAnswer,
+} from '@/features/agents/human-request';
 import { CommandDelivery } from '@/features/connection/connection-status';
 import { usePendingCommands } from '@/features/connection/use-connection';
 import { useTheme } from '@/hooks/use-theme';
@@ -43,6 +49,10 @@ export function HumanRequestBar({ agentId, session, request, enqueueing = false,
   const [acknowledged, setAcknowledged] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [questionIndex, setQuestionIndex] = useState(0);
+  const [questionAnswers, setQuestionAnswers] = useState<QuestionAnswer[]>(() =>
+    request.questions?.map(() => ({ selectedOptionIds: [], customText: '' })) ?? [],
+  );
   /**
    * `sending` only shuts the buttons once React has re-rendered, which leaves
    * a frame in which a second tap still sees the old value. Answering twice
@@ -58,9 +68,20 @@ export function HumanRequestBar({ agentId, session, request, enqueueing = false,
   );
   const sent = acknowledged || command?.state === 'sent';
 
-  const options = answerOptions(request);
+  const structuredQuestions = request.questions && request.questions.length > 1
+    ? request.questions
+    : null;
+  const currentQuestion = structuredQuestions?.[questionIndex];
+  const currentAnswer = questionAnswers[questionIndex] ?? {
+    selectedOptionIds: [],
+    customText: '',
+  };
+  const options = currentQuestion?.options ?? answerOptions(request);
   const locked = sending || enqueueing || sent || command != null;
-  const promptOnly = options.length === 0;
+  const promptOnly = options.length === 0 && !structuredQuestions;
+  const currentReady = Boolean(
+    currentAnswer.selectedOptionIds?.length || currentAnswer.customText?.trim(),
+  );
 
   useEffect(() => {
     const observe = () => {
@@ -74,8 +95,8 @@ export function HumanRequestBar({ agentId, session, request, enqueueing = false,
     return herdrRepository.subscribeCommands(observe);
   }, [agentId, request.id, session]);
 
-  async function answer(optionIds: string[]) {
-    if (inFlight.current || locked || optionIds.length === 0 ||
+  async function submit(answerBody: AnswerBody) {
+    if (inFlight.current || locked ||
       herdrRepository.getPendingCommands().some((entry) =>
         entry.agentId === agentId && entry.action === 'human_request.answer' &&
         sameAgentSession(commandSession(entry.payload), session) &&
@@ -91,7 +112,7 @@ export function HumanRequestBar({ agentId, session, request, enqueueing = false,
       await herdrRepository.answerHumanRequest(
         agentId,
         request.id,
-        answerBodyFor(request, optionIds),
+        answerBody,
       );
     } catch (cause) {
       setError(toUserMessage(cause));
@@ -101,7 +122,50 @@ export function HumanRequestBar({ agentId, session, request, enqueueing = false,
     }
   }
 
+  function answer(optionIds: string[]) {
+    if (optionIds.length > 0) {
+      void submit(answerBodyFor(request, optionIds));
+    }
+  }
+
+  function updateCurrentAnswer(next: QuestionAnswer) {
+    setQuestionAnswers((answers) =>
+      answers.map((answer, index) => index === questionIndex ? next : answer),
+    );
+  }
+
+  function chooseStructured(optionId: string) {
+    if (!currentQuestion || locked) return;
+    const selected = currentAnswer.selectedOptionIds ?? [];
+    updateCurrentAnswer({
+      ...currentAnswer,
+      selectedOptionIds: currentQuestion.multiSelect
+        ? selected.includes(optionId)
+          ? selected.filter((item) => item !== optionId)
+          : [...selected, optionId]
+        : [optionId],
+      customText: currentQuestion.multiSelect ? currentAnswer.customText : '',
+    });
+  }
+
+  function continueStructured() {
+    if (!structuredQuestions || !currentReady || locked) return;
+    if (questionIndex < structuredQuestions.length - 1) {
+      setQuestionIndex((index) => index + 1);
+      return;
+    }
+    try {
+      void submit(multiQuestionAnswerBody(request, questionAnswers));
+    } catch (cause) {
+      setError(toUserMessage(cause));
+    }
+  }
+
   function choose(optionId: string) {
+    if (structuredQuestions) {
+      chooseStructured(optionId);
+      return;
+    }
     if (request.multiSelect) {
       setSelected((current) =>
         current.includes(optionId)
@@ -133,8 +197,14 @@ export function HumanRequestBar({ agentId, session, request, enqueueing = false,
               {sent ? 'ANSWER SENT'
                 : command?.state === 'failed' || command?.state === 'uncertain' ? 'REVIEW ANSWER'
                   : command ? 'ANSWER QUEUED'
-                    : request.multiSelect ? 'CHOOSE ANY' : 'NEEDS YOUR INPUT'}
+                    : request.kind === 'permission' ? 'PERMISSION REQUIRED'
+                      : request.multiSelect ? 'CHOOSE ANY' : 'NEEDS YOUR INPUT'}
             </ThemedText>
+            {structuredQuestions ? (
+              <ThemedText type="caption" themeColor="textMuted" style={styles.questionCount}>
+                {questionIndex + 1} of {structuredQuestions.length}
+              </ThemedText>
+            ) : null}
           </View>
 
           {/* Tappable to expand, because while the question is open this is its
@@ -143,11 +213,11 @@ export function HumanRequestBar({ agentId, session, request, enqueueing = false,
               description, which is prose. */}
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={request.question}
+            accessibilityLabel={currentQuestion?.question ?? request.question}
             accessibilityState={{ expanded }}
             onPress={() => setExpanded((current) => !current)}>
             <ThemedText type="small" numberOfLines={expanded ? undefined : 3}>
-              {request.question}
+              {currentQuestion?.question ?? request.question}
             </ThemedText>
           </Pressable>
 
@@ -157,13 +227,36 @@ export function HumanRequestBar({ agentId, session, request, enqueueing = false,
             </ThemedText>
           ) : null}
 
+          {request.permission?.patterns.length ? (
+            <View style={styles.permissionPatterns}>
+              {request.permission.patterns.slice(0, 4).map((pattern, index) => (
+                <ThemedText
+                  key={`${index}:${pattern}`}
+                  type="caption"
+                  numberOfLines={2}
+                  style={[styles.permissionPattern, { color: theme.textSecondary }]}>
+                  {pattern}
+                </ThemedText>
+              ))}
+              {request.permission.patterns.length > 4 ? (
+                <ThemedText type="caption" themeColor="textMuted">
+                  +{request.permission.patterns.length - 4} more
+                </ThemedText>
+              ) : null}
+            </View>
+          ) : null}
+
           <View style={styles.options}>
             {options.map((option) => {
-              const isSelected = selected.includes(option.id);
+              const isSelected = structuredQuestions
+                ? currentAnswer.selectedOptionIds?.includes(option.id) === true
+                : selected.includes(option.id);
               return (
                 <Pressable
                   key={option.id}
-                  accessibilityRole={request.multiSelect ? 'checkbox' : 'button'}
+                  accessibilityRole={
+                    (currentQuestion?.multiSelect ?? request.multiSelect) ? 'checkbox' : 'button'
+                  }
                   accessibilityLabel={option.label}
                   accessibilityHint={option.description ?? undefined}
                   accessibilityState={{ selected: isSelected, disabled: locked }}
@@ -189,13 +282,83 @@ export function HumanRequestBar({ agentId, session, request, enqueueing = false,
             })}
           </View>
 
-          {request.multiSelect ? (
+          {structuredQuestions && currentQuestion?.allowCustomAnswer ? (
+            <TextInput
+              accessibilityLabel={`Custom answer for ${currentQuestion.question}`}
+              editable={!locked}
+              maxLength={4_000}
+              multiline
+              onChangeText={(customText) => updateCurrentAnswer({
+                ...currentAnswer,
+                customText,
+                selectedOptionIds: currentQuestion.multiSelect
+                  ? currentAnswer.selectedOptionIds
+                  : [],
+              })}
+              placeholder="Type another answer"
+              placeholderTextColor={theme.placeholder}
+              style={[
+                styles.customAnswer,
+                {
+                  borderColor: theme.glassBorder,
+                  color: theme.text,
+                  backgroundColor: theme.backgroundElement,
+                },
+              ]}
+              value={currentAnswer.customText ?? ''}
+            />
+          ) : null}
+
+          {structuredQuestions ? (
+            <View style={styles.formActions}>
+              {questionIndex > 0 ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Previous question"
+                  disabled={locked}
+                  onPress={() => setQuestionIndex((index) => index - 1)}
+                  style={({ pressed }) => [
+                    styles.previous,
+                    {
+                      borderColor: theme.glassBorder,
+                      opacity: locked ? 0.4 : pressed ? 0.72 : 1,
+                    },
+                  ]}>
+                  <ThemedText type="smallBold">Back</ThemedText>
+                </Pressable>
+              ) : null}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  questionIndex === structuredQuestions.length - 1
+                    ? 'Send all answers'
+                    : 'Continue to next question'
+                }
+                accessibilityState={{ disabled: locked || !currentReady }}
+                disabled={locked || !currentReady}
+                onPress={continueStructured}
+                style={({ pressed }) => [
+                  styles.confirm,
+                  styles.formContinue,
+                  {
+                    backgroundColor: theme.accent,
+                    opacity: locked || !currentReady ? 0.4 : pressed ? 0.8 : 1,
+                  },
+                ]}>
+                <ThemedText type="smallBold" style={{ color: theme.onAccent }}>
+                  {questionIndex === structuredQuestions.length - 1
+                    ? 'Send answers'
+                    : 'Next'}
+                </ThemedText>
+              </Pressable>
+            </View>
+          ) : request.multiSelect ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Send selected answers"
               accessibilityState={{ disabled: locked || selected.length === 0 }}
               disabled={locked || selected.length === 0}
-              onPress={() => void answer(selected)}
+              onPress={() => answer(selected)}
               style={({ pressed }) => [
                 styles.confirm,
                 {
@@ -301,6 +464,9 @@ const styles = StyleSheet.create({
     // Pulled up against the question it introduces.
     marginBottom: -Spacing.half,
   },
+  questionCount: {
+    marginLeft: 'auto',
+  },
   options: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -308,6 +474,12 @@ const styles = StyleSheet.create({
     // Answers are the action, so they get more room above them than the
     // question got below its label.
     marginTop: Spacing.half,
+  },
+  permissionPatterns: {
+    gap: Spacing.half,
+  },
+  permissionPattern: {
+    fontFamily: Fonts.mono,
   },
   option: {
     minHeight: OPTION_HEIGHT,
@@ -318,6 +490,33 @@ const styles = StyleSheet.create({
     // bar used to run out past its own edge.
     flexShrink: 1,
     maxWidth: '100%',
+  },
+  customAnswer: {
+    minHeight: 42,
+    maxHeight: 96,
+    borderWidth: 1,
+    borderRadius: Radius.control,
+    paddingHorizontal: Spacing.one + Spacing.half,
+    paddingVertical: Spacing.one,
+    fontFamily: Fonts.regular,
+    fontSize: 14,
+    textAlignVertical: 'top',
+  },
+  formActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: Spacing.one,
+  },
+  previous: {
+    minHeight: OPTION_HEIGHT,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.two,
+    borderWidth: 1,
+    borderRadius: Radius.pill,
+  },
+  formContinue: {
+    flex: 0,
+    minWidth: 104,
     /**
      * Half the height it can never go under, so a one-line answer is a true
      * pill. `Radius.pill` is 999, which on an answer that wraps to four lines

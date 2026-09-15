@@ -15,14 +15,34 @@ def answer_human_request(host: Bridge, payload: dict[str, Any]) -> dict[str, Any
     if not isinstance(request_id, str):
         raise BridgeError("INVALID_REQUEST", "Human request ID is required.")
     pending = host.sessions.question(request_id)
-    request = pending.request if pending else None
-    if pending is not None and (pending.key.provider, pending.key.session_id) != (
+    if pending is None:
+        raise BridgeError(
+            "COMMAND_PRECONDITION_FAILED", "The question is no longer active."
+        )
+    request = pending.request
+    if (pending.key.provider, pending.key.session_id) != (
         agent.get("provider"), agent.get("providerSessionId")
     ):
         raise BridgeError("INVALID_REQUEST", "The question belongs to another session.")
     answer = payload.get("answer") or {}
     if not isinstance(answer, dict):
         raise BridgeError("INVALID_ANSWER", "Answer must be an object.")
+    request_origin = request.get("origin")
+    if request_origin is not None and answer.get("requestOrigin") != request_origin:
+        raise BridgeError(
+            "COMMAND_PRECONDITION_FAILED",
+            "The question response transport no longer matches the active request.",
+        )
+    if request_origin == "api":
+        if host.provider_adapter(agent.get("provider")).answer_request(
+            agent, request, answer,
+        ):
+            host.sessions.forget_question(request_id)
+            return {"accepted": True}
+        raise BridgeError(
+            "COMMAND_PRECONDITION_FAILED",
+            "This provider cannot answer the native request.",
+        )
     custom_text = answer.get("customText")
     selected_ids = answer.get("selectedOptionIds") or []
     text = custom_text.strip() if isinstance(custom_text, str) else ""

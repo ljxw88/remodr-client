@@ -22,7 +22,7 @@ export default function ModelsPage() {
   if (!flowId || !draft || (draft.kind !== 'new-agent' && draft.kind !== 'agent-settings')) {
     return <MissingFlow title="Models Unavailable" />;
   }
-  if (draft.kind === 'new-agent' && draft.provider === 'opencode') {
+  if (draft.provider === 'opencode') {
     return <OpenCodeModelPicker flowId={flowId} draft={draft} />;
   }
 

@@ -1,6 +1,6 @@
 """Provider-independent wire protocol, command storage and lifecycle limits."""
 
-BRIDGE_VERSION = "0.1.0"
+BRIDGE_VERSION = "0.2.0"
 PROTOCOL = 1
 SHELL_READY_TIMEOUT = 20
 MAX_AGENT_NAME = 60

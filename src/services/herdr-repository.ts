@@ -124,6 +124,15 @@ export class HerdrRepository {
   private reconnectHandler: ((deviceId: string) => Promise<boolean>) | null = null;
   private readonly transcripts: ConversationStore;
   private readonly dispatcher: CommandDispatcher;
+  private conversationEventTargets = new Map<
+    string,
+    { generation: number; revision: number }
+  >();
+  private conversationEventApplied = new Map<
+    string,
+    { generation: number; revision: number }
+  >();
+  private conversationEventRefreshes = new Map<string, Promise<void>>();
   private writingRuntimes: Promise<void> = Promise.resolve();
   private readonly drafts = new DraftStore(AsyncStorage);
 
@@ -420,12 +429,22 @@ export class HerdrRepository {
     }
     const unavailable = retuningUnavailableReason(agent.provider, agent.capabilities);
     if (unavailable) throw new Error(unavailable);
-    if (agent.provider === 'opencode' && (
-      request.variant === undefined || !request.modelToken ||
-      request.providerSessionId !== agent.providerSessionId ||
-      request.model != null || request.effort != null || request.context != null
-    )) {
-      throw new Error('Reload OpenCode variants for this session. Only its reasoning variant can be changed here.');
+    if (agent.provider === 'opencode') {
+      if (agent.capabilities.apiModelSelection === true) {
+        if (request.providerSessionId !== agent.providerSessionId) {
+          throw new Error('This OpenCode session changed. Reopen model settings.');
+        }
+        if (request.effort != null || request.context != null ||
+          (request.model === undefined && request.variant === undefined)) {
+          throw new Error('Choose the model or variant for prompts sent from this app.');
+        }
+      } else if (
+        request.variant === undefined || !request.modelToken ||
+        request.providerSessionId !== agent.providerSessionId ||
+        request.model != null || request.effort != null || request.context != null
+      ) {
+        throw new Error('Reload OpenCode variants for this session. Only its reasoning variant can be changed here.');
+      }
     }
     return this.mutateAgent(input.agentId, 'agent.retune', request);
   }
@@ -618,7 +637,13 @@ export class HerdrRepository {
   async answerHumanRequest(
     agentId: string,
     requestId: string,
-    answer: { selectedOptionIds?: string[]; customText?: string | null },
+    answer: {
+      selectedOptionIds?: string[];
+      customText?: string | null;
+      answers?: { selectedOptionIds?: string[]; customText?: string | null }[];
+      permissionReply?: 'once' | 'always' | 'reject';
+      requestOrigin?: 'api' | 'sqlite' | 'tui';
+    },
   ): Promise<void> {
     const conversation = this.transcripts.get(agentId);
     const agent = this.currentAgent(agentId);
@@ -632,7 +657,10 @@ export class HerdrRepository {
     await this.queueCommand(agentId, 'human_request.answer', {
       agentId,
       requestId,
-      answer,
+      answer: {
+        ...answer,
+        requestOrigin: answer.requestOrigin ?? conversation.activeHumanRequest.origin,
+      },
     }, answer.customText ?? labels ?? 'Answer', agentSession(agent));
   }
 
@@ -740,9 +768,19 @@ export class HerdrRepository {
       return;
     }
     if (event.event === 'conversation.changed') {
-      const data = event.data as { agentId?: unknown };
+      const data = event.data as {
+        agentId?: unknown;
+        conversationRevision?: unknown;
+      };
       if (typeof data.agentId === 'string' && this.conversations.has(data.agentId)) {
-        await this.loadConversation(data.agentId);
+        const revision = typeof data.conversationRevision === 'number' &&
+          Number.isSafeInteger(data.conversationRevision) &&
+          data.conversationRevision > 0
+          ? data.conversationRevision
+          : null;
+        await this.refreshConversationEvent(
+          data.agentId, revision, device.generation,
+        );
       }
       this.lastSemanticEvent = event.event;
       this.publish();
@@ -759,6 +797,58 @@ export class HerdrRepository {
         event.event === 'connection.closed' ? 'ERR_BRIDGE_CLOSED' : 'HERDR_UNAVAILABLE', message,
       ));
     }
+  }
+
+  private async refreshConversationEvent(
+    agentId: string,
+    revision: number | null,
+    generation: number,
+  ): Promise<void> {
+    if (revision == null) {
+      await this.loadConversation(agentId);
+      return;
+    }
+    const previousTarget = this.conversationEventTargets.get(agentId);
+    this.conversationEventTargets.set(agentId, {
+      generation,
+      revision: previousTarget?.generation === generation
+        ? Math.max(previousTarget.revision, revision)
+        : revision,
+    });
+    const current = this.conversationEventRefreshes.get(agentId);
+    if (current) {
+      await current;
+      const pending = this.conversationEventTargets.get(agentId);
+      const applied = this.conversationEventApplied.get(agentId);
+      if (pending && (
+        applied?.generation !== pending.generation ||
+        pending.revision > applied.revision
+      )) {
+        await this.refreshConversationEvent(
+          agentId, pending.revision, pending.generation,
+        );
+      }
+      return;
+    }
+    const refresh = (async () => {
+      while (this.conversations.has(agentId)) {
+        const target = this.conversationEventTargets.get(agentId);
+        if (!target || target.generation !== generation) return;
+        const applied = this.conversationEventApplied.get(agentId);
+        if (
+          applied?.generation === generation &&
+          target.revision <= applied.revision
+        ) return;
+        await this.loadConversation(agentId);
+        this.conversationEventApplied.set(agentId, target);
+      }
+    })().finally(() => {
+      if (this.conversationEventRefreshes.get(agentId) === refresh) {
+        this.conversationEventRefreshes.delete(agentId);
+      }
+    });
+    this.conversationEventRefreshes.set(agentId, refresh);
+    await refresh;
   }
 
   private async installRuntime(

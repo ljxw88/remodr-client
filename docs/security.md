@@ -29,6 +29,7 @@ Network retries must not change those decisions. See
 | Drafts, cached conversations, pending commands | AsyncStorage | Unencrypted message content; potentially sensitive even though it is not authentication data |
 | Known host fingerprints | App-private JSON | Integrity is part of SSH trust; deleting entries requires re-verification |
 | Remote command ledger | Private SQLite file under the remote user's deployment directory | Stores command fingerprints/results, not raw prompt payloads; preserves deduplication across bridge restarts |
+| OpenCode server bindings | Private SQLite under `~/.local/share/remote-workspace/` | Stores per-pane loopback credentials; `0700` directory, `0600` files, no symlinks/hard links; never sent to the phone |
 
 Host schema validation excludes unknown fields; it does not make all metadata
 non-sensitive. The complete allowed metadata shape is
@@ -52,6 +53,26 @@ the mobile app confirms every destructive tool action.
 
 App-level confirmations for deleting a saved server or closing an agent/space
 are separate from provider tool approval.
+
+### OpenCode loopback control
+
+Remodr-created OpenCode TUIs expose their native server on `127.0.0.1` only,
+with fresh per-agent HTTP Basic credentials. Before sending a credential, the
+bridge proves that the exact Herdr pane's foreground OpenCode PID owns one
+loopback listener and that an unauthenticated health request receives `401`.
+It then verifies the server version, exact Herdr-reported session, and workspace
+directory. Arbitrary open ports, redirects, proxies, mDNS, query-string
+credentials, and non-loopback listeners are refused.
+
+OpenCode tools execute as the same remote Unix user and may inherit the managed
+server environment. HTTP authentication therefore limits accidental and
+cross-user access, but is not a sandbox against arbitrary code already running
+as that Unix account. Native permission controls preserve OpenCode's workflow;
+they cannot protect a host after the provider process or same-user account is
+compromised.
+
+OpenCode SSE has no durable replay cursor. Reconnects use authoritative API
+snapshots, and token-rate events are coalesced before crossing SSH.
 
 ### Copilot workspace trust
 

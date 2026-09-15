@@ -1,4 +1,8 @@
-import { answerBodyFor, answerOptions } from '@/features/agents/human-request';
+import {
+  answerBodyFor,
+  answerOptions,
+  multiQuestionAnswerBody,
+} from '@/features/agents/human-request';
 import type { HumanRequest } from '@/domain/herdr';
 
 function request(overrides: Partial<HumanRequest>): HumanRequest {
@@ -36,6 +40,19 @@ describe('answers offered as buttons', () => {
   it('supplies yes and no for a permission request too', () => {
     const options = answerOptions(request({ kind: 'permission' }));
     expect(options.map((option) => option.label)).toEqual(['Yes', 'No']);
+  });
+
+  it('offers the native permission decisions when details are available', () => {
+    const options = answerOptions(request({
+      kind: 'permission',
+      origin: 'api',
+      permission: { permission: 'bash', patterns: ['git status'], always: [] },
+    }));
+    expect(options.map((option) => option.label)).toEqual([
+      'Allow once',
+      'Always allow',
+      'Reject',
+    ]);
   });
 
   it('offers nothing for a question that wants prose', () => {
@@ -92,5 +109,89 @@ describe('the answer sent back', () => {
       ['b', 'a'],
     );
     expect(body).toEqual({ selectedOptionIds: ['b', 'a'] });
+  });
+
+  it('pins API-origin answers to their request transport', () => {
+    const body = answerBodyFor(
+      request({
+        origin: 'api',
+        options: [{ id: 'pg', label: 'PostgreSQL' }],
+      }),
+      ['pg'],
+    );
+    expect(body).toEqual({ selectedOptionIds: ['pg'], requestOrigin: 'api' });
+  });
+
+  it('uses the native permission reply vocabulary', () => {
+    const body = answerBodyFor(
+      request({
+        kind: 'permission',
+        origin: 'api',
+        permission: { permission: 'bash', patterns: ['git status'], always: [] },
+      }),
+      ['always'],
+    );
+    expect(body).toEqual({ permissionReply: 'always', requestOrigin: 'api' });
+  });
+
+  it('preserves the order of a native multi-question answer', () => {
+    const body = multiQuestionAnswerBody(
+      request({
+        origin: 'api',
+        questions: [
+          {
+            header: 'Database',
+            question: 'Which database?',
+            options: [{ id: 'pg', label: 'PostgreSQL' }],
+            allowCustomAnswer: false,
+            multiSelect: false,
+          },
+          {
+            header: 'Region',
+            question: 'Which regions?',
+            options: [
+              { id: 'eu', label: 'Europe' },
+              { id: 'us', label: 'United States' },
+            ],
+            allowCustomAnswer: true,
+            multiSelect: true,
+          },
+        ],
+      }),
+      [
+        { selectedOptionIds: ['pg'] },
+        { selectedOptionIds: ['eu'], customText: 'Asia Pacific' },
+      ],
+    );
+    expect(body).toEqual({
+      answers: [
+        { selectedOptionIds: ['pg'] },
+        { selectedOptionIds: ['eu'], customText: 'Asia Pacific' },
+      ],
+      requestOrigin: 'api',
+    });
+  });
+
+  it('rejects incomplete native multi-question answers', () => {
+    expect(() => multiQuestionAnswerBody(
+      request({
+        origin: 'api',
+        questions: [
+          {
+            question: 'One?',
+            options: [],
+            allowCustomAnswer: true,
+            multiSelect: false,
+          },
+          {
+            question: 'Two?',
+            options: [],
+            allowCustomAnswer: true,
+            multiSelect: false,
+          },
+        ],
+      }),
+      [{ customText: 'Only one' }],
+    )).toThrow('Every question needs an answer.');
   });
 });
