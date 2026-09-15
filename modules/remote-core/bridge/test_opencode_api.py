@@ -539,7 +539,7 @@ class ApiCapabilityTest(unittest.TestCase):
         capabilities, _ = self.capabilities(None)
         for name in (
             "apiConversation", "apiPrompt", "apiAbort",
-            "nativeQuestions", "nativePermissions", "apiModelSelection",
+            "nativeQuestions", "nativePermissions", "apiModelSelection", "apiVariantSelection",
         ):
             self.assertNotIn(name, capabilities)
         self.assertEqual(
@@ -557,13 +557,14 @@ class ApiCapabilityTest(unittest.TestCase):
                 name: capabilities[name]
                 for name in (
                     "apiConversation", "apiPrompt", "apiAbort",
-                    "nativeQuestions", "nativePermissions", "apiModelSelection",
+                    "nativeQuestions", "nativePermissions", "apiModelSelection", "apiVariantSelection",
                 )
             },
             {
                 "apiConversation": True, "apiPrompt": True, "apiAbort": True,
                 "nativeQuestions": True, "nativePermissions": True,
                 "apiModelSelection": True,
+                "apiVariantSelection": True,
             },
         )
 
@@ -580,9 +581,9 @@ class ApiCapabilityTest(unittest.TestCase):
                 self.assertEqual(
                     [values[name] for name in (
                         "apiConversation", "apiPrompt", "apiAbort",
-                        "nativeQuestions", "nativePermissions", "apiModelSelection",
+                        "nativeQuestions", "nativePermissions", "apiModelSelection", "apiVariantSelection",
                     )],
-                    [False] * 6,
+                    [False] * 7,
                 )
 
     def test_verification_is_cached_briefly_then_repeated(self):

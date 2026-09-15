@@ -23,6 +23,7 @@ API_CAPABILITIES = (
     "nativeQuestions",
     "nativePermissions",
     "apiModelSelection",
+    "apiVariantSelection",
 )
 
 

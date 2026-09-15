@@ -255,6 +255,25 @@ describe('HerdrRepository live retuning capabilities', () => {
     await repository.releaseDevice('device-1');
   });
 
+  it('queries native variants for an explicit model only on supporting bridges', async () => {
+    const current = snapshot(true, 'opencode');
+    current.agents[0].capabilities.apiModelSelection = true;
+    const transport = fakeTransport(current);
+    const repository = repositoryWith([transport]);
+    await repository.connect('ssh-1', 'device-1');
+    await expect(repository.agentVariantOptions('agent-1', 'copilot-session-1', 'openai/model')).rejects.toThrow('updated bridge');
+    current.agents[0].capabilities.apiVariantSelection = true;
+    transport.request.mockResolvedValueOnce(current);
+    await repository.refreshRuntime('device-1');
+    const choices = { modelLabel: 'Model', modelToken: 'openai/model', currentVariant: null, variants: ['custom'] };
+    transport.request.mockResolvedValueOnce(choices);
+    expect(await repository.agentVariantOptions('agent-1', 'copilot-session-1', 'openai/model')).toEqual(choices);
+    expect(transport.request).toHaveBeenLastCalledWith('agent.variant_options', {
+      agentId: 'agent-1', providerSessionId: 'copilot-session-1', model: 'openai/model',
+    });
+    await repository.releaseDevice('device-1');
+  });
+
   it('rejects direct retuning when the latest runtime explicitly disables it', async () => {
     const transport = fakeTransport(snapshot(true));
     const repository = repositoryWith([transport]);

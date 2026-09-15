@@ -10,7 +10,7 @@ from ...errors import BridgeError
 from ...session_registry import SessionKey
 from ...storage import host_scope
 from ..base import AgentLaunch, ProviderAdapter, ProviderHost
-from . import api, native, questions, transcript
+from . import api, api_variants, native, questions, transcript
 from .bootstrap import create_session, delete_session
 from .events import EventManager
 from .registry import ServerRegistry, generate_credentials
@@ -42,7 +42,19 @@ class OpenCodeAdapter(ProviderAdapter):
         return ServerRegistry(host_scope(self.host))
 
     def variant_options(self, payload: dict[str, Any]) -> dict[str, Any]:
+        agent = self.host._require_agent(payload)
+        self._check_settings_session(agent, payload)
+        binding = self.require_binding(agent, allow_compatibility="model" not in payload)
+        if binding is not None:
+            tuning = self.host.sessions.tuning(agent["paneId"])
+            return api_variants.options(binding, payload.get("model", tuning.get("model")), tuning)
         return OpenCodeVariants(self.host, payload).options()
+
+    @staticmethod
+    def _check_settings_session(agent: dict[str, Any], payload: dict[str, Any]) -> None:
+        if (not agent.get("providerSessionId")
+                or payload.get("providerSessionId") != agent.get("providerSessionId")):
+            raise BridgeError("SESSION_CHANGED", "This OpenCode session changed. Reopen model settings.")
 
     def retune(self, payload: dict[str, Any]) -> dict[str, Any]:
         if "model" not in payload and "variant" not in payload:
@@ -52,6 +64,7 @@ class OpenCodeAdapter(ProviderAdapter):
         agent = self.host._require_agent(payload)
         binding = self.require_binding(agent, allow_compatibility=True)
         if binding is not None:
+            self._check_settings_session(agent, payload)
             if payload.get("effort") is not None or payload.get("context") is not None:
                 raise BridgeError(
                     "UNSUPPORTED_TUNING",
@@ -67,13 +80,19 @@ class OpenCodeAdapter(ProviderAdapter):
                     "INVALID_MODEL", "OpenCode models must use provider/model format."
                 )
             variant = payload.get("variant")
-            if variant is not None and (
-                not isinstance(variant, str)
-                or not variant.strip()
-                or len(variant) > 128
-            ):
+            if variant is not None and not api_variants.valid_name(variant):
                 raise BridgeError("INVALID_VARIANT", "Invalid OpenCode variant.")
             tuning = self.host.sessions.tuning(agent["paneId"])
+            if "variant" in payload and variant is not None:
+                target_model = payload.get("model", tuning.get("model"))
+                choices = api_variants.options(binding, target_model, tuning)
+                if payload.get("modelToken") != choices["modelToken"]:
+                    raise BridgeError("VARIANT_MODEL_CHANGED", "Reload variants for the selected OpenCode model.")
+                if variant not in choices["variants"]:
+                    raise BridgeError("INVALID_VARIANT", "This variant is no longer available. Reload variants.")
+                # A variant is model-specific: pin both fields on future prompts.
+                tuning["model"] = target_model
+                tuning["_apiModelSelected"] = True
             if "model" in payload:
                 tuning["model"] = model
                 tuning["_apiModelSelected"] = True

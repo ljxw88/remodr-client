@@ -37,6 +37,9 @@ export function beginAgentSettingsFlow(agent: RemoteAgent): string {
     ...(agent.capabilities.apiModelSelection === true
       ? { apiModelSelection: true }
       : {}),
+    ...(agent.capabilities.apiVariantSelection === true
+      ? { apiVariantSelection: true }
+      : {}),
     initialTuning,
     tuning: { ...initialTuning },
   });
@@ -72,6 +75,9 @@ export function agentEditError(
     return 'This agent’s session has changed. Go back and open a new form.';
   }
   if (draft.kind === 'agent-settings') {
+    if (draft.apiModelSelection && !agent.capabilities.apiModelSelection) {
+      return 'Reconnect this OpenCode session before applying model settings.';
+    }
     return retuningUnavailableReason(agent.provider, agent.capabilities);
   }
   return null;

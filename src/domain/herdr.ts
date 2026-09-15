@@ -36,6 +36,7 @@ export const agentCapabilitiesSchema = z.object({
   nativeQuestions: z.boolean().optional(),
   nativePermissions: z.boolean().optional(),
   apiModelSelection: z.boolean().optional(),
+  apiVariantSelection: z.boolean().optional(),
   toolActivity: z.boolean().default(false),
   todos: z.boolean().default(false),
   fallback: z.boolean().default(true),

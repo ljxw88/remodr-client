@@ -9,6 +9,7 @@ import { agentVariantOptionsSchema, EMPTY_RUNTIME, remoteAgentSchema } from '@/d
 import { flowDrafts } from '@/features/forms/flow-drafts';
 import { herdrRepository } from '@/services/herdr-repository';
 import { beginAgentSettingsFlow } from './agent-edit-flow';
+import { TuningFields } from './tuning-fields';
 
 jest.mock('expo-router', () => ({
   router: { back: jest.fn(), push: jest.fn() }, useLocalSearchParams: jest.fn(),
@@ -72,6 +73,82 @@ describe('OpenCode reasoning variants', () => {
   function button(label: string) {
     return renderer.root.findAllByType(AppButton).find((node) => node.props.label === label)!;
   }
+
+  function enableApiVariants() {
+    const agent = herdrRepository.getSnapshot().devices['device-a'].runtime.agents[0];
+    agent.capabilities.apiModelSelection = true;
+    agent.capabilities.apiVariantSelection = true;
+    flowDrafts.discard(flowId);
+    flowId = beginAgentSettingsFlow(agent);
+    jest.mocked(useLocalSearchParams).mockReturnValue({ flowId });
+    jest.mocked(herdrRepository.agentVariantOptions).mockResolvedValue({ ...options, modelToken: 'provider/example' });
+  }
+
+  it('loads API variants and applies the model and custom variant together without restarting', async () => {
+    enableApiVariants();
+    await render();
+    expect(herdrRepository.agentVariantOptions).toHaveBeenCalledWith('agent-a', 'ses_a', 'provider/example');
+    expect(row('high').props.selected).toBe(true);
+    expect(button('Apply').props.disabled).toBe(true);
+    TestRenderer.act(() => row('custom-deep').props.onPress());
+    expect(button('Apply').props.disabled).toBe(false);
+    await TestRenderer.act(async () => button('Apply').props.onPress());
+    expect(herdrRepository.retuneAgent).toHaveBeenCalledWith({
+      agentId: 'agent-a', providerSessionId: 'ses_a', model: 'provider/example',
+      effort: null, context: null, variant: 'custom-deep', modelToken: 'provider/example',
+    });
+  });
+
+  it('clears an API variant through Default', async () => {
+    enableApiVariants();
+    await render();
+    TestRenderer.act(() => row('Default').props.onPress());
+    await TestRenderer.act(async () => button('Apply').props.onPress());
+    expect(herdrRepository.retuneAgent).toHaveBeenCalledWith(expect.objectContaining({ variant: null }));
+  });
+
+  it('discards the previous model variant and ignores late discovery results', async () => {
+    enableApiVariants();
+    let resolve!: (value: typeof options) => void;
+    jest.mocked(herdrRepository.agentVariantOptions).mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    await render();
+    jest.mocked(herdrRepository.agentVariantOptions).mockResolvedValue({
+      modelLabel: 'Other model', modelToken: 'provider/other', currentVariant: null, variants: ['other-only'],
+    });
+    await TestRenderer.act(async () => renderer.root.findByType(TuningFields).props.onChange({
+      model: 'provider/other', effort: null, context: null,
+    }));
+    await TestRenderer.act(async () => resolve({ ...options, modelToken: 'provider/example' }));
+    expect(row('custom-deep')).toBeUndefined();
+    expect(row('Default').props.selected).toBe(true);
+    TestRenderer.act(() => row('other-only').props.onPress());
+    await TestRenderer.act(async () => button('Apply').props.onPress());
+    expect(herdrRepository.retuneAgent).toHaveBeenCalledWith(expect.objectContaining({ model: 'provider/other', variant: 'other-only' }));
+  });
+
+  it('keeps Auto available and clears model-specific choices', async () => {
+    enableApiVariants();
+    await render();
+    TestRenderer.act(() => row('custom-deep').props.onPress());
+    await TestRenderer.act(async () => renderer.root.findByType(TuningFields).props.onChange({ model: null, effort: null, context: null }));
+    expect(row('custom-deep')).toBeUndefined();
+    await TestRenderer.act(async () => button('Apply').props.onPress());
+    expect(herdrRepository.retuneAgent).toHaveBeenCalledWith({
+      agentId: 'agent-a', providerSessionId: 'ses_a', model: null, effort: null, context: null,
+    });
+  });
+
+  it('reloads failed API discovery and blocks applying after native connection loss', async () => {
+    enableApiVariants();
+    jest.mocked(herdrRepository.agentVariantOptions).mockRejectedValueOnce(new Error('Provider unavailable'));
+    await render();
+    expect(row('custom-deep')).toBeUndefined();
+    await TestRenderer.act(async () => button('Reload variants').props.onPress());
+    TestRenderer.act(() => row('custom-deep').props.onPress());
+    herdrRepository.getSnapshot().devices['device-a'].runtime.agents[0].capabilities.apiModelSelection = false;
+    await TestRenderer.act(async () => button('Apply').props.onPress());
+    expect(herdrRepository.retuneAgent).not.toHaveBeenCalled();
+  });
 
   it('reads model-specific variants from the owning live session without changing anything', async () => {
     await render();

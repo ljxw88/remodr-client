@@ -114,6 +114,7 @@ function ScopedModelPicker({ flowId, draft, cwd, unavailable }: {
           ...value,
           tuning: chooseModel('opencode', model, value.tuning),
           ...(value.kind === 'new-agent' ? { modelAvailability: undefined } : {}),
+          ...(value.kind === 'agent-settings' && value.tuning.model !== model ? { variantSelection: undefined } : {}),
         }
         : value,
     );
