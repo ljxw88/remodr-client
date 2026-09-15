@@ -234,6 +234,27 @@ describe('HerdrRepository live retuning capabilities', () => {
     await repository.releaseDevice('device-1');
   });
 
+  it('submits API-backed OpenCode model choices for the exact session', async () => {
+    const current = snapshot(true, 'opencode');
+    current.agents[0].capabilities.apiModelSelection = true;
+    const transport = fakeTransport(current);
+    const repository = repositoryWith([transport]);
+    await repository.connect('ssh-1', 'device-1');
+    const input = {
+      agentId: 'agent-1',
+      providerSessionId: 'copilot-session-1',
+      model: 'openai/gpt-5.4',
+    };
+    transport.request.mockResolvedValueOnce({ agentId: 'agent-1', runtime: current });
+    await repository.retuneAgent(input);
+    expect(transport.request).toHaveBeenLastCalledWith('agent.retune', input);
+    await expect(repository.retuneAgent({
+      ...input,
+      providerSessionId: 'stale-session',
+    })).rejects.toThrow('session changed');
+    await repository.releaseDevice('device-1');
+  });
+
   it('rejects direct retuning when the latest runtime explicitly disables it', async () => {
     const transport = fakeTransport(snapshot(true));
     const repository = repositoryWith([transport]);

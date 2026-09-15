@@ -102,6 +102,11 @@ def close_workspace(host: Bridge, payload: dict[str, Any]) -> dict[str, Any]:
         raise BridgeError("INVALID_WORKSPACE", "A space is required.")
     if not isinstance(close_group, bool):
         raise BridgeError("INVALID_WORKSPACE", "Invalid group close setting.")
+    closing = [
+        (agent.get("paneId"), agent.get("provider"))
+        for agent in host.runtime.get("agents", [])
+        if isinstance(agent, dict) and agent.get("workspaceId") == workspace_id
+    ]
     host._herdr_request(
         "workspace.close",
         {
@@ -109,6 +114,9 @@ def close_workspace(host: Bridge, payload: dict[str, Any]) -> dict[str, Any]:
             "close_group": close_group,
         },
     )
+    for pane_id, provider in closing:
+        if isinstance(pane_id, str) and pane_id:
+            forget_pane_launch(host, pane_id, provider)
     try:
         host._refresh_runtime()
     except Exception as error:
@@ -164,6 +172,26 @@ def remove_workspace_from_runtime(host: Bridge, workspace_id: str) -> None:
             pane_id = agent.get("paneId")
             if isinstance(pane_id, str):
                 host.sessions.forget_pane(pane_id)
+                forget_pane_launch(host, pane_id, agent.get("provider"))
+
+
+def forget_pane_launch(host: Bridge, pane_id: str, provider: Any = None) -> None:
+    """Drop provider launch state for a pane that has been closed.
+
+    Only closing does this. A bridge that stops or loses its connection leaves
+    every record alone, because the agent it describes is still running and has
+    to be reachable again on reconnect.
+    """
+    adapters = (
+        [host.provider_adapter(provider)]
+        if isinstance(provider, str) and provider
+        else list(host.providers.values())
+    )
+    for adapter in adapters:
+        try:
+            adapter.forget_pane(pane_id)
+        except Exception as error:
+            host._diagnostic("AGENT_FORGET_PANE", repr(error))
 
 
 def create_agent(host: Bridge, payload: dict[str, Any]) -> dict[str, Any]:
@@ -186,12 +214,15 @@ def create_agent(host: Bridge, payload: dict[str, Any]) -> dict[str, Any]:
         raise BridgeError("INVALID_REQUEST", "Invalid permission setting.")
 
     host._refresh_runtime()
-    workspace_ids = {
-        workspace.get("id")
+    workspaces = [
+        workspace
         for workspace in host.runtime.get("workspaces", [])
         if isinstance(workspace, dict)
-    }
-    if workspace_id not in workspace_ids:
+    ]
+    workspace = next(
+        (entry for entry in workspaces if entry.get("id") == workspace_id), None
+    )
+    if workspace is None:
         raise BridgeError("WORKSPACE_NOT_FOUND", "The selected space no longer exists.")
     catalog = host._agent_catalog_snapshot(force=True)
     available = next(
@@ -208,34 +239,39 @@ def create_agent(host: Bridge, payload: dict[str, Any]) -> dict[str, Any]:
             f"{host._provider_label(provider)} is not available on this device.",
         )
 
-    tab_result = host._herdr_request(
-        "tab.create",
-        {
-            "focus": False,
-            "workspace_id": workspace_id,
-            # The label is what the agent is called in the list. Without
-            # one every new agent arrives as "GitHub Copilot", which is
-            # unfindable once there is more than one.
-            "label": label or provider,
-        },
-    )
-    root_pane = tab_result.get("root_pane")
-    pane_id = (
-        root_pane.get("pane_id") if isinstance(root_pane, dict) else None
-    )
-    if not isinstance(pane_id, str) or not pane_id:
-        raise BridgeError("INVALID_HERDR_RESPONSE", "New agent pane is missing.")
-
     name = provider
     args = list(adapter.spec.bypass_arguments) if bypass_permissions else []
     args.extend(tuning)
+    cwd = workspace.get("cwd")
+    # Prepared before the pane exists because a provider may need the pane's
+    # process environment, which can only be set when the pane is created.
+    # Anything durable is left to open_session, once there is a pane to own it.
+    launch = adapter.prepare_launch(label, args, cwd if isinstance(cwd, str) else None)
+
+    tab_parameters: dict[str, Any] = {
+        "focus": False,
+        "workspace_id": workspace_id,
+        # The label is what the agent is called in the list. Without
+        # one every new agent arrives as "GitHub Copilot", which is
+        # unfindable once there is more than one.
+        "label": label or provider,
+    }
+    if launch.env:
+        tab_parameters["env"] = dict(launch.env)
+    pane_id: str | None = None
+    tab_id: str | None = None
+    started = False
+
     try:
-        workspace = next(
-            (entry for entry in host.runtime.get("workspaces", []) if entry.get("id") == workspace_id),
-            {},
-        )
-        cwd = workspace.get("cwd")
-        session_id = adapter.prepare_launch(label, args, cwd if isinstance(cwd, str) else None)
+        tab_result = host._herdr_request("tab.create", tab_parameters)
+        tab_id = created_tab_id(tab_result)
+        root_pane = tab_result.get("root_pane")
+        candidate = root_pane.get("pane_id") if isinstance(root_pane, dict) else None
+        pane_id = candidate if isinstance(candidate, str) and candidate else None
+        if pane_id is None:
+            raise BridgeError("INVALID_HERDR_RESPONSE", "New agent pane is missing.")
+        launch = adapter.open_session(pane_id, label, args, launch)
+        session_id = launch.session_id
         try:
             host._start_agent(name, provider, pane_id, args)
         except BridgeError as error:
@@ -243,6 +279,15 @@ def create_agent(host: Bridge, payload: dict[str, Any]) -> dict[str, Any]:
                 raise
             name = f"{provider}-{uuid.uuid4().hex[:4]}"
             host._start_agent(name, provider, pane_id, args)
+        started = True
+        try:
+            adapter.commit_launch(pane_id, launch)
+        except Exception as error:
+            # The agent is already running, and closing it because its
+            # credentials could not be filed would lose the user's work for a
+            # feature they did not ask for. Without a record every later check
+            # fails closed, so the agent simply runs without the API.
+            host._diagnostic("AGENT_LAUNCH_BINDING", sanitized_code(error))
         agent_id = host._stable_agent_id(pane_id)
         with host.refresh_lock:
             host.sessions.record_launch(
@@ -276,11 +321,54 @@ def create_agent(host: Bridge, payload: dict[str, Any]) -> dict[str, Any]:
             "runtime": host.runtime,
         }
     except Exception:
+        # Close what was made before taking back what was stored: a session the
+        # agent may still be writing to cannot be judged while it is running.
+        close_created_target(host, pane_id, tab_id)
         try:
-            host._herdr_request("pane.close", {"pane_id": pane_id})
-        except Exception as cleanup_error:
-            host._diagnostic("AGENT_CLEANUP", repr(cleanup_error))
+            adapter.discard_launch(pane_id, launch, started=started)
+        except Exception as discard_error:
+            host._diagnostic("AGENT_CLEANUP", repr(discard_error))
         raise
+
+
+def created_tab_id(tab_result: dict[str, Any]) -> str | None:
+    """The tab Herdr says it just created, if it named one unambiguously."""
+    tab = tab_result.get("tab")
+    for candidate in (
+        tab.get("tab_id") if isinstance(tab, dict) else None,
+        tab_result.get("tab_id"),
+    ):
+        if isinstance(candidate, str) and candidate:
+            return candidate
+    return None
+
+
+def close_created_target(host: Bridge, pane_id: str | None, tab_id: str | None) -> None:
+    """Close exactly what this creation made, and never anything it might have.
+
+    A pane is closed when one was named. Otherwise the tab is closed, but only
+    when Herdr named it: a creation that returned nothing identifiable leaves
+    nothing this app is entitled to close, and guessing would close somebody
+    else's work.
+    """
+    if pane_id:
+        method, params = "pane.close", {"pane_id": pane_id}
+    elif tab_id:
+        method, params = "tab.close", {"tab_id": tab_id}
+    else:
+        # Nothing was created, or nothing that Herdr named. Either way there is
+        # nothing this app is entitled to close.
+        return
+    try:
+        host._herdr_request(method, params)
+    except Exception as cleanup_error:
+        host._diagnostic("AGENT_CLEANUP", repr(cleanup_error))
+
+
+def sanitized_code(error: Exception) -> str:
+    """A reportable label for a failure whose message may name private paths."""
+    code = getattr(error, "code", None)
+    return code if isinstance(code, str) and code else type(error).__name__
 
 
 def rename_agent(host: Bridge, payload: dict[str, Any]) -> dict[str, Any]:
@@ -322,6 +410,7 @@ def close_agent(host: Bridge, payload: dict[str, Any]) -> dict[str, Any]:
             host.pending_agents.pop(pane_id, None)
         host.sessions.forget_pane(pane_id)
         host.output_activity.invalidate(agent_id)
+    forget_pane_launch(host, pane_id, agent.get("provider"))
     try:
         host._refresh_runtime()
     except Exception as error:
@@ -351,6 +440,9 @@ def remove_agent_from_runtime(host: Bridge, agent_id: str) -> None:
         host.sessions.remove_agent(agent_id)
         if pane_id is not None:
             host.sessions.forget_pane(pane_id)
+            forget_pane_launch(
+                host, pane_id, removed.get("provider") if removed else None
+            )
         host.output_activity.invalidate(agent_id)
 
 
@@ -393,7 +485,7 @@ def install_pending_agent(
                 "status": "working",
                 "title": name,
                 "focused": False,
-                "capabilities": host._agent_capabilities(provider, None),
+                "capabilities": host._agent_capabilities(provider, None, pane_id),
             }
             host.runtime = {
                 **host.runtime,

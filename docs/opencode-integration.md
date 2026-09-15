@@ -2,259 +2,262 @@
 
 [Documentation index](README.md) | [Provider contract](herdr-mobile-architecture.md)
 
-## Direction and researched baseline
+## Supported architecture
 
-OpenCode is the first provider in Remodr's picker and the preferred default when
-Herdr advertises it as available. GitHub Copilot is the other supported agent
-provider. A saved host that lacks OpenCode falls back to Copilot rather than
-launching an unavailable executable.
-
-OpenCode is a useful integration target because it has a client/server API and
-a unified model/provider layer. That reduces the number of provider-specific
-mobile adapters, but does not remove account restrictions or make all CLI
-behaviors interchangeable.
-
-This work inspected OpenCode **1.18.29** and Herdr **0.8.2** source and the
-installed CLIs' version/help output. The sources below are version-pinned where
-possible. It is not a claim that every older or future OpenCode database schema
-or plugin version is compatible.
-
-## Provider accounts are not interchangeable
-
-Configure credentials in OpenCode on the remote host using its `/connect`
-workflow. Remodr does not copy account tokens into its model catalogue or phone.
-
-| Account or service | Verified integration guidance |
-| --- | --- |
-| GitHub Copilot | OpenCode documents native device-code authentication for a Copilot subscription. Organization policy and model entitlement still apply. |
-| ChatGPT / OpenAI | OpenCode documents ChatGPT Plus/Pro OAuth and a separate API-key option. Authenticate through OpenCode's `/connect` workflow. |
-| Anthropic / Claude | Use supported Anthropic API credentials. The current provider documentation warns that Claude Pro/Max third-party OAuth plugins are prohibited by Anthropic and stopped being bundled in OpenCode 1.3.0. Do not treat Claude subscription portability as supported. |
-| xAI / Grok | OpenCode 1.18.29 ships native SuperGrok device-code OAuth as well as API-key authentication. The plan must include Grok API access; do not assume every consumer tier does. |
-| Cursor | Direct Cursor Agent support has been removed from Remodr. No native Cursor-subscription login was verified in the inspected OpenCode provider/auth sources. Third-party plugins are not an equivalent supported native capability. |
-
-The [provider documentation](https://opencode.ai/docs/providers/) contains an
-outdated Claude OAuth instruction alongside its newer prohibition warning;
-the latter and the current shipped implementation must not be ignored.
-OpenCode also supports compatible custom endpoints and local model servers.
-Availability depends on the remote configuration, not on a model appearing in
-Remodr's bundled offline catalogue.
-
-## Initial Herdr-backed integration
-
-Keep the existing topology:
+Remodr uses OpenCode's structured HTTP/SSE API for agents it creates. It does
+not reconstruct chat messages, questions, permissions, or model controls from
+terminal text in native API mode.
 
 ```text
-Remodr -> authenticated SSH -> Python bridge -> Herdr-managed OpenCode TUI
-                                           -> read-only OpenCode session DB
-                                           -> temporary authenticated loopback bootstrap
+Android app
+    -> authenticated SSH
+    -> bundled Python bridge
+    -> authenticated HTTP/SSE on 127.0.0.1
+    -> server inside the Herdr-managed OpenCode TUI
 ```
 
-On the remote server, install/configure OpenCode and its provider credentials,
-then install Herdr's built-in integration:
+Herdr still owns the pane and reports the selected root OpenCode session. The
+bridge uses that exact session ID for every read and mutation. It never selects
+a session by cwd, database mtime, title, or "newest session."
+
+This integration was developed against OpenCode 1.18.30, source-checked against
+1.18.31, and exercised with Herdr 0.9.0 / protocol 22. OpenCode 2 has a separate
+plugin and client model and is not implicitly covered by this compatibility
+statement.
+
+## Host setup
+
+General users do not install a Remodr-specific plugin or configure a database.
+On the remote machine, as the same Unix user Remodr connects as:
 
 ```sh
+# Install OpenCode.
+curl -fsSL https://opencode.ai/install | bash
 opencode --version
+
+# Start OpenCode once and use /connect to authenticate a provider.
+opencode
+
+# Install Herdr.
+curl -fsSL https://herdr.dev/install.sh | sh
 herdr --version
+
+# Install Herdr's bundled OpenCode integration.
 herdr integration install opencode
 herdr integration status
 ```
 
-Herdr 0.8.2 ships integration version 10, including both a server event plugin
-and a TUI session-selection plugin. The TUI plugin reports the exact selected
-root session through `pane.report_agent_session`, scoped by `HERDR_PANE_ID` and
-`HERDR_SOCKET_PATH`; child-session events are separately handled. Keep both
-plugins enabled. Do not launch the managed TUI with `--pure`, which disables
-external plugins.
+`herdr integration status` must report `opencode: current`. Restart OpenCode
+TUIs that were already running when the integration was installed or updated.
+Then connect Remodr and create a new OpenCode agent from the app; Remodr supplies
+the loopback server arguments and credentials automatically.
 
-Remodr uses the reported session ID, never the newest database row, newest file,
-or a cwd-based guess. It does not invent a `ses_` ID: OpenCode's `--session` flag
-resumes an existing session. For agents created from Remodr, the bridge starts
-an owned temporary OpenCode server on `127.0.0.1` with an ephemeral password,
-creates an empty native session through `POST /session` in the verified workspace
-directory, stops that server, then launches the TUI with the returned session ID.
-This sends no inference prompt and avoids a first-message deadlock at the home
-screen. The bootstrap ID is not a substitute for Herdr's native pane report.
+OpenCode creates its own application data, and Remodr creates its command and
+server-binding SQLite files automatically under
+`~/.local/share/remote-workspace/`. No PostgreSQL/MySQL service, schema command,
+or manual database migration is required. The remote home directory must be
+writable by the SSH user.
 
-The workspace must have an existing, known absolute cwd. The bridge and TUI
-must use the same OpenCode data directory. A manually launched home-only TUI
-still needs a selected/created session; missing or unverifiable identity must
-not become a durable-send target. `OPENCODE_BIN` can select the bridge's bootstrap
-executable; configure Herdr's launch environment consistently. Without an override,
-the bridge first searches its SSH PATH, then the standard
-`~/.opencode/bin/opencode` installer location. Interactive shell PATH configuration
-alone may not apply to the noninteractive SSH bridge.
+Do not launch the managed TUI with `--pure`; that disables the OpenCode plugins
+Herdr uses to report status and the selected root session.
 
-Launch-time models use `--model provider/model`. OpenCode's `--auto` implements
-the existing automatic-tool-approval choice, but does not override explicitly
-denied permissions. Omitting it preserves the remote OpenCode permission policy;
-it does not force every tool to ask. Remodr does not change the user's global
-OpenCode configuration or install plugins automatically.
+`OPENCODE_BIN` may select the executable used by the bridge's short-lived
+bootstrap process. Without it, the bridge checks its SSH `PATH`, then
+`~/.opencode/bin/opencode`. The Herdr manifest and bootstrap executable must
+refer to compatible OpenCode installations and data directories.
 
-The read adapter supports the pinned SQLite `message`/`part` layout and newer
-`session_message` layout, including empty sessions, tool activity, running
-`question` tools as Copilot-style needs-input, and the
-native `todo` table. Reads are transactional and read-only, including live WAL
-commits; they never migrate or edit OpenCode's database. Each projection
-includes the newest 200 stored messages and the current ordered todo snapshot
-for that exact session. Synthetic/system/reasoning parts and other sessions are
-excluded. Todo states preserve pending, in-progress, completed and cancelled
-semantics, with a safe unknown fallback for future native states; Remodr does
-not infer a plan from assistant prose or rendered terminal text. The global
-database mtime is not attributed as per-agent activity.
+Provider credentials stay in the remote OpenCode installation. They are not
+copied into Remodr's model catalogue, Android storage, or bridge protocol.
 
-By default the database is `$XDG_DATA_HOME/opencode/opencode.db`, falling back
-to `~/.local/share/opencode/opencode.db`, including on macOS. `OPENCODE_DB` or
-the bridge-specific `REMODR_OPENCODE_DB` can name an explicit database; relative
-names resolve below that data directory. Channel-specific/custom paths must be
-configured explicitly, not discovered by picking a recent file. In-memory
-databases, unsupported schemas and sessions with an active revert are not
-silently treated as normal empty history. Older file-based JSON storage is not
-implemented. The current database's session model is reported when available.
+## Agent creation and server ownership
 
-The phone's Stop action sends **Escape**, OpenCode's default `session_interrupt`
-binding. It never sends Ctrl+C to OpenCode: that defaults to `app_exit`. Herdr
-0.8.2 accepts both `escape` and `esc`. This phase assumes default TUI keybindings;
-customizing `session_interrupt`, or a focused dialog consuming Escape, can prevent
-Stop from aborting work. Remodr does not read or rewrite private TUI configuration
-and does not yet use the session-specific API abort endpoint.
+OpenCode needs a real session before the first prompt so durable mobile commands
+can bind to an exact identity. Creation therefore has two stages:
 
-## Feature parity boundary
+1. After Herdr creates the pane, the bridge starts a temporary authenticated
+   `opencode serve` process on loopback, creates an empty session in the
+   workspace through `POST /session`, then stops that temporary server.
+2. Herdr starts the TUI with:
 
-The Herdr-backed adapter now covers agent creation, account-scoped remote model
-discovery, exact-session messages, tool activity, Copilot-style needs-input for
-persisted `question` tools, the current live plan/todo snapshot, stop, and
-model-specific reasoning variants. Todos come from durable SQLite state and
-therefore work with the default internal-worker TUI.
+   ```text
+   opencode --hostname 127.0.0.1 --port 0 --session <session-id>
+   ```
 
-Pending permission approvals remain live-process state, not durable SQLite.
-Question tools that persist their prompt in the session database become
-Copilot-style `activeHumanRequest` controls. If Herdr reports the agent
-blocked and SQLite has no question, the bridge reads the visible TUI dialog
-and surfaces that prompt. Answers always drive that TUI dialog, even when Herdr
-is not `blocked`. This is a temporary path until Remodr owns OpenCode's
-session-bound HTTP/SSE reply API. Movement is one verified arrow at a time
-from the highlighted row; a typed answer enters the freeform row before
-characters. Unverified focus fails closed.
-Native permission APIs still require an owned authenticated loopback
-server.
+   A fresh username/password is supplied in that pane's launch environment.
 
-Native permission, abort, and event APIs still require Remodr to own an
-authenticated loopback OpenCode server bound to the exact Herdr pane and
-session. An unrelated temporary server cannot answer requests owned by the
-existing TUI. That remains the next architectural phase for those APIs.
+Passing an explicit network flag is important. OpenCode 1.18.x otherwise runs
+the TUI server through internal worker RPC without a TCP listener. The managed
+listener belongs to the TUI itself; it is not a separate server guessed by
+directory or port.
 
-## Native API integration is the next boundary
+Herdr's plugin remains the session authority. The bootstrap ID allows startup,
+but native actions are not enabled until Herdr reports the session and the
+bridge independently verifies the server.
 
-### Remote model discovery
+### Verification chain
 
-New Agent's model picker now queries `opencode models` through the existing SSH
-bridge in the selected workspace, with a user-triggered `--refresh` option.
-There is no shared maintenance-machine model list in the OpenCode picker.
-This uses the native `Provider.list()` result: configured and effective
-providers, project overrides, custom models, plugin authentication and model
-allow/deny filters. It is not equivalent to taking every model from `/provider`
-and filtering by its `connected` field, which can retain catalogue entries
-removed from the effective provider list.
+An on-disk credential record does not grant access by itself. Before advertising
+native capabilities, the bridge proves:
 
-Only bare selectors cross the bridge; `--verbose` and unredacted provider API
-responses are intentionally avoided because arbitrary provider/model options
-can contain credentials. Authentication remains in the remote OpenCode install.
-The CLI initializes configured plugins, so discovery is not guaranteed to have
-zero initialization side effects, but Remodr sends no inference and creates no
-conversation.
+```text
+Herdr pane
+  -> foreground OpenCode PID and managed launch arguments
+  -> exactly one 127.0.0.1 listener owned by that PID
+  -> unauthenticated /global/health returns 401
+  -> authenticated /global/health reports a supported version
+  -> authenticated /session/<Herdr-session-id> returns the same session and cwd
+```
 
-OpenCode's own catalogue refresh and some account-specific discovery can silently
-fall back to cached data. A fetched list therefore means "available in this
-OpenCode configuration," not proven account entitlement, quota, or successful
-upstream synchronization. See [Model catalogues](model-catalogues.md) for the
-UI behavior and refresh contract.
+The listener is found through `/proc` on Linux or `lsof` on macOS. The bridge
+does not scan ports or try arbitrary OpenCode processes. Credentials are sent
+only after PID-to-listener ownership and the unauthenticated 401 have been
+established.
 
-### Further API-backed capabilities
+Verified bindings are cached briefly. Revalidation happens outside the bridge's
+runtime lock, so an unresponsive provider cannot stall Herdr snapshots or other
+agents. API capabilities disappear while a binding is absent or expired and
+return only after successful verification.
 
-OpenCode's [server API](https://opencode.ai/docs/server/) is the better long-term
-surface than reimplementing TUI keystrokes or indefinitely tracking private
-database migrations. A separate `opencode serve` process is not automatically
-the server backing an existing TUI.
+## Private server registry
 
-Beyond the short-lived empty-session bootstrap, an API-backed phase must
-establish a trustworthy mapping of
-`device -> OpenCode server -> project/directory -> session`, with explicit
-ownership and lifecycle. Prefer a managed loopback server accessed inside the
-existing SSH connection. Configure `OPENCODE_SERVER_PASSWORD` (and optionally
-`OPENCODE_SERVER_USERNAME`); do not expose an unauthenticated server on
-`0.0.0.0`, infer a server from an arbitrary open port, or fetch all credentials
-to make discovery work.
+Managed listener credentials must survive a bridge or phone reconnect while
+the TUI keeps running. They are stored in:
 
-| Native interface | Remodr integration opportunity |
+```text
+~/.local/share/remote-workspace/opencode-servers.sqlite3
+```
+
+The registry is independent of `commands.sqlite3`. It uses a user-owned `0700`
+directory, `0600` regular files, no symlinks or hard links, an exclusive
+initialization lock, a pinned schema, bounded entries, integrity checks, and
+full SQLite synchronization. Records are scoped to the saved device, remote
+user's Herdr session/socket, and pane.
+
+Closing an agent through Remodr removes its record. Authoritative Herdr snapshots
+also reclaim records for panes closed elsewhere after a grace period. A missing,
+busy, unsafe, stale, or corrupt registry fails closed: the agent stays usable in
+compatibility mode, but native capabilities are not advertised.
+
+No credential is included in runtime snapshots, bridge requests, durable command
+payloads, diagnostics, URLs, or model responses.
+
+## Native conversation and controls
+
+For a verified managed agent, the bridge reads:
+
+| Data | OpenCode interface |
 | --- | --- |
-| `/global/health`, `/doc` | Version/health negotiation and schema validation against the actual deployed server |
-| `/provider`, `/config/providers` | Device/project-scoped model selection instead of a maintenance-machine snapshot |
-| `/session`, `/session/:id`, `/session/status` | Explicit creation, binding, status, and restoration |
-| `/session/:id/message`, `/session/:id/prompt_async` | Typed messages with a provider/model selection per prompt |
-| `/event`, `/global/event` | SSE-driven updates with reconnect snapshot reconciliation, not polling-only reads |
-| `/session/:id/abort` | Session-specific stop without relying on customized TUI keybindings |
-| Question/permission reply endpoints in the deployed `/doc` | Exact request IDs, choices, multi-question replies and explicit permission handling |
+| Messages and tool parts | `GET /session/:id/message` |
+| Current TODOs | `GET /session/:id/todo` |
+| Pending questions | `GET /question`, filtered to the exact session |
+| Pending permissions | `GET /permission`, filtered to the exact session |
+| Session/model metadata | `GET /session/:id` and message metadata |
 
-Preserve Remodr's stable command IDs, durable local outbox and remote receipts.
-An HTTP timeout is not evidence that a prompt was rejected, and accepting a
-client-supplied `messageID` does not by itself prove idempotent replay. Verify
-deduplication on the actual deployed version before bypassing the existing
-delivery ledger. SSE is not assumed to be a durable replay log.
+Responses have strict count, text, body-size, type, role, ID, session, and
+message/part relationship checks. Synthetic, ignored, reasoning, and unrelated
+session content is not shown as chat. Permission metadata is not forwarded to
+the phone; only the permission name, display patterns, reusable patterns, and
+stable request ID cross the bridge.
 
-### Reasoning variants from the phone
+Questions preserve OpenCode's ordered multi-question structure, option
+descriptions, multi-select flag, and custom-answer flag. The phone renders a
+step-by-step form and submits `answers: string[][]` in native order. Permissions
+offer OpenCode's exact decisions: **Allow once**, **Always allow**, and
+**Reject**.
 
-OpenCode agents with an updated bridge expose **Model Settings → Reasoning
-effort**. Choices are read from the active TUI's variant chooser, including
-custom model-specific names. They are not converted into Copilot's portable
-effort enum or guessed from the phone's offline catalogue. **Default** clears
-the variant override.
+Native mutations use:
 
-The bridge pins the agent, session and current model while interacting with
-the native chooser, verifies the selected value, and closes the chooser.
-Changes do not send an inference prompt, restart the agent, or modify
-OpenCode's configuration/database. Busy agents, unrecognized dialogs and
-changed sessions/models are refused rather than receiving blind input.
-Keep the OpenCode terminal idle while using these controls. Custom TUI
-bindings or unsupported chooser layouts may require selecting the variant
-directly in OpenCode instead.
+| Action | OpenCode interface |
+| --- | --- |
+| Send message | `POST /session/:id/prompt_async` |
+| Answer question | `POST /question/:id/reply` |
+| Answer permission | `POST /permission/:id/reply` |
+| Stop current work | `POST /session/:id/abort` |
 
-Session-screen discovery isolates the native dialog's ANSI background rectangle
-from the dimmed conversation behind it, including wide-character text. The
-right-aligned workspace path is not part of the model or variant identifier.
-A matching variant chooser or empty/variant-filtered command palette left open
-by an interrupted read can be recovered; unrelated dialogs, searches and native
-drafts remain untouched. If OpenCode offers no variant command for the model,
-settings reports that limitation instead of a generic picker-verification error.
+Every request is pinned to the current provider, pane, and Herdr-reported
+session. A request also carries its source (`api`, `sqlite`, or `tui`); an API
+request can never fall through to TUI keystrokes if the native binding is lost.
 
-OpenCode's root TUI has no `--variant` launch flag (`opencode run` is a different
-command). Create the agent and select its model normally, then choose the
-reasoning variant from its Model Settings. Live model switching remains in
-OpenCode itself. This feature requires an explicit bridge capability; older
-bridges do not gain an enabled but nonfunctional settings control.
+## Delivery and live updates
 
-The session database records the variant last used for a submitted message,
-not necessarily the variant currently selected in the TUI. Opening Model
-Settings reads the live chooser instead of treating that historical value as
-current. **Reload variants** discards the unapplied mobile choice and reads
-the TUI again.
+Messages and answers retain Remodr's durable command ID, local outbox, remote
+SQLite receipt, and exact-session preconditions. The bridge marks a native
+mutation as potentially delivered immediately before the HTTP write. A timeout
+after that point becomes `COMMAND_UNCERTAIN` and is never replayed
+automatically. OpenCode accepts a client message ID but does not deduplicate it,
+so the ID is used for reconciliation rather than as permission to resend.
 
-Native question/permission buttons, account management from the phone, live
-model switching and API streaming are not claimed by the Herdr/SQLite
-adapter. Copilot keeps its existing full in-chat settings support.
+One SSE worker follows each owned TUI server through `GET /event`. It uses the
+Authorization header and explicit workspace directory. SSE has no replay
+cursor, so snapshots remain authoritative and foreground polling remains a
+safety net.
+
+Token/part updates are coalesced before crossing SSH. Questions, permissions,
+TODO changes, session lifecycle, completion, and errors invalidate immediately.
+Each invalidation has a monotonically increasing bridge-local revision; the
+mobile repository drains newer revisions without issuing one full transcript
+request for every token event.
+
+## Models and variants
+
+New-agent model discovery continues to run `opencode models` in the selected
+remote workspace. This returns effective configured provider/model selectors
+without forwarding verbose provider options that may contain credentials.
+
+For a verified managed session, **Model Settings** chooses the model used by
+future prompts sent from Remodr. The model is encoded in OpenCode's native
+`{providerID, modelID}` prompt field. This does not interrupt or retune a turn
+already in progress.
+
+OpenCode 1.18.x keeps the desktop TUI picker as client-local state. Selecting a
+model in Remodr therefore does not immediately update the TUI footer. Once
+Remodr sends a prompt with that model, the turn records the selection and the
+tested 1.18.30 TUI reflects it. Different sessions retain their own recorded
+models. There is currently no supported TUI model setter that would make the
+footer update before a turn.
+
+Compatibility-mode sessions retain the verified TUI reasoning-variant picker.
+Its reasoning choices are read from the live TUI and changes are reflected
+immediately. Managed API sessions currently expose model selection but not a
+separate reasoning-effort picker; adding one requires sanitizing model-specific
+variant metadata from OpenCode's provider API. The API-backed path does not open
+the command palette or parse its ANSI layout.
+
+## Compatibility mode
+
+A manually launched plain `opencode` TUI has no listener, and an older agent may
+not have a registry record. Those agents keep the previous conservative path:
+
+- exact-session read-only SQLite projection for messages, tools, TODOs, and
+  persisted question tools;
+- visible-TUI question fallback only when Herdr reports the agent blocked;
+- verified TUI key navigation for compatible question answers and variants;
+- Escape for Stop and `agent.prompt` for messages.
+
+Compatibility requests are explicitly tagged `sqlite` or `tui`. Managed API
+records that fail verification do not silently downgrade writes to keystrokes.
+
+## Security limitations
+
+The server binds only to `127.0.0.1`; never use `0.0.0.0`, mDNS, query-string
+credentials, proxies, or redirects. The phone reaches it only through the
+existing SSH-hosted bridge.
+
+OpenCode and its tools run as the same remote Unix user as the bridge. The
+server password prevents accidental and cross-user access when filesystem and
+process isolation are intact, but it is not a sandbox boundary against arbitrary
+code already executing as that user. In particular, a tool subprocess may
+inherit the managed server environment. Provider permission prompts must not be
+described as protection from a fully compromised same-user process.
 
 ## Sources
 
-- [OpenCode server API](https://opencode.ai/docs/server/) and [provider authentication](https://opencode.ai/docs/providers/)
-- [OpenCode CLI](https://opencode.ai/docs/cli/) and [keybindings](https://opencode.ai/docs/keybinds/)
-- [OpenCode 1.18.29 SQLite schema](https://github.com/anomalyco/opencode/blob/v1.18.29/packages/core/src/session/sql.ts)
-- [OpenCode 1.18.29 todo storage](https://github.com/anomalyco/opencode/blob/v1.18.29/packages/core/src/session/todo.ts)
-- [OpenCode 1.18.29 todo wire states](https://github.com/anomalyco/opencode/blob/v1.18.29/packages/schema/src/session-todo.ts)
-- [OpenCode 1.18.29 session message types](https://github.com/anomalyco/opencode/blob/v1.18.29/packages/schema/src/session-message.ts)
-- [OpenCode 1.18.29 database paths](https://github.com/anomalyco/opencode/blob/v1.18.29/packages/core/src/database/database.ts)
-- [OpenCode 1.18.29 model discovery](https://github.com/anomalyco/opencode/blob/v1.18.29/packages/opencode/src/cli/cmd/models.ts)
-- [OpenCode 1.18.29 effective provider construction](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/provider/provider.ts#L1385-L1728)
-- [OpenCode 1.18.29 config/provider API](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/server/routes/instance/httpapi/handlers/config.ts#L24-L29)
-- [OpenCode 1.18.29 catalogue refresh and fallback](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/core/src/models-dev.ts#L160-L258)
-- [OpenCode 1.18.29 xAI subscription authentication](https://github.com/anomalyco/opencode/blob/v1.18.29/packages/opencode/src/plugin/xai.ts)
-- [Herdr 0.8.2 TUI session binding](https://github.com/herdrdev/herdr/blob/v0.8.2/src/integration/assets/opencode/herdr-tui-session.js)
-- [Herdr 0.8.2 OpenCode event integration](https://github.com/herdrdev/herdr/blob/v0.8.2/src/integration/assets/opencode/herdr-agent-state.js)
+- [OpenCode server API](https://opencode.ai/docs/server/)
+- [OpenCode CLI](https://opencode.ai/docs/cli/)
+- [OpenCode 1.18.31 TUI transport selection](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/cli/cmd/tui.ts#L232-L250)
+- [OpenCode 1.18.31 session routes](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/server/routes/instance/httpapi/groups/session.ts)
+- [OpenCode 1.18.31 question routes](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/server/routes/instance/httpapi/groups/question.ts)
+- [OpenCode 1.18.31 permission routes](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/server/routes/instance/httpapi/groups/permission.ts)
+- [OpenCode 1.18.31 question schema](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/schema/src/v1/question.ts)
+- [OpenCode 1.18.31 permission schema](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/schema/src/v1/permission.ts)
+- [Herdr OpenCode integration](https://github.com/herdrdev/herdr/tree/master/src/integration/assets/opencode)

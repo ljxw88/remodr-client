@@ -111,6 +111,69 @@ describe('agent settings and model pages', () => {
     expect(router.back).toHaveBeenCalledTimes(1);
   });
 
+  it('applies an API-backed OpenCode model to the exact session', async () => {
+    flowDrafts.discard(flowId);
+    const live = remoteAgentSchema.parse({
+      ...agent(),
+      provider: 'opencode',
+      capabilities: {
+        supportsRetuning: true,
+        apiModelSelection: true,
+      },
+    });
+    jest.mocked(herdrRepository.getSnapshot).mockReturnValue({
+      selectedDeviceId: 'device-a',
+      connection: 'connected',
+      runtime: { ...EMPTY_RUNTIME, agents: [live] },
+      devices: {
+        'device-a': {
+          deviceId: 'device-a',
+          connection: 'connected',
+          runtime: {
+            ...EMPTY_RUNTIME,
+            workspaces: [{
+              id: 'space-a',
+              deviceId: 'device-a',
+              name: 'Work',
+              cwd: '/work/project',
+              status: 'idle',
+            }],
+            agents: [live],
+          },
+          hello: null,
+          lastError: null,
+        },
+      },
+      hello: null,
+      lastError: null,
+      lastSemanticEvent: null,
+      agentCountsByDevice: {},
+    });
+    flowId = beginAgentSettingsFlow(live);
+    jest.mocked(useLocalSearchParams).mockReturnValue({ flowId });
+    jest.mocked(herdrRepository.retuneAgent).mockResolvedValueOnce({
+      agentId: 'agent-a',
+      runtime: EMPTY_RUNTIME,
+    });
+    TestRenderer.act(() => {
+      renderer = TestRenderer.create(createElement(AgentSettingsPage));
+    });
+    TestRenderer.act(() => renderer.root.findByType(TuningFields).props.onChange({
+      model: 'openai/gpt-5.4',
+      effort: null,
+      context: null,
+    }));
+    await TestRenderer.act(async () =>
+      renderer.root.findByType(AppButton).props.onPress());
+    expect(herdrRepository.retuneAgent).toHaveBeenCalledWith({
+      agentId: 'agent-a',
+      providerSessionId: 'session-a',
+      model: 'openai/gpt-5.4',
+      effort: null,
+      context: null,
+    });
+  });
+
   it('retains a failed draft and blocks requests if the owning connection or provider changed', async () => {
     jest.mocked(herdrRepository.retuneAgent).mockRejectedValueOnce(new Error('Runtime refused settings'));
     TestRenderer.act(() => { renderer = TestRenderer.create(createElement(AgentSettingsPage)); });

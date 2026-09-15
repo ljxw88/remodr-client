@@ -30,6 +30,12 @@ export const agentCapabilitiesSchema = z.object({
   structuredConversation: z.boolean().default(false),
   streamingConversation: z.boolean().default(false),
   structuredQuestions: z.boolean().default(false),
+  apiConversation: z.boolean().optional(),
+  apiPrompt: z.boolean().optional(),
+  apiAbort: z.boolean().optional(),
+  nativeQuestions: z.boolean().optional(),
+  nativePermissions: z.boolean().optional(),
+  apiModelSelection: z.boolean().optional(),
   toolActivity: z.boolean().default(false),
   todos: z.boolean().default(false),
   fallback: z.boolean().default(true),
@@ -245,6 +251,28 @@ export const humanOptionSchema = z.object({
 });
 export type HumanOption = z.infer<typeof humanOptionSchema>;
 
+export const humanRequestOriginSchema = z.enum(['api', 'sqlite', 'tui']);
+export type HumanRequestOrigin = z.infer<typeof humanRequestOriginSchema>;
+
+export const humanQuestionSchema = z.object({
+  header: z.string().optional(),
+  question: z.string(),
+  options: z.array(humanOptionSchema).default([]),
+  allowCustomAnswer: z.boolean().default(true),
+  multiSelect: z.boolean().default(false),
+});
+export type HumanQuestion = z.infer<typeof humanQuestionSchema>;
+
+export const permissionReplySchema = z.enum(['once', 'always', 'reject']);
+export type PermissionReply = z.infer<typeof permissionReplySchema>;
+
+export const humanPermissionSchema = z.object({
+  permission: z.string(),
+  patterns: z.array(z.string()).default([]),
+  always: z.array(z.string()).default([]),
+});
+export type HumanPermission = z.infer<typeof humanPermissionSchema>;
+
 export const humanRequestSchema = z.object({
   id: z.string(),
   kind: z.enum(['choice', 'text', 'confirmation', 'permission']),
@@ -252,6 +280,10 @@ export const humanRequestSchema = z.object({
   options: z.array(humanOptionSchema).default([]),
   allowCustomAnswer: z.boolean().default(true),
   multiSelect: z.boolean().default(false),
+  origin: humanRequestOriginSchema.optional(),
+  providerSessionId: z.string().optional(),
+  questions: z.array(humanQuestionSchema).optional(),
+  permission: humanPermissionSchema.optional(),
 });
 export type HumanRequest = z.infer<typeof humanRequestSchema>;
 

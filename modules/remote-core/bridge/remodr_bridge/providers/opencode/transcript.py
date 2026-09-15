@@ -305,6 +305,35 @@ def project_todos(
     }
 
 
+def message_count(identifier: Any) -> int | None:
+    """How many messages the exact session holds, or None if that is unknown.
+
+    Used only to decide whether an abandoned session is safe to delete, so an
+    unreadable database, an unsupported schema or a missing session all answer
+    "unknown" rather than "empty". Nothing is ever deleted on a guess.
+    """
+    if not session_id(identifier):
+        return None
+    try:
+        with database() as connection:
+            if connection is None:
+                return None
+            tables = schema(connection)
+            if connection.execute(
+                "SELECT 1 FROM session WHERE id = ?", (identifier,)
+            ).fetchone() is None:
+                return None
+            total = 0
+            for table in ("session_message", "message"):
+                if table in tables:
+                    total += connection.execute(
+                        f'SELECT count(*) FROM "{table}" WHERE session_id = ?', (identifier,)
+                    ).fetchone()[0]
+            return total
+    except (TranscriptError, sqlite3.Error, OSError):
+        return None
+
+
 def read_session(identifier: Any) -> dict[str, Any] | None:
     if not session_id(identifier):
         raise TranscriptError("Invalid OpenCode session identifier.")

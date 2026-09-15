@@ -32,6 +32,7 @@ export type AgentSettingsDraft = {
   kind: 'agent-settings';
   deviceId: string;
   agentId: string;
+  workspaceId?: string;
   provider: AgentProvider;
   /**
    * Snapshot of the session the form opened against, so applying can be blocked
@@ -39,6 +40,8 @@ export type AgentSettingsDraft = {
    * Optional, so hand-built and older draft fixtures stay valid.
    */
   providerSessionId?: string | null;
+  /** Keeps the settings workflow stable if the live API binding later drops. */
+  apiModelSelection?: boolean;
   initialTuning: Tuning;
   tuning: Tuning;
   /** Read from the active OpenCode chooser, not its last submitted message. */

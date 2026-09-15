@@ -196,6 +196,20 @@ class SessionRegistry:
         with self._lock:
             self._questions[request["id"]] = PendingQuestion(key, deepcopy(request))
 
+    def replace_questions(
+        self, key: SessionKey, requests: list[dict[str, Any]],
+    ) -> None:
+        with self._lock:
+            self._questions = {
+                request_id: pending
+                for request_id, pending in self._questions.items()
+                if pending.key.agent_id != key.agent_id
+            }
+            for request in requests:
+                self._questions[request["id"]] = PendingQuestion(
+                    key, deepcopy(request),
+                )
+
     def question(self, request_id: str) -> PendingQuestion | None:
         with self._lock:
             return deepcopy(self._questions.get(request_id))

@@ -1,3 +1,4 @@
+import contextlib
 import json
 import tempfile
 import unittest
@@ -15,6 +16,14 @@ from herdr_mobile_bridge import (
     SUPPORTED_PROVIDERS,
     TUNING_ARGUMENTS,
 )
+
+
+@contextlib.contextmanager
+def private_home():
+    """Keep credential and command storage inside the test, never in $HOME."""
+    with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+        with patch.object(Path, "home", return_value=Path(directory)):
+            yield Path(directory)
 
 
 class BridgeProtocolTest(unittest.TestCase):
@@ -301,6 +310,7 @@ class BridgeProtocolTest(unittest.TestCase):
         catalog = [{"provider": "opencode", "available": True, "aliases": []}]
 
         with (
+            private_home(),
             patch(
                 "remodr_bridge.providers.opencode.create_session",
                 return_value="ses_created",
@@ -321,6 +331,7 @@ class BridgeProtocolTest(unittest.TestCase):
                     "bypassPermissions": True,
                 }
             )
+            credential = bridge.providers["opencode"].servers().load("p2")
 
         request.assert_called_once_with(
             "tab.create",
@@ -328,15 +339,23 @@ class BridgeProtocolTest(unittest.TestCase):
                 "focus": False,
                 "workspace_id": "w1",
                 "label": "opencode",
+                # agent.start carries no environment, so the managed server's
+                # credentials can only reach the process through its pane.
+                "env": {
+                    "OPENCODE_SERVER_USERNAME": credential.username,
+                    "OPENCODE_SERVER_PASSWORD": credential.password,
+                },
             },
         )
         start_agent.assert_called_once_with(
             "opencode",
             "opencode",
             "p2",
-            ["--auto", "--session", "ses_created"],
+            ["--auto", "--hostname", "127.0.0.1", "--port", "0", "--session", "ses_created"],
         )
         self.assertEqual(result["agentId"], agent_id)
+        self.assertEqual(credential.session_id, "ses_created")
+        self.assertEqual(credential.cwd, "/work/project")
 
     def test_creates_workspace_from_remote_root_folder(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1264,6 +1283,7 @@ class AgentManagementTest(unittest.TestCase):
                         "agents": [{"paneId": "p1"}],
                     }
                     with (
+                        private_home(),
                         patch(
                             "remodr_bridge.providers.opencode.create_session",
                             return_value="ses_bootstrap",
@@ -1288,11 +1308,24 @@ class AgentManagementTest(unittest.TestCase):
                     )
                     args = list(BYPASS_ARGUMENTS[provider]) if bypass else []
                     args.extend(expected)
+                    tab = next(
+                        call.args[1] for call in request.call_args_list
+                        if call.args[0] == "tab.create"
+                    )
                     if provider == "copilot":
                         args.extend(["--session-id", bridge.sessions.launched_session("p1")])
+                        # Nothing to inject, so nothing is sent at all.
+                        self.assertNotIn("env", tab)
                     elif provider == "opencode":
-                        args.extend(["--session", "ses_bootstrap"])
+                        args.extend([
+                            "--hostname", "127.0.0.1", "--port", "0",
+                            "--session", "ses_bootstrap",
+                        ])
                         self.assertEqual(bridge.sessions.launched_session("p1"), "ses_bootstrap")
+                        self.assertEqual(
+                            set(tab["env"]),
+                            {"OPENCODE_SERVER_USERNAME", "OPENCODE_SERVER_PASSWORD"},
+                        )
                     if provider == "opencode":
                         bootstrap.assert_called_once_with("/work/synthetic", "")
                     else:

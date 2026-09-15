@@ -194,7 +194,8 @@ class Bridge:
             with self.refresh_lock:
                 self._refresh_runtime_and_publish()
                 agent = self._require_agent(payload)
-                return self._load_conversation(agent)
+            self.provider_adapter(agent["provider"]).prepare_conversation(agent)
+            return self._load_conversation(agent)
         if action == "agent.variant_options":
             with self.refresh_lock:
                 self._refresh_runtime_and_publish()
@@ -207,10 +208,7 @@ class Bridge:
             text = payload.get("text")
             if not isinstance(text, str) or not text.strip():
                 raise BridgeError("INVALID_MESSAGE", "Message cannot be empty.")
-            self._herdr_mutation(
-                "agent.prompt",
-                {"target": agent["paneId"], "text": text},
-            )
+            self.provider_adapter(agent["provider"]).send_message(agent, text)
             return {"accepted": True}
         if action == "agent.create":
             return self._create_agent(payload)
@@ -228,13 +226,7 @@ class Bridge:
             return self._answer_human_request(payload)
         if action == "agent.interrupt":
             agent = self._require_agent(payload)
-            self._herdr_mutation(
-                "agent.send_keys",
-                {
-                    "target": agent["paneId"],
-                    "keys": list(self.provider_adapter(agent["provider"]).spec.interrupt_keys),
-                },
-            )
+            self.provider_adapter(agent["provider"]).interrupt(agent)
             return {"accepted": True}
         raise BridgeError("UNKNOWN_ACTION", f"Unsupported action: {action}")
 
@@ -348,7 +340,14 @@ class Bridge:
         """
         ours = self.sessions.tuning(pane_id)
         logged = self.provider_adapter(provider).session_tuning(provider_session_id)
-        return {key: ours.get(key) or logged.get(key) for key in ORDERED_TUNING}
+        return {
+            key: (
+                ours.get(key)
+                if key == "model" and ours.get("_apiModelSelected") is True
+                else ours.get(key) or logged.get(key)
+            )
+            for key in ORDERED_TUNING
+        }
 
     def _load_conversation(self, agent: dict[str, Any]) -> dict[str, Any]:
         with self.refresh_lock:
@@ -409,9 +408,11 @@ class Bridge:
         }
 
     def _agent_capabilities(
-        self, provider: str, provider_session_id: Any
+        self, provider: str, provider_session_id: Any, pane_id: str | None = None
     ) -> dict[str, bool]:
-        return self.provider_adapter(provider).agent_capabilities(provider_session_id)
+        return self.provider_adapter(provider).agent_capabilities(
+            provider_session_id, pane_id
+        )
 
     @staticmethod
     def _provider(value: Any) -> str:
@@ -493,6 +494,16 @@ class Bridge:
 
     def _herdr_mutation(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         return commands.herdr_mutation(self, method, params)
+
+    def _provider_mutation(self, agent: dict[str, Any]) -> None:
+        commands.provider_mutation(self, agent)
+
+    def _provider_rejected(self) -> None:
+        commands.provider_rejected(self)
+
+    def _active_command_id(self) -> str | None:
+        value = getattr(self.command_context, "command_id", None)
+        return value if isinstance(value, str) else None
 
     def _create_workspace(self, payload: dict[str, Any]) -> dict[str, Any]:
         return lifecycle.create_workspace(self, payload)

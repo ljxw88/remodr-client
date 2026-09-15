@@ -55,6 +55,8 @@ export default function AgentConversationScreen() {
   const agentStatus = agent?.status;
   const conversation = useAgentConversation(id ?? '');
   const hasOpenRequest = conversation?.activeHumanRequest != null;
+  const requestUsesForm = conversation?.activeHumanRequest?.kind === 'permission' ||
+    (conversation?.activeHumanRequest?.questions?.length ?? 0) > 1;
   // A cached runtime can name an agent well before its device transport is up,
   // and a conversation fetched in that window throws. Following the owning
   // device's connection gives the fetch a trigger to run again on.
@@ -233,6 +235,10 @@ export default function AgentConversationScreen() {
       setSendError('An answer is already queued. Review its delivery status before answering again.');
       return;
     }
+    if (requestUsesForm) {
+      setSendError('Complete the question form above before sending another message.');
+      return;
+    }
     const submission = captureSend();
     if (!submission?.text) {
       submission?.cancel();
@@ -347,6 +353,7 @@ export default function AgentConversationScreen() {
           answerPending={answerPending}
           error={[sendError, draftError].filter(Boolean).join('\n') || null}
           hasOpenRequest={hasOpenRequest}
+          requestUsesForm={requestUsesForm}
           requestBar={conversation?.activeHumanRequest ? (
             // A new question or session starts with a clean selection.
             <HumanRequestBar

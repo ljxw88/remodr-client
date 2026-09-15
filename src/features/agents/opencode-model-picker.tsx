@@ -9,27 +9,44 @@ import { FormError, FormPage, FormSection, SelectionRow } from '@/components/ui/
 import { TextField } from '@/components/ui/text-field';
 import { Spacing } from '@/constants/theme';
 import type { OpenCodeModels } from '@/domain/opencode-models';
-import { flowDrafts, type NewAgentDraft } from '@/features/forms/flow-drafts';
+import {
+  flowDrafts,
+  type AgentSettingsDraft,
+  type NewAgentDraft,
+} from '@/features/forms/flow-drafts';
 import { herdrRepository } from '@/services/herdr-repository';
 import { toUserMessage } from '@/utils/user-error';
 import { chooseModel, type ModelChoice } from './agent-edit-flow';
 import { useHerdr } from './use-herdr';
 
-export function OpenCodeModelPicker({ flowId, draft }: { flowId: string; draft: NewAgentDraft }) {
+type OpenCodeModelDraft = NewAgentDraft | AgentSettingsDraft;
+
+export function OpenCodeModelPicker({
+  flowId,
+  draft,
+}: {
+  flowId: string;
+  draft: OpenCodeModelDraft;
+}) {
   const { devices } = useHerdr();
   const device = devices[draft.deviceId];
   const workspace = device?.runtime.workspaces.find((space) =>
     space.id === draft.workspaceId && (!space.deviceId || space.deviceId === draft.deviceId),
   );
   const unavailable = device?.connection !== 'connected' ? 'Connect this device to fetch its OpenCode models.'
-    : !workspace?.cwd ? 'Choose an available space before fetching OpenCode models.' : null;
+    : !draft.workspaceId || !workspace?.cwd
+      ? 'Choose an available space before fetching OpenCode models.'
+      : null;
   return <ScopedModelPicker key={JSON.stringify([flowId, draft.deviceId, draft.workspaceId, workspace?.cwd, unavailable])}
     flowId={flowId} draft={draft} cwd={workspace?.cwd ?? null}
     unavailable={unavailable} />;
 }
 
 function ScopedModelPicker({ flowId, draft, cwd, unavailable }: {
-  flowId: string; draft: NewAgentDraft; cwd: string | null; unavailable: string | null;
+  flowId: string;
+  draft: OpenCodeModelDraft;
+  cwd: string | null;
+  unavailable: string | null;
 }) {
   const [catalogue, setCatalogue] = useState<OpenCodeModels | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +55,8 @@ function ScopedModelPicker({ flowId, draft, cwd, unavailable }: {
   const [query, setQuery] = useState('');
   const leaving = useRef(false);
   const insets = useSafeAreaInsets();
-  const { deviceId, workspaceId } = draft;
+  const deviceId = draft.deviceId;
+  const workspaceId = draft.workspaceId ?? '';
 
   useEffect(() => {
     let cancelled = false;
@@ -73,7 +91,8 @@ function ScopedModelPicker({ flowId, draft, cwd, unavailable }: {
   function select(model: string | null) {
     if (leaving.current) return;
     const current = flowDrafts.get(flowId);
-    if (current?.kind !== 'new-agent' || current.provider !== 'opencode'
+    if ((current?.kind !== 'new-agent' && current?.kind !== 'agent-settings') ||
+      current.provider !== 'opencode'
       || current.deviceId !== deviceId || current.workspaceId !== workspaceId) {
       setError('This form changed. Reopen the model picker.');
       return;
@@ -89,8 +108,15 @@ function ScopedModelPicker({ flowId, draft, cwd, unavailable }: {
       }
     }
     leaving.current = true;
-    flowDrafts.update(flowId, (value) => value.kind === 'new-agent'
-      ? { ...value, tuning: chooseModel('opencode', model, value.tuning), modelAvailability: undefined } : value);
+    flowDrafts.update(flowId, (value) =>
+      value.kind === 'new-agent' || value.kind === 'agent-settings'
+        ? {
+          ...value,
+          tuning: chooseModel('opencode', model, value.tuning),
+          ...(value.kind === 'new-agent' ? { modelAvailability: undefined } : {}),
+        }
+        : value,
+    );
     router.back();
   }
 

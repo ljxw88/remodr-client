@@ -20,7 +20,8 @@ resolution, and transcript parsing:
 
 - `copilot/`: native process/session discovery, Copilot event parsing, questions,
   TODOs, and Copilot-specific tuning.
-- `opencode/`: OpenCode launch settings, native session identity and read-only SQLite transcripts.
+- `opencode/`: OpenCode launch settings, owned loopback HTTP/SSE bindings,
+  native snapshots/actions, and read-only SQLite/TUI compatibility.
 
 Shared orchestration, protocol, transport, and durable storage stay outside
 provider packages. The provider registry is the integration point; adding a
@@ -44,7 +45,8 @@ and restrictions below remain unchanged.
 
 Copilot's `processes.py`, `sessions.py`, `transcript.py`, and `tuning.py` separate
 OS process inspection, identity resolution, transcript decoding, and live
-retuning. OpenCode reads its exact reported session from SQLite.
+retuning. OpenCode uses Herdr's exact reported session with its owned native
+server when available, and SQLite only as a compatibility reader.
 Runtime publication and Herdr I/O stay with the host. Session state belongs to
 `Bridge.sessions`, whose explicit registry methods replace mutable host
 dictionaries. Durable-command state remains in the ledger.
@@ -91,6 +93,31 @@ OpenCode controls provider authentication, project overrides and catalogue
 caching. Its native refresh can fall back silently, so this endpoint does not
 claim successful upstream refresh or prove every model's account entitlement.
 See [Model catalogues](../../../docs/model-catalogues.md).
+
+## OpenCode native server
+
+Remodr-created OpenCode TUIs receive `--hostname 127.0.0.1 --port 0` and fresh
+per-pane Basic credentials through `tab.create.env`. The credentials persist in
+the separate private `opencode-servers.sqlite3` registry; they never enter the
+NDJSON protocol or command ledger.
+
+The adapter advertises API capabilities only after proving the pane's
+foreground OpenCode PID owns one loopback listener, confirming that listener
+rejects an unauthenticated health request, and verifying the exact
+Herdr-reported session and cwd through authenticated requests. Verification is
+cached and refreshed outside the runtime lock.
+
+Native conversation snapshots read messages, tools, TODOs, questions and
+permissions. Native mutations use exact-session prompt, answer and abort
+endpoints. Mutating HTTP requests enter the same uncertain-delivery boundary as
+Herdr mutations immediately before the write. API-origin request IDs cannot
+fall through to compatibility keystrokes.
+
+One SSE worker follows each verified pane/server. Streaming message events are
+coalesced before publishing `conversation.changed`; request, TODO, lifecycle
+and completion events publish immediately. SSE is only an invalidation channel:
+the authoritative state is always reread after reconnect because OpenCode does
+not provide replay cursors.
 
 ## Session ownership and locks
 
@@ -192,18 +219,17 @@ permissions unless explicitly denied. Omitting it leaves the user's OpenCode
 permission policy in effect; it does not force an ask-every-time policy.
 
 OpenCode creation uses a temporary password-protected loopback server to create
-an empty session in the known workspace cwd, then closes that server and launches
-the Herdr TUI with `--session <existing-id>`. The native Herdr session report is
-still required before durable sends. Bootstrap sends no inference prompt and
-does not rewrite user credentials or plugin configuration.
+an empty session in the known workspace cwd, then closes that server and
+launches the Herdr TUI with its own authenticated `127.0.0.1` HTTP/SSE listener
+and `--session <existing-id>`. The native Herdr session report is still required
+before durable sends. Bootstrap sends no inference prompt and does not rewrite
+user credentials or plugin configuration.
 
-OpenCode conversations read the exact session's supported SQLite rows through a
-read-only transaction, including WAL data. Missing identity keeps the explicit
-terminal fallback; invalid identifiers, missing exact sessions, unsupported
-schemas and active reverts do not silently select another session. Running
-`question` tools become Copilot-style `activeHumanRequest` items. No live API
-permission controls or streaming subscription is advertised.
-In-chat reasoning variants use the verified native TUI chooser described below.
+For an ownership-verified managed TUI, OpenCode conversations, tools, TODOs,
+questions and permissions come from the native API. Prompts, answers and aborts
+use session-bound native endpoints, and SSE supplies coalesced invalidation
+hints. SQLite and verified TUI interaction remain compatibility paths for
+manual or older sessions without an owned server.
 See [OpenCode integration](../../../docs/opencode-integration.md)
 for storage overrides, installation and account support.
 
@@ -227,7 +253,7 @@ Only Copilot accepts `default` and `long_context` as a separate context setting.
 OpenCode reasoning variants are selected after launch, not passed as an
 unsupported root-TUI flag.
 
-**Live retuning supports Copilot settings and OpenCode variants.** Both hello
+**Live retuning supports Copilot settings and OpenCode settings.** Both hello
 `capabilities.providerCapabilities[provider].supportsRetuning` and each
 agent's `capabilities.supportsRetuning` report this explicitly. Clients must
 not equate creation tuning with live-retuning support. `agent.retune` rejects
@@ -235,17 +261,18 @@ unsupported providers with `PROVIDER_NOT_TUNABLE` before issuing CLI input.
 Copilot retains its existing `/model` and session-restart behavior; its
 `--session-id`, `/exit`, and session-log parsing never apply to other providers.
 Creation settings remembered by the bridge override lagging native session
-metadata. OpenCode's semantic read adapter does not imply native HTTP model
-switching or question controls.
+metadata. A verified OpenCode API binding selects the model for future prompts
+sent from Remodr; compatibility sessions retain the TUI variant flow.
 
-For OpenCode, `agent.variant_options` takes `{agentId, providerSessionId}` and
+For compatibility-mode OpenCode sessions, `agent.variant_options` takes
+`{agentId, providerSessionId}` and
 returns `{modelLabel, modelToken, currentVariant, variants}`. Names come from
 the active chooser, not the last submitted message or an offline model list.
 `currentVariant: null` means Default. To apply, send `agent.retune` with
 `{agentId, providerSessionId, modelToken, variant}`; `variant: null` clears the
 override. Do not include changed generic model/effort/context settings.
 
-Both operations pin the live session and terminal and require an idle,
+Those compatibility operations pin the live session and terminal and require an idle,
 recognizable TUI with an empty native prompt. The bridge opens the command
 palette without submitting a prompt, verifies the unique variant command and
 picker, and checks ANSI focus before selecting. It reopens the picker to
@@ -560,12 +587,13 @@ Interrupted first initialization fails closed and requires operator recovery.
 ## What this does not guarantee
 
 This is persistent duplicate suppression and explicit ambiguous delivery,
-**not exactly-once execution**. Herdr `agent.prompt` and the SQLite transaction
-cannot commit atomically. If Herdr accepts a prompt and the bridge dies before
-recording the result, the ledger can only report uncertainty. It must not
-reissue that prompt. Conversely, a bridge can die after reserving but before
-sending; that reservation is also uncertain. A lost stdout ACK after a
-successful ledger commit is recoverable by returning the cached response.
+**not exactly-once execution**. Neither Herdr `agent.prompt` nor an OpenCode
+HTTP mutation can commit atomically with the SQLite transaction. If the
+provider accepts a prompt or answer and the bridge dies before recording the
+result, the ledger can only report uncertainty. It must not reissue that
+command. Conversely, a bridge can die after reserving but before sending; that
+reservation is also uncertain. A lost stdout ACK after a successful ledger
+commit is recoverable by returning the cached response.
 
 Provider/pane/question validation rejects stale queued targets observed before
 dispatch. Herdr does not accept an atomic expected-session/question condition,

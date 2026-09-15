@@ -28,10 +28,20 @@ export default function AgentSettingsPage() {
     return () => { mounted.current = false; };
   }, []);
 
-  if (flowId && draft?.kind === 'agent-settings' && draft.provider === 'opencode') {
+  if (
+    flowId &&
+    draft?.kind === 'agent-settings' &&
+    draft.provider === 'opencode' &&
+    draft.apiModelSelection !== true
+  ) {
     return <OpenCodeVariantSettings flowId={flowId} draft={draft} />;
   }
-  if (!flowId || !draft || draft.kind !== 'agent-settings' || !supportsRetuning(draft.provider)) {
+  if (
+    !flowId ||
+    !draft ||
+    draft.kind !== 'agent-settings' ||
+    (draft.provider !== 'opencode' && !supportsRetuning(draft.provider))
+  ) {
     return <MissingFlow title="Model Settings Unavailable" />;
   }
   const availabilityError = agentEditError(devices, draft);
@@ -48,7 +58,13 @@ export default function AgentSettingsPage() {
     setBusy(true);
     setError(null);
     try {
-      await herdrRepository.retuneAgent({ agentId: current.agentId, ...current.tuning });
+      await herdrRepository.retuneAgent({
+        agentId: current.agentId,
+        ...(current.provider === 'opencode'
+          ? { providerSessionId: current.providerSessionId ?? undefined }
+          : {}),
+        ...current.tuning,
+      });
       if (mounted.current) router.back();
     } catch (cause) {
       if (!mounted.current) return;
@@ -89,7 +105,9 @@ export default function AgentSettingsPage() {
         />
       </View>
       <ThemedText type="small" themeColor="textSecondary">
-        Changes stay here until you apply them.
+        {draft.provider === 'opencode'
+          ? 'The selected model is used for prompts sent from this app. It does not change a turn already in progress.'
+          : 'Changes stay here until you apply them.'}
       </ThemedText>
       {restarts ? (
         <ThemedText type="small" themeColor="textSecondary">

@@ -31,8 +31,12 @@ export function beginAgentSettingsFlow(agent: RemoteAgent): string {
     kind: 'agent-settings',
     deviceId: deviceFor(agent),
     agentId: agent.id,
+    workspaceId: agent.workspaceId,
     provider: agent.provider,
     providerSessionId: agent.providerSessionId,
+    ...(agent.capabilities.apiModelSelection === true
+      ? { apiModelSelection: true }
+      : {}),
     initialTuning,
     tuning: { ...initialTuning },
   });

@@ -8,6 +8,7 @@ import {
   createAgentResultSchema,
   createAgentInputSchema,
   createSpaceResultSchema,
+  humanRequestSchema,
   launchableAgentProviderSchema,
   providerLabel,
   runtimeStateSchema,
@@ -171,6 +172,61 @@ describe('Herdr mobile protocol', () => {
       ],
     });
     expect(conversation.items).toHaveLength(3);
+  });
+
+  it('preserves native OpenCode questions and permissions without raw metadata', () => {
+    const questions = humanRequestSchema.parse({
+      id: 'que_native',
+      kind: 'choice',
+      question: 'Which database?',
+      options: [{ id: 'PostgreSQL', label: 'PostgreSQL' }],
+      allowCustomAnswer: false,
+      multiSelect: false,
+      origin: 'api',
+      providerSessionId: 'ses_native',
+      questions: [
+        {
+          header: 'Database',
+          question: 'Which database?',
+          options: [{ id: 'PostgreSQL', label: 'PostgreSQL' }],
+          allowCustomAnswer: false,
+          multiSelect: false,
+        },
+        {
+          header: 'Region',
+          question: 'Which regions?',
+          options: [{ id: 'Europe', label: 'Europe' }],
+          allowCustomAnswer: true,
+          multiSelect: true,
+        },
+      ],
+    });
+    expect(questions.questions).toHaveLength(2);
+    expect(questions.questions?.[1]).toMatchObject({
+      question: 'Which regions?',
+      multiSelect: true,
+    });
+
+    const permission = humanRequestSchema.parse({
+      id: 'per_native',
+      kind: 'permission',
+      question: 'Allow OpenCode to use bash?',
+      options: [],
+      allowCustomAnswer: false,
+      multiSelect: false,
+      origin: 'api',
+      providerSessionId: 'ses_native',
+      permission: {
+        permission: 'bash',
+        patterns: ['git status'],
+        always: ['git *'],
+      },
+    });
+    expect(permission.permission).toEqual({
+      permission: 'bash',
+      patterns: ['git status'],
+      always: ['git *'],
+    });
   });
 
   it('parses a created agent with its refreshed runtime', () => {

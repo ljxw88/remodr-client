@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import uuid
 from typing import Any, TYPE_CHECKING
 from .constants import DURABLE_ACTIONS, PROTOCOL
 from .errors import BridgeError
 from .ledger import CommandLedger
+from .storage import host_scope
 
 if TYPE_CHECKING:
     from .bridge import Bridge
@@ -23,11 +23,7 @@ def command_id(value: Any) -> str:
 
 
 def command_ledger(host: Bridge) -> CommandLedger:
-    scope = json.dumps(
-        [os.getuid(), host.device_id, host.session_name, os.path.abspath(host.herdr_socket)],
-        separators=(",", ":"),
-    )
-    return CommandLedger(hashlib.sha256(scope.encode()).hexdigest())
+    return CommandLedger(host_scope(host))
 
 
 def command_error(code: str, message: str) -> dict[str, Any]:
@@ -84,6 +80,7 @@ def durable_command(
     host.command_context.active = True
     host.command_context.side_effect = False
     host.command_context.agent = None
+    host.command_context.command_id = command_id
     try:
         host._prepare_command(action, payload)
         result = host._dispatch(action, payload)
@@ -106,6 +103,7 @@ def durable_command(
     finally:
         host.command_context.active = False
         host.command_context.agent = None
+        host.command_context.command_id = None
     try:
         ledger.finish(command_id, state, response)
     except Exception:
@@ -145,6 +143,9 @@ def prepare_command(host: Bridge, action: str, payload: dict[str, Any]) -> None:
         )
     host.command_context.agent = agent
     if action == "human_request.answer":
+        answer = payload.get("answer")
+        origin = answer.get("requestOrigin") if isinstance(answer, dict) else None
+        host.provider_adapter(agent.get("provider")).prepare_request(agent, origin)
         conversation = host._load_conversation(agent)
         request = conversation.get("activeHumanRequest")
         if not isinstance(request, dict) or request.get("id") != payload.get("requestId"):
@@ -165,3 +166,26 @@ def herdr_mutation(host: Bridge, method: str, params: dict[str, Any]) -> dict[st
             raise BridgeError("COMMAND_PRECONDITION_FAILED", identity_error)
         host.command_context.side_effect = True
     return host._herdr_request(method, params)
+
+
+def provider_mutation(host: Bridge, agent: dict[str, Any]) -> None:
+    """Mark a provider API request at the same durable boundary as Herdr I/O."""
+    if not getattr(host.command_context, "active", False):
+        return
+    bound = host.command_context.agent
+    if bound is None or any(
+        bound.get(field) != agent.get(field)
+        for field in ("id", "provider", "providerSessionId", "paneId")
+    ):
+        raise BridgeError("COMMAND_PRECONDITION_FAILED", "Command target is not bound.")
+    host._require_agent({"agentId": agent["id"]})
+    identity_error = host.sessions.identity_error(agent.get("paneId"))
+    if identity_error:
+        raise BridgeError("COMMAND_PRECONDITION_FAILED", identity_error)
+    host.command_context.side_effect = True
+
+
+def provider_rejected(host: Bridge) -> None:
+    """A definite client/auth/not-found response proves no mutation occurred."""
+    if getattr(host.command_context, "active", False):
+        host.command_context.side_effect = False

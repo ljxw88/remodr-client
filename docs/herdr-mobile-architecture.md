@@ -9,8 +9,9 @@ the remote bridge and provider adapters.
 
 The server needs SSH/SFTP access, Python 3 with the bridge's standard-library
 dependencies (including SQLite), Herdr, and the OpenCode or GitHub Copilot CLI.
-Herdr 0.8.2/protocol 20 and Copilot CLI 1.0.80 are previous development
-baselines, not an exhaustive support matrix or a claim about what is installed
+The native OpenCode path was exercised with OpenCode 1.18.30 and Herdr
+0.9.0/protocol 22; Copilot CLI 1.0.80 is a previous development baseline.
+These are not an exhaustive support matrix or a claim about what is installed
 on the reader's server.
 
 The bridge reads Herdr's provider catalog at runtime. It does not assume that
@@ -29,8 +30,8 @@ reinstall the app to deploy the OpenCode adapter.
 OpenCode is listed first and selected by default when available. Its integration
 uses the exact session reported by Herdr's OpenCode plugins, not a guessed
 session from the project directory. See [OpenCode integration](opencode-integration.md)
-for account support, installation requirements, read-only storage limits and the
-future native HTTP/SSE boundary.
+for account support, installation requirements, native HTTP/SSE ownership, and
+compatibility fallback limits.
 
 OpenCode models are discovered from the selected remote workspace, while
 Copilot model/reasoning/context choices come from its bundled catalogue. See
@@ -38,10 +39,11 @@ Copilot model/reasoning/context choices come from its bundled catalogue. See
 ChatGPT/OpenAI and Anthropic through OpenCode's `/connect` workflow on each
 remote host; Remodr does not launch standalone Codex or Claude Code agents.
 
-Live retuning is resolved by
+Live settings are resolved by
 [`agent-capabilities.ts`](../src/domain/agent-capabilities.ts), independently of
 the model catalogues. Copilot supports model/reasoning/context settings;
-OpenCode supports its live reasoning variants only. The runtime agent's
+managed OpenCode sessions select the model for future mobile prompts, while
+compatibility sessions retain live TUI reasoning variants. The runtime agent's
 `capabilities.supportsRetuning` controls availability:
 
 | Reported value | Client behavior |
@@ -67,6 +69,7 @@ HerdrRepository
     -> herdr_mobile_bridge-<sha256>.pyz
         -> Herdr Unix socket
         -> provider transcript files
+        -> owned OpenCode loopback HTTP/SSE server
 ```
 
 The [modular Python source](../modules/remote-core/bridge/remodr_bridge/) is
@@ -122,7 +125,8 @@ foreground launcher chain to the native runtime.
 
 | Provider | Current conversation source | Limits |
 | --- | --- | --- |
-| OpenCode | Read-only SQLite session/message/todo storage, scoped by Herdr's native session ID | Semantic text, tool activity, current ordered plan, `question` tools and blocked TUI dialogs as Copilot-style needs-input, and verified TUI reasoning-variant selection; native permission APIs and live model switching are not yet wired |
+| OpenCode managed by Remodr | Authenticated loopback HTTP snapshots and SSE from the exact Herdr-managed TUI | Messages, tools, TODOs, ordered questions, permissions, prompt, abort, and next-prompt model selection |
+| OpenCode compatibility mode | Read-only SQLite plus explicit Herdr terminal fallback | Manual/older sessions without a verified owned server; TUI interaction remains capability-gated |
 | Copilot | `~/.copilot/session-state/<id>/events.jsonl`, plus session database TODOs | Structured messages, tool activity and `ask_user` questions; requires a known provider session |
 | Unknown or unreadable adapter | Herdr `agent.read` | Explicit raw-output compatibility view |
 

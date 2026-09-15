@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 import uuid
 
-from ..base import ProviderAdapter, ProviderHost
+from ..base import AgentLaunch, ProviderAdapter, ProviderHost
 from . import sessions, transcript, trust
 from .processes import CopilotProcesses
 from .settings import SPEC
@@ -29,10 +29,10 @@ class CopilotAdapter(ProviderAdapter):
             args.extend(["--name", label])
         return session_id
 
-    def prepare_launch(self, label: str, args: list[str], cwd: str | None) -> str:
+    def prepare_launch(self, label: str, args: list[str], cwd: str | None) -> AgentLaunch:
         if cwd:
             trust.trust_workspace(cwd)
-        return self.new_session_arguments(label, args)
+        return AgentLaunch(session_id=self.new_session_arguments(label, args))
 
     def resolve_session(
         self, raw: dict[str, Any], native_session_id: str | None, *, inspect: bool

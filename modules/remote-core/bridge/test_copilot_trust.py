@@ -218,9 +218,15 @@ class CopilotTrustTest(unittest.TestCase):
     def test_creation_prepares_workspace_trust_without_changing_tool_permissions(self):
         adapter = Bridge().providers["copilot"]
         args = ["--model", "gpt-5.4-mini"]
-        session_id = adapter.prepare_launch("First message", args, str(self.project))
+        launch = adapter.prepare_launch("First message", args, str(self.project))
         self.assertEqual(self.read()["trustedFolders"], [str(self.project)])
-        self.assertEqual(args, ["--model", "gpt-5.4-mini", "--session-id", session_id, "--name", "First message"])
+        self.assertEqual(
+            args,
+            ["--model", "gpt-5.4-mini", "--session-id", launch.session_id, "--name", "First message"],
+        )
+        # Copilot needs no managed server, so it contributes no environment.
+        self.assertEqual(dict(launch.env), {})
+        self.assertIsNone(launch.binding)
         self.assertNotIn("--allow-all-tools", args)
         self.assertNotIn("--allow-all-paths", args)
 

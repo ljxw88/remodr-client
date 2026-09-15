@@ -13,6 +13,7 @@ from urllib.request import Request
 from remodr_bridge.bridge import Bridge
 from remodr_bridge.errors import BridgeError
 from remodr_bridge.providers.opencode import bootstrap
+from remodr_bridge.providers.opencode.registry import ServerRegistry
 
 
 class OpenCodeBootstrapTest(unittest.TestCase):
@@ -279,16 +280,36 @@ class OpenCodeReadinessTest(unittest.TestCase):
 
 
 class OpenCodeBootstrapLifecycleTest(unittest.TestCase):
+    def make_bridge(self):
+        bridge = Bridge()
+        bridge.runtime = {"workspaces": [{"id": "w1", "cwd": "/work/synthetic"}], "agents": []}
+        bridge._refresh_runtime = Mock()
+        bridge._agent_catalog_snapshot = Mock(
+            return_value=[{"provider": "opencode", "available": True}]
+        )
+        bridge._herdr_request = Mock(return_value={"root_pane": {"pane_id": "p1"}})
+        bridge._start_agent = Mock()
+        return bridge
+
     def setUp(self):
-        self.bridge = Bridge()
-        self.bridge.runtime = {"workspaces": [{"id": "w1", "cwd": "/work/synthetic"}], "agents": []}
-        self.bridge._refresh_runtime = Mock()
-        self.bridge._agent_catalog_snapshot = Mock(return_value=[{"provider": "opencode", "available": True}])
-        self.bridge._herdr_request = Mock(return_value={"root_pane": {"pane_id": "p1"}})
-        self.bridge._start_agent = Mock()
+        directory = tempfile.TemporaryDirectory(dir=Path(__file__).parent)
+        self.addCleanup(directory.cleanup)
+        self.home = Path(directory.name)
+        home = patch.object(Path, "home", return_value=self.home)
+        home.start()
+        self.addCleanup(home.stop)
+        self.bridge = self.make_bridge()
         patcher = patch("remodr_bridge.providers.opencode.create_session", return_value="ses_created")
         self.create_session = patcher.start()
         self.addCleanup(patcher.stop)
+        deleter = patch("remodr_bridge.providers.opencode.delete_session")
+        self.delete_session = deleter.start()
+        self.addCleanup(deleter.stop)
+        empty = patch(
+            "remodr_bridge.providers.opencode.transcript.message_count", return_value=0
+        )
+        self.message_count = empty.start()
+        self.addCleanup(empty.stop)
         sleep = patch("remodr_bridge.lifecycle.time.sleep")
         sleep.start()
         self.addCleanup(sleep.stop)
@@ -299,11 +320,18 @@ class OpenCodeBootstrapLifecycleTest(unittest.TestCase):
             "model": "openai/test-model", "bypassPermissions": True,
         })
 
+    def registry(self):
+        return self.bridge.providers["opencode"].servers()
+
     def test_bootstrap_id_is_resumed_but_not_published_as_native_identity(self):
         result = self.create()
         self.create_session.assert_called_once_with("/work/synthetic", "Initial session")
         self.bridge._start_agent.assert_called_once_with(
-            "opencode", "opencode", "p1", ["--auto", "--model", "openai/test-model", "--session", "ses_created"],
+            "opencode", "opencode", "p1",
+            [
+                "--auto", "--model", "openai/test-model",
+                "--hostname", "127.0.0.1", "--port", "0", "--session", "ses_created",
+            ],
         )
         pending = self.bridge.runtime["agents"][0]
         self.assertEqual(pending["id"], result["agentId"])
@@ -313,9 +341,62 @@ class OpenCodeBootstrapLifecycleTest(unittest.TestCase):
         self.assertIsNone(adapter.resolve_session({"pane_id": "p1"}, None, inspect=False))
         self.assertIsNone(self.bridge.sessions.launched_session("p1"))
         self.assertEqual(adapter.resolve_session({"pane_id": "p1"}, "ses_reported", inspect=False), "ses_reported")
+        credential = self.registry().load("p1")
         self.assertEqual(self.bridge._herdr_request.call_args_list, [
-            call("tab.create", {"focus": False, "workspace_id": "w1", "label": "Initial session"}),
+            call("tab.create", {
+                "focus": False, "workspace_id": "w1", "label": "Initial session",
+                "env": {
+                    "OPENCODE_SERVER_USERNAME": credential.username,
+                    "OPENCODE_SERVER_PASSWORD": credential.password,
+                },
+            }),
         ])
+        self.assertEqual((credential.cwd, credential.session_id), ("/work/synthetic", "ses_created"))
+        # A launch secret never reaches a payload, a snapshot or a repr.
+        self.assertNotIn(credential.password, json.dumps(result, default=str))
+        self.assertNotIn(credential.password, repr(credential))
+
+    def test_generated_credentials_are_unique_per_agent(self):
+        first = self.create()
+        self.bridge._herdr_request.return_value = {"root_pane": {"pane_id": "p2"}}
+        self.create()
+        credentials = [self.registry().load(pane) for pane in ("p1", "p2")]
+        self.assertEqual(len({item.username for item in credentials}), 2)
+        self.assertEqual(len({item.password for item in credentials}), 2)
+        self.assertTrue(all(len(item.password) >= 32 for item in credentials))
+        self.assertIsNotNone(first["paneId"])
+
+    def test_closing_the_agent_removes_its_stored_credentials(self):
+        self.create()
+        self.bridge.raw_agents = {
+            "a1": {"id": "a1", "provider": "opencode", "paneId": "p1", "agent_status": "idle"},
+        }
+        self.bridge._close_agent({"agentId": "a1"})
+        self.assertIsNone(self.registry().load("p1"))
+
+    def test_closing_the_space_removes_the_credentials_of_its_agents(self):
+        self.create()
+        self.bridge.runtime["agents"] = [
+            {"id": "a1", "provider": "opencode", "paneId": "p1", "workspaceId": "w1"},
+            {"id": "a2", "provider": "opencode", "paneId": "p9", "workspaceId": "w2"},
+        ]
+        self.bridge.providers["opencode"].servers().record(
+            self.registry().load("p1").__class__(
+                pane_id="p9", cwd="/work/other", username="other",
+                password="other-password", session_id="ses_other",
+            )
+        )
+        self.bridge._close_workspace({"workspaceId": "w1"})
+        self.assertIsNone(self.registry().load("p1"))
+        self.assertIsNotNone(self.registry().load("p9"))
+
+    def test_a_dropped_bridge_keeps_a_running_agent_reachable(self):
+        self.create()
+        self.assertIsNotNone(self.registry().load("p1"))
+        restarted = Bridge()
+        # Nothing about construction, shutdown or reconnection may forget a
+        # server this bridge is still responsible for reaching.
+        self.assertIsNotNone(restarted.providers["opencode"].servers().load("p1"))
 
     def test_bootstrap_failure_closes_new_pane_without_starting_tui(self):
         self.create_session.side_effect = BridgeError("OPENCODE_START_FAILED", "synthetic bootstrap failure")
@@ -325,21 +406,149 @@ class OpenCodeBootstrapLifecycleTest(unittest.TestCase):
         self.bridge._start_agent.assert_not_called()
         self.assertIn(call("pane.close", {"pane_id": "p1"}), self.bridge._herdr_request.call_args_list)
         self.assertIsNone(self.bridge.sessions.launched_session("p1"))
+        self.assertIsNone(self.registry().load("p1"))
+        # Nothing durable was created, so there is nothing to delete.
+        self.delete_session.assert_not_called()
 
-    def test_unknown_workspace_cwd_closes_pane_without_launching_cli(self):
+    def test_unknown_workspace_cwd_never_creates_a_pane_or_launches_the_cli(self):
         self.bridge.runtime["workspaces"][0].pop("cwd")
         with self.assertRaises(BridgeError) as caught:
             self.create()
         self.assertEqual(caught.exception.code, "INVALID_WORKSPACE")
         self.create_session.assert_not_called()
         self.bridge._start_agent.assert_not_called()
-        self.assertIn(call("pane.close", {"pane_id": "p1"}), self.bridge._herdr_request.call_args_list)
+        # The launch is prepared first now, so a refused one costs no pane.
+        self.bridge._herdr_request.assert_not_called()
 
-    def test_tui_failure_after_bootstrap_closes_new_pane(self):
+    def test_tui_failure_after_bootstrap_closes_pane_and_stores_nothing(self):
         self.bridge._start_agent.side_effect = BridgeError("START_FAILED", "synthetic TUI failure")
         with self.assertRaises(BridgeError):
             self.create()
         self.create_session.assert_called_once()
+        self.assertIn(call("pane.close", {"pane_id": "p1"}), self.bridge._herdr_request.call_args_list)
+        self.assertIsNone(self.registry().load("p1"))
+
+    def test_a_refused_tab_leaves_no_session_and_closes_nothing(self):
+        self.bridge._herdr_request.side_effect = BridgeError("tab_failed", "synthetic tab failure")
+        with self.assertRaises(BridgeError) as caught:
+            self.create()
+        self.assertEqual(caught.exception.code, "tab_failed")
+        # The native session is only created once a pane exists to own it.
+        self.create_session.assert_not_called()
+        self.delete_session.assert_not_called()
+        self.bridge._start_agent.assert_not_called()
+        self.assertEqual(
+            [call.args[0] for call in self.bridge._herdr_request.call_args_list], ["tab.create"],
+        )
+
+    def test_a_tab_without_a_usable_pane_closes_the_tab_it_named(self):
+        self.bridge._herdr_request.return_value = {
+            "tab": {"tab_id": "t1"}, "root_pane": {"pane_id": ""},
+        }
+        with self.assertRaises(BridgeError) as caught:
+            self.create()
+        self.assertEqual(caught.exception.code, "INVALID_HERDR_RESPONSE")
+        self.create_session.assert_not_called()
+        self.assertEqual(
+            self.bridge._herdr_request.call_args_list[-1], call("tab.close", {"tab_id": "t1"}),
+        )
+
+    def test_a_tab_that_names_nothing_is_never_closed_on_a_guess(self):
+        for result in ({}, {"root_pane": {}}, {"root_pane": "p1", "tab": {}}, {"tab_id": 7}):
+            with self.subTest(result=result):
+                self.bridge._herdr_request.reset_mock()
+                self.bridge._herdr_request.return_value = result
+                with self.assertRaises(BridgeError) as caught:
+                    self.create()
+                self.assertEqual(caught.exception.code, "INVALID_HERDR_RESPONSE")
+                self.assertEqual(
+                    [call.args[0] for call in self.bridge._herdr_request.call_args_list],
+                    ["tab.create"],
+                )
+        self.create_session.assert_not_called()
+
+    def test_an_unstarted_session_is_deleted_after_a_failed_launch(self):
+        self.bridge._start_agent.side_effect = BridgeError("START_FAILED", "synthetic TUI failure")
+        with self.assertRaises(BridgeError):
+            self.create()
+        self.assertIn(call("pane.close", {"pane_id": "p1"}), self.bridge._herdr_request.call_args_list)
+        self.delete_session.assert_called_once_with("/work/synthetic", "ses_created")
+        # Nothing ran, so the transcript is not even consulted.
+        self.message_count.assert_not_called()
+
+    def test_a_session_the_agent_may_have_written_to_is_kept(self):
+        self.message_count.return_value = 3
+        self.bridge._refresh_runtime.side_effect = [None, None, OSError("snapshot failed")]
+        with self.assertRaises(OSError):
+            self.create()
+        self.delete_session.assert_not_called()
+        self.assertIsNone(self.registry().load("p1"))
+
+    def test_an_unknown_transcript_is_never_treated_as_an_empty_session(self):
+        self.message_count.return_value = None
+        self.bridge._refresh_runtime.side_effect = [None, None, OSError("snapshot failed")]
+        with self.assertRaises(OSError):
+            self.create()
+        self.delete_session.assert_not_called()
+
+    def test_a_started_agents_pane_is_closed_before_its_session_is_judged(self):
+        order = []
+        self.bridge._herdr_request.side_effect = lambda method, params: (
+            order.append(method) or {"root_pane": {"pane_id": "p1"}}
+        )
+        self.message_count.side_effect = lambda identifier: order.append("transcript") or 0
+        self.delete_session.side_effect = lambda cwd, identifier: order.append("delete")
+        self.bridge._refresh_runtime.side_effect = [None, None, OSError("snapshot failed")]
+        with self.assertRaises(OSError):
+            self.create()
+        self.assertEqual(order, ["tab.create", "pane.close", "transcript", "delete"])
+
+    def test_a_failed_session_cleanup_is_reported_without_masking_the_failure(self):
+        self.delete_session.side_effect = BridgeError("OPENCODE_START_FAILED", "synthetic")
+        self.bridge._start_agent.side_effect = BridgeError("START_FAILED", "synthetic TUI failure")
+        diagnostics = []
+        with patch.object(Bridge, "_diagnostic", staticmethod(lambda *item: diagnostics.append(item))):
+            with self.assertRaises(BridgeError) as caught:
+                self.create()
+        self.assertEqual(caught.exception.code, "START_FAILED")
+        self.assertIn(("OPENCODE_SESSION_CLEANUP", "OPENCODE_START_FAILED"), diagnostics)
+
+    def test_a_store_failure_after_start_leaves_the_agent_running(self):
+        failures = [
+            BridgeError("OPENCODE_SERVER_STORE_BUSY", "synthetic contention"),
+            BridgeError("OPENCODE_SERVER_STORE_FULL", "synthetic capacity"),
+            BridgeError("OPENCODE_SERVER_STORE_UNAVAILABLE", "synthetic /private/path"),
+            OSError("synthetic"),
+        ]
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__):
+                self.bridge = self.make_bridge()
+                diagnostics = []
+                with (
+                    patch.object(ServerRegistry, "record", side_effect=failure),
+                    patch.object(
+                        Bridge, "_diagnostic", staticmethod(lambda *item: diagnostics.append(item))
+                    ),
+                ):
+                    result = self.create()
+                self.assertEqual(result["paneId"], "p1")
+                self.bridge._start_agent.assert_called_once()
+                self.assertNotIn(
+                    "pane.close", [call.args[0] for call in self.bridge._herdr_request.call_args_list]
+                )
+                self.delete_session.assert_not_called()
+                expected = getattr(failure, "code", type(failure).__name__)
+                self.assertIn(("AGENT_LAUNCH_BINDING", expected), diagnostics)
+                # A sanitized code only: never a path or a message.
+                self.assertTrue(all("synthetic" not in item[1] for item in diagnostics))
+                # Without a record every later check fails closed.
+                self.assertIsNone(self.registry().load("p1"))
+
+    def test_a_failed_post_start_creation_removes_the_stored_binding(self):
+        self.bridge._refresh_runtime.side_effect = [None, None, OSError("snapshot failed")]
+        with self.assertRaises(OSError):
+            self.create()
+        self.assertIsNone(self.registry().load("p1"))
         self.assertIn(call("pane.close", {"pane_id": "p1"}), self.bridge._herdr_request.call_args_list)
 
     def test_agent_name_retry_reuses_existing_native_session_without_bootstrapping_twice(self):
@@ -348,7 +557,10 @@ class OpenCodeBootstrapLifecycleTest(unittest.TestCase):
         self.create_session.assert_called_once()
         self.assertEqual(self.bridge._start_agent.call_count, 2)
         for start in self.bridge._start_agent.call_args_list:
-            self.assertEqual(start.args[-1][-2:], ["--session", "ses_created"])
+            self.assertEqual(start.args[-1][-6:], [
+                "--hostname", "127.0.0.1", "--port", "0", "--session", "ses_created",
+            ])
+        self.assertEqual(self.registry().load("p1").session_id, "ses_created")
 
 
 if __name__ == "__main__":
