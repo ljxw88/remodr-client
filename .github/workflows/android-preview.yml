@@ -72,6 +72,13 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # NB: do NOT use the action's default packages (`tools platform-tools`):
+          # the legacy `tools` package was removed from Google's SDK repository,
+          # so `sdkmanager tools` fails with "Failed to find package 'tools'".
+          # Install only packages that exist and that this build needs
+          # (Expo 57 defaults: compileSdk/targetSdk 36).
+          packages: platform-tools "platforms;android-36" "build-tools;36.0.0"
 
       - name: Increase inotify watchers
         run: echo fs.inotify.max_user_watches=524288 | sudo tee -a /etc/sysctl.conf && sudo sysctl -p
