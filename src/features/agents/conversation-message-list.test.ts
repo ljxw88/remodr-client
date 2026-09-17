@@ -185,9 +185,29 @@ describe('ConversationMessageList', () => {
     });
     expect(renderer!.root.findAllByType(ConversationSkeleton)).toHaveLength(0);
     expect(renderer!.root.findByType(MarkdownMessage).props.children).toBe('Saved reply');
+    expect(text()).toContain('Refresh failed');
     render({ data: [], hasConversation: true, error: null });
     expect(text()).toContain('No conversation yet.');
     expect(renderer!.root.findAllByType(ConversationSkeleton)).toHaveLength(0);
+  });
+
+  it('shows a failed reply refresh and retry next to an already-sent mobile message', () => {
+    const sent: TranscriptItem = { id: 'sent', kind: 'user_message', text: 'Hello', delivery: 'sent' };
+    render({ data: [sent], error: 'The current session transcript could not be read.' });
+    const instance = list().instance;
+    expect(text()).toContain('Hello');
+    expect(text()).toContain('The current session transcript could not be read.');
+    const retry = buttons().find((node) => node.props.accessibilityLabel === 'Retry loading conversation')!;
+    expect(retry).toBeDefined();
+    TestRenderer.act(() => retry.props.onPress());
+    expect(props.onRetry).toHaveBeenCalledTimes(1);
+
+    render({ data: [{ id: 'reply', kind: 'assistant_message', markdown: 'Recovered reply' }, sent], error: null });
+    expect(list().instance).toBe(instance);
+    expect(renderer!.root.findByType(MarkdownMessage).props.children).toBe('Recovered reply');
+    expect(text()).not.toContain('could not be read');
+    expect(buttons().some((node) => node.props.accessibilityLabel === 'Retry loading conversation')).toBe(false);
+    expect(list().props.ListHeaderComponent.props.style.height).toBe(180);
   });
 
   it('matches real bubble padding, corners, message gaps and line boxes rather than adding generic cards', () => {
