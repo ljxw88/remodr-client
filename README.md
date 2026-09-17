@@ -24,6 +24,10 @@ Dropped connections retain transcripts and durable pending sends, with a floatin
 status indicator and server-page controls rather than repeated dialogs.
 Ambiguous delivery requires review instead of a potentially duplicated command.
 
+## Demo
+
+<video src="docs/qemu-system-aarch64.mp4" controls width="100%"></video>
+
 ## Run
 
 ```bash
