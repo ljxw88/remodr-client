@@ -26,7 +26,10 @@ jobs:
   build-android:
     needs: validate
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # NB: the EAS local build alone takes ~40min (heavy native modules:
+    # Skia, Reanimated), plus ~15min of SDK/npm setup. A 60min cap kills the
+    # job mid-release-publish with "The operation was canceled".
+    timeout-minutes: 180
     permissions:
       contents: write
 
