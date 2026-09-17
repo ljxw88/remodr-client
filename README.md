@@ -26,7 +26,7 @@ Ambiguous delivery requires review instead of a potentially duplicated command.
 
 ## Demo
 
-<video src="docs/qemu-system-aarch64.mp4" controls width="100%"></video>
+![Remodr demo](docs/qemu-system-aarch64.mp4)
 
 ## Run
 
