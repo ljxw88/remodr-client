@@ -98,7 +98,14 @@ export function ConversationMessageList({
           // anchor on iOS. Explicit follow runs after layout settles.
           maintainVisibleContentPosition={HISTORY_ANCHOR}
           // Inverted, so this measured spacer sits below the newest message.
-          ListHeaderComponent={<View style={{ height: bottomInset }} />}
+          ListHeaderComponent={error && transcript.length > 0 ? (
+            <View>
+              <View style={styles.refreshError}>
+                <ConversationReadError message={error} onRetry={onRetry} />
+              </View>
+              <View style={{ height: bottomInset }} />
+            </View>
+          ) : <View style={{ height: bottomInset }} />}
           ListFooterComponent={<View style={{ height: topInset }} />}
           ListEmptyComponent={
             initialLoading ? (
@@ -106,19 +113,7 @@ export function ConversationMessageList({
             ) : (
             <View style={styles.empty}>
               {error ? (
-                <>
-                  <ThemedText type="small" themeColor="textMuted">
-                    {error}
-                  </ThemedText>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Retry loading conversation"
-                    onPress={onRetry}>
-                    <ThemedText type="smallBold" style={styles.retry}>
-                      Try again
-                    </ThemedText>
-                  </Pressable>
-                </>
+                <ConversationReadError message={error} onRetry={onRetry} />
               ) : hasConversation ? (
                 <ThemedText type="small" themeColor="textMuted">
                   No conversation yet.
@@ -134,6 +129,19 @@ export function ConversationMessageList({
         />
       )}
     </ScrollEdgeFrame>
+  );
+}
+
+function ConversationReadError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <>
+      <ThemedText type="small" themeColor="textMuted" accessibilityRole="alert" accessibilityLiveRegion="polite">
+        {message}
+      </ThemedText>
+      <Pressable accessibilityRole="button" accessibilityLabel="Retry loading conversation" onPress={onRetry}>
+        <ThemedText type="smallBold" style={styles.retry}>Try again</ThemedText>
+      </Pressable>
+    </>
   );
 }
 
@@ -368,6 +376,10 @@ const styles = StyleSheet.create({
   },
   retry: {
     color: Colors.accent,
+  },
+  refreshError: {
+    gap: Spacing.one,
+    paddingVertical: Spacing.two,
   },
   empty: {
     alignItems: 'center',
