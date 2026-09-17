@@ -78,7 +78,10 @@ jobs:
           # so `sdkmanager tools` fails with "Failed to find package 'tools'".
           # Install only packages that exist and that this build needs
           # (Expo 57 defaults: compileSdk/targetSdk 36).
-          packages: platform-tools "platforms;android-36" "build-tools;36.0.0"
+          # NOTE: no quotes around the semicolon specs — the action splits this
+          # string on whitespace and passes each token straight to sdkmanager
+          # (no shell), so quotes would become part of the package name.
+          packages: platform-tools platforms;android-36 build-tools;36.0.0
 
       - name: Increase inotify watchers
         run: echo fs.inotify.max_user_watches=524288 | sudo tee -a /etc/sysctl.conf && sudo sysctl -p
