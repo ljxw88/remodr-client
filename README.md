@@ -26,7 +26,10 @@ Ambiguous delivery requires review instead of a potentially duplicated command.
 
 ## Demo
 
-![Remodr demo](docs/qemu-system-aarch64.mp4)
+[![Remodr demo preview](docs/demo-preview.gif)](docs/qemu-system-aarch64.mp4)
+
+Preview above (first 15 seconds) — click it or
+[watch the full 66-second demo video](docs/qemu-system-aarch64.mp4).
 
 ## Run
 
