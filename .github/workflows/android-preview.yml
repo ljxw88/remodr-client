@@ -158,6 +158,23 @@ jobs:
           # Recheck after the long build, immediately before any release writes.
           node scripts/check-release-source.cjs
 
+          # The ~160MB APK takes ~10min to upload and the uploads endpoint
+          # occasionally answers HTTP 400 when the long stream gets cut, so
+          # retry transient upload failures instead of failing the whole job.
+          gh_upload_retry() {
+            local attempt=1 max_attempts=4
+            while [ "$attempt" -le "$max_attempts" ]; do
+              if gh release upload "$@"; then
+                return 0
+              fi
+              echo "Release upload attempt $attempt/$max_attempts failed, retrying in 30s..."
+              sleep 30
+              attempt=$((attempt + 1))
+            done
+            echo "Release upload failed after $max_attempts attempts" >&2
+            return 1
+          }
+
           PRIMARY_APK="build/${APK_BASENAME}.apk"
           STABLE_APK="build/remodr-preview.apk"
 
@@ -182,7 +199,7 @@ jobs:
 
             if gh release view "$TAG" >/dev/null 2>&1; then
               echo "Updating existing release $TAG..."
-              gh release upload "$TAG" "$PRIMARY_APK" "$STABLE_APK" --clobber
+              gh_upload_retry "$TAG" "$PRIMARY_APK" "$STABLE_APK" --clobber
               gh release edit "$TAG" --title "$TITLE" --notes "$NOTES"
             else
               echo "Creating new release $TAG..."
@@ -196,7 +213,7 @@ jobs:
             # Official Tagged Release (e.g., v0.1.0)
             if gh release view "$TAG" >/dev/null 2>&1; then
               echo "Updating existing release $TAG..."
-              gh release upload "$TAG" "$PRIMARY_APK" --clobber
+              gh_upload_retry "$TAG" "$PRIMARY_APK" --clobber
             else
               echo "Creating official release $TAG..."
               gh release create "$TAG" "$PRIMARY_APK" \
